@@ -10,6 +10,9 @@ docs/
 .vscode/
 *.swp
 
+# Ambiente chumbado no build (gerado por make deploy-local ou pelo release)
+feixe/ambiente.json
+
 # Python
 __pycache__/
 *.py[cod]
