@@ -38,8 +38,9 @@ jobs:
         working-directory: web
       - run: pnpm build
         working-directory: web
-      - name: Empacotar plugin
+      - name: Empacotar plugin (build de dev, só para inspeção)
         run: |
+          python3 -c "import json; d=json.load(open('config/ambientes.json'))['dev']; json.dump(d, open('feixe/ambiente.json','w'), indent=2)"
           VERSAO=$(sed -n 's/^version=//p' feixe/metadata.txt)
           mkdir -p dist
           zip -qr "dist/feixe-$VERSAO.zip" feixe -x "*/__pycache__/*" "*.pyc"
