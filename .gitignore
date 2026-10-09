@@ -1,0 +1,29 @@
+# Material de apoio: dumps com dados pessoais (contas, e-mails, hashes de senha) e PDFs. Nunca versionar.
+apoio/
+
+# Documentação de trabalho (descrição, backlog, build log). Mantida fora do repositório público.
+docs/
+
+# Sistema / editores
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.zip
+
+# Front (build vai para feixe/web/dist e é gerado no release, não versionado)
+node_modules/
+web/dist/
+feixe/web/dist/
+
+# Symlink para ~/.config/feixe/dev.env (senha do ambiente de dev). Nunca versionar.
+.dev.env
