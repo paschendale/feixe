@@ -1,0 +1,19 @@
+[general]
+name=Feixe
+qgisMinimumVersion=3.22
+qgisMaximumVersion=3.99
+description=Controle e acompanhamento de cargas de trabalho da produção cartográfica (IBGE/CCAR)
+about=Planejamento, execução, controle de qualidade e acompanhamento de cargas de trabalho das equipes de cartografia do IBGE, com funcionamento híbrido (online na rede do IBGE, offline fora dela). A interface abre no navegador padrão, servida localmente pelo próprio plugin.
+version=0.1.0
+author=Victor Marotta
+email=victordossantosmarotta@gmail.com
+tracker=https://github.com/paschendale/feixe/issues
+repository=https://github.com/paschendale/feixe
+homepage=https://github.com/paschendale/feixe
+tags=ibge,cartografia,cargas de trabalho,controle de qualidade,produção
+category=Plugins
+icon=icon.svg
+experimental=True
+deprecated=False
+hasProcessingProvider=no
+supportsQt6=False
