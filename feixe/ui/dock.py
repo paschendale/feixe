@@ -7,38 +7,40 @@ from __future__ import annotations
 
 from qgis.PyQt.QtCore import Qt, pyqtSignal
 from qgis.PyQt.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDockWidget,
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from ..core import config as cfgmod
+from ..core.ambiente import Ambiente
 
 
 class DockFeixe(QDockWidget):
     abrir_painel = pyqtSignal()
-    testar_conexao = pyqtSignal()
     sincronizar = pyqtSignal()
-    configurar = pyqtSignal()
+    conta = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, amb: Ambiente, parent=None):
         super().__init__("Feixe", parent)
         self.setObjectName("FeixeDock")
         self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.setContentsMargins(8, 8, 8, 8)
-        self.selo = QLabel("")
+        self.selo = QLabel(amb.rotulo.upper())
         self.selo.setAlignment(Qt.AlignCenter)
-        self.selo.setStyleSheet("padding:4px;border-radius:4px;color:white;font-weight:bold")
-        self.estado = QLabel("sem conexão configurada")
+        self.selo.setStyleSheet(f"padding:4px;border-radius:4px;color:white;font-weight:bold;background:{amb.cor}")
+        self.selo.setToolTip(f"Este Feixe usa o banco {amb.descricao_banco}")
+        if amb.producao:
+            self.selo.hide()  # em produção o selo é desnecessário; só dev e homologação precisam se destacar
+        self.estado = QLabel("não verificado")
         self.estado.setWordWrap(True)
         lay.addWidget(self.selo)
         lay.addWidget(self.estado)
@@ -51,58 +53,57 @@ class DockFeixe(QDockWidget):
         linha.addWidget(self.bt_painel)
         linha.addWidget(self.bt_sync)
         lay.addLayout(linha)
-        linha2 = QHBoxLayout()
-        self.bt_testar = QPushButton("Testar conexão")
-        self.bt_testar.clicked.connect(self.testar_conexao)
-        self.bt_config = QPushButton("Configurações")
-        self.bt_config.clicked.connect(self.configurar)
-        linha2.addWidget(self.bt_testar)
-        linha2.addWidget(self.bt_config)
-        lay.addLayout(linha2)
+        self.bt_conta = QPushButton("Usuário e senha")
+        self.bt_conta.clicked.connect(self.conta)
+        lay.addWidget(self.bt_conta)
         lay.addStretch()
         self.setWidget(w)
-
-    def mostrar_ambiente(self, cfg: cfgmod.Config) -> None:
-        self.selo.setText(cfg.rotulo_ambiente.upper())
-        self.selo.setStyleSheet(
-            f"padding:4px;border-radius:4px;color:white;font-weight:bold;background:{cfg.cor_ambiente}"
-        )
 
     def mostrar_estado(self, texto: str) -> None:
         self.estado.setText(texto)
 
 
-class DialogoConfig(QDialog):
-    def __init__(self, cfg: cfgmod.Config, conexoes: list, parent=None):
+class DialogoCredenciais(QDialog):
+    """Só o que o usuário precisa informar: matrícula (usuário do banco) e senha. O resto vem do build."""
+
+    def __init__(self, amb: Ambiente, usuario_atual: str, testar, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Feixe: configurações")
-        self.cfg = cfg
+        self.setWindowTitle("Feixe: usuário e senha")
+        self.setMinimumWidth(380)
+        self._testar = testar
+        self.resultado_teste = None
         form = QFormLayout(self)
-        self.cb_ambiente = QComboBox()
-        for chave, (rotulo, _) in cfgmod.AMBIENTES.items():
-            self.cb_ambiente.addItem(rotulo, chave)
-        self.cb_ambiente.setCurrentIndex(list(cfgmod.AMBIENTES).index(cfg.ambiente))
-        form.addRow("Ambiente", self.cb_ambiente)
-        self.cb_conexoes = {}
-        for chave, (rotulo, _) in cfgmod.AMBIENTES.items():
-            cb = QComboBox()
-            cb.addItem("(nenhuma)", "")
-            for nome in conexoes:
-                cb.addItem(nome, nome)
-            atual = cfg.conexoes.get(chave, "")
-            idx = cb.findData(atual)
-            cb.setCurrentIndex(idx if idx >= 0 else 0)
-            self.cb_conexoes[chave] = cb
-            form.addRow(f"Conexão PostGIS ({rotulo})", cb)
-        ajuda = QLabel("As conexões vêm do cadastro PostGIS do QGIS. Guarde a senha no Authentication Manager.")
-        ajuda.setWordWrap(True)
-        form.addRow(ajuda)
-        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        botoes.accepted.connect(self.accept)
+        self.ed_usuario = QLineEdit(usuario_atual)
+        self.ed_usuario.setPlaceholderText("u_1234567")
+        self.ed_senha = QLineEdit()
+        self.ed_senha.setEchoMode(QLineEdit.Password)
+        form.addRow("Usuário", self.ed_usuario)
+        form.addRow("Senha", self.ed_senha)
+        self.msg = QLabel("Use o mesmo usuário e senha do banco de dados cartográfico.")
+        self.msg.setWordWrap(True)
+        form.addRow(self.msg)
+        botoes = QDialogButtonBox()
+        self.bt_ok = botoes.addButton("Testar e salvar", QDialogButtonBox.AcceptRole)
+        botoes.addButton(QDialogButtonBox.Cancel)
+        botoes.accepted.connect(self._ao_aceitar)
         botoes.rejected.connect(self.reject)
         form.addRow(botoes)
 
-    def resultado(self) -> cfgmod.Config:
-        self.cfg.ambiente = self.cb_ambiente.currentData()
-        self.cfg.conexoes = {k: cb.currentData() for k, cb in self.cb_conexoes.items()}
-        return self.cfg
+    def _ao_aceitar(self):
+        usuario, senha = self.ed_usuario.text().strip(), self.ed_senha.text()
+        if not usuario or not senha:
+            self.msg.setText("Informe usuário e senha.")
+            return
+        self.bt_ok.setEnabled(False)
+        self.msg.setText("Testando a conexão…")
+        self.repaint()
+        r = self._testar(usuario, senha)
+        self.bt_ok.setEnabled(True)
+        if r.get("ok"):
+            self.resultado_teste = r
+            self.accept()
+        else:
+            self.msg.setText(f"Não conectou: {r.get('erro', 'erro desconhecido')}")
+
+    def valores(self) -> tuple:
+        return self.ed_usuario.text().strip(), self.ed_senha.text()

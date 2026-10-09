@@ -34,7 +34,8 @@ export type Status = {
   ambiente: string
   rotulo_ambiente: string
   cor_ambiente: string
-  conexao: string
+  banco: string
+  credencial: boolean
   versao_plugin: string
   qgis: string
   clientes_sse: number

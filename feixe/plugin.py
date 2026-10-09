@@ -3,23 +3,20 @@
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
-import sys
 import threading
 
 from qgis.core import Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsProject, QgsRectangle
 from qgis.PyQt.QtCore import QObject, Qt, QTimer, QUrl, pyqtSignal
 from qgis.PyQt.QtGui import QDesktopServices, QIcon
-from qgis.PyQt.QtWidgets import QAction
+from qgis.PyQt.QtWidgets import QAction, QMessageBox
 
-from .core import config as cfgmod
-from .core import db, dispatch, log
+from .core import ambiente as ambmod
+from .core import config, db, dispatch, log
 from .core.versao import raiz_plugin, versao_plugin
 from .server.api import Contexto, criar_roteador
 from .server.http import ServidorLocal
 from .server.sse import Broker
-from .ui.dock import DialogoConfig, DockFeixe
+from .ui.dock import DialogoCredenciais, DockFeixe
 
 
 class _Sinais(QObject):
@@ -29,7 +26,12 @@ class _Sinais(QObject):
 class FeixePlugin:
     def __init__(self, iface):
         self.iface = iface
-        self.cfg = cfgmod.carregar()
+        self.amb = None
+        self.erro_ambiente = None
+        try:
+            self.amb = ambmod.carregar()
+        except ambmod.AmbienteInvalido as e:
+            self.erro_ambiente = str(e)
         self.servidor = None
         self.broker = Broker()
         self.dock = None
@@ -42,12 +44,14 @@ class FeixePlugin:
 
     # --- ciclo de vida -------------------------------------------------------------------------
     def initGui(self):  # noqa: N802
+        if self.amb is None:
+            log.erro(self.erro_ambiente)
+            self.iface.messageBar().pushMessage("Feixe", self.erro_ambiente, Qgis.Critical, 0)
+            return
         dispatch.iniciar()
-        self.dock = DockFeixe(self.iface.mainWindow())
+        self.dock = DockFeixe(self.amb, self.iface.mainWindow())
         self.dock.abrir_painel.connect(self.abrir_painel)
-        self.dock.testar_conexao.connect(self.testar_conexao)
-        self.dock.configurar.connect(self.configurar)
-        self.dock.mostrar_ambiente(self.cfg)
+        self.dock.conta.connect(self.pedir_credenciais)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dock)
         self.acao = QAction(QIcon(os.path.join(raiz_plugin(), "icon.svg")), "Feixe", self.iface.mainWindow())
         self.acao.triggered.connect(self.abrir_painel)
@@ -57,6 +61,8 @@ class FeixePlugin:
         self.iniciar_servidor()
         self.verificar_rede()
         self._timer.start()
+        if config.credenciais(self.amb) is None:
+            QTimer.singleShot(500, self.pedir_credenciais)  # primeiro uso: pede usuário e senha
 
     def unload(self):
         self._timer.stop()
@@ -82,44 +88,58 @@ class FeixePlugin:
             ),
         )
         pasta = os.path.join(raiz_plugin(), "web", "dist")
-        self.servidor = ServidorLocal(criar_roteador(ctx), self.broker, pasta, porta=self.cfg.porta).iniciar()
+        self.servidor = ServidorLocal(criar_roteador(ctx), self.broker, pasta).iniciar()
         log.info(f"servidor local em {self.servidor.origem}")
 
     def abrir_painel(self):
+        if config.credenciais(self.amb) is None:
+            self.pedir_credenciais()
+            if config.credenciais(self.amb) is None:
+                return
         if not self.servidor:
             self.iniciar_servidor()
-        url = self.servidor.url_abertura
-        # Modo aplicativo do Edge/Chrome quando existir: janela sem barra de endereço, parece um programa próprio.
-        for exe in ("msedge", "chrome", "google-chrome", "chromium"):
-            caminho = shutil.which(exe)
-            if caminho:
-                try:
-                    subprocess.Popen([caminho, f"--app={url}"], close_fds=True)
-                    return
-                except OSError:
-                    break
-        if sys.platform == "darwin":
-            for app in ("Microsoft Edge", "Google Chrome"):
-                if os.path.isdir(f"/Applications/{app}.app"):
-                    try:
-                        subprocess.Popen(["open", "-na", app, "--args", f"--app={url}"], close_fds=True)
-                        return
-                    except OSError:
-                        break
-        QDesktopServices.openUrl(QUrl(url))
+        QDesktopServices.openUrl(QUrl(self.servidor.url_abertura))
+
+    # --- credenciais ---------------------------------------------------------------------------
+    def pedir_credenciais(self):
+        atual = config.credenciais(self.amb)
+        dlg = DialogoCredenciais(
+            self.amb,
+            atual[0] if atual else "",
+            testar=lambda u, s: db.testar(self.amb, u, s),
+            parent=self.iface.mainWindow(),
+        )
+        if not dlg.exec_():
+            return
+        usuario, senha = dlg.valores()
+        try:
+            config.salvar_credenciais(self.amb, usuario, senha)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self.iface.mainWindow(), "Feixe", f"Não foi possível guardar a credencial:\n{e}")
+            return
+        r = dlg.resultado_teste or {}
+        schema = "sim" if r.get("schema_feixe") else "não"
+        self._publicar_estado(
+            {
+                "online": True,
+                "usuario": r.get("usuario", usuario),
+                "detalhe": f"{r.get('usuario', usuario)}@{r.get('banco', self.amb.banco)} · schema feixe: {schema}",
+            }
+        )
+        self.iface.messageBar().pushMessage("Feixe", f"Conectado como {usuario}.", Qgis.Success, 4)
 
     # --- banco e rede --------------------------------------------------------------------------
     def consultar(self, sql, params=None):
-        if not self.cfg.conexao:
-            raise RuntimeError("nenhuma conexão configurada para este ambiente")
-        return db.consultar(self.cfg.conexao, sql, params)
+        return db.consultar(self.amb, sql, params)
 
     def status_api(self):
+        cred = config.credenciais(self.amb)
         return {
-            "ambiente": self.cfg.ambiente,
-            "rotulo_ambiente": self.cfg.rotulo_ambiente,
-            "cor_ambiente": self.cfg.cor_ambiente,
-            "conexao": self.cfg.conexao,
+            "ambiente": self.amb.nome,
+            "rotulo_ambiente": self.amb.rotulo,
+            "cor_ambiente": self.amb.cor,
+            "banco": self.amb.descricao_banco,
+            "credencial": bool(cred),
             "versao_plugin": versao_plugin(),
             "qgis": Qgis.QGIS_VERSION,
             "clientes_sse": self.broker.conectados,
@@ -128,46 +148,20 @@ class FeixePlugin:
 
     def verificar_rede(self):
         """Checagem barata (TCP) em thread própria; o resultado volta pela thread principal via sinal."""
-        nome = self.cfg.conexao
-        if not nome:
-            self._publicar_estado({"online": False, "usuario": None, "detalhe": "nenhuma conexão configurada"})
-            return
 
         def rodar():
-            try:
-                host, porta = db.host_porta(nome)
-                ok = db.alcancavel(host, porta)
-                detalhe = f"{host}:{porta} {'responde' if ok else 'não responde'}"
-                self.sinais.estado_mudou.emit({"online": ok, "detalhe": detalhe})
-            except Exception as e:  # noqa: BLE001
-                self.sinais.estado_mudou.emit({"online": False, "detalhe": str(e)})
+            ok = db.alcancavel(self.amb)
+            detalhe = f"{self.amb.descricao_banco} {'responde' if ok else 'não responde'}"
+            self.sinais.estado_mudou.emit({"online": ok, "detalhe": detalhe})
 
         threading.Thread(target=rodar, name="feixe-rede", daemon=True).start()
-
-    def testar_conexao(self):
-        nome = self.cfg.conexao
-        if not nome:
-            self.iface.messageBar().pushMessage("Feixe", "Configure uma conexão para este ambiente.", Qgis.Warning, 5)
-            return
-
-        def rodar():
-            r = db.testar(nome)
-            if r.get("ok"):
-                schema = "sim" if r["schema_feixe"] else "não"
-                detalhe = f"{r['usuario']}@{r['banco']} · {r['versao_servidor']} · schema feixe: {schema}"
-                self.sinais.estado_mudou.emit({"online": True, "usuario": r["usuario"], "detalhe": detalhe})
-            else:
-                self.sinais.estado_mudou.emit({"online": False, "detalhe": r.get("erro", "falha")})
-
-        threading.Thread(target=rodar, name="feixe-teste", daemon=True).start()
 
     def _publicar_estado(self, novo: dict):
         self.estado.update(novo)
         if self.dock:
             icone = "●" if self.estado["online"] else "○"
-            self.dock.mostrar_estado(
-                f"{icone} {'online' if self.estado['online'] else 'offline'} · {self.estado['detalhe']}"
-            )
+            situacao = "online" if self.estado["online"] else "offline"
+            self.dock.mostrar_estado(f"{icone} {situacao} · {self.estado['detalhe']}")
             self.dock.bt_sync.setEnabled(bool(self.estado["online"]))
         self.broker.publicar("estado", self.estado)
 
@@ -184,17 +178,3 @@ class FeixePlugin:
             ret = QgsCoordinateTransform(origem, destino, QgsProject.instance()).transformBoundingBox(ret)
         canvas.setExtent(ret)
         canvas.refresh()
-
-    def configurar(self):
-        try:
-            conexoes = db.conexoes_postgis()
-        except Exception as e:  # noqa: BLE001
-            log.aviso(f"não foi possível listar conexões: {e}")
-            conexoes = []
-        dlg = DialogoConfig(self.cfg, conexoes, self.iface.mainWindow())
-        if dlg.exec_():
-            self.cfg = dlg.resultado()
-            cfgmod.salvar(self.cfg)
-            self.dock.mostrar_ambiente(self.cfg)
-            self.broker.publicar("configuracao", {"ambiente": self.cfg.ambiente})
-            self.verificar_rede()

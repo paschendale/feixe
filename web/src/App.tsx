@@ -69,13 +69,14 @@ export default function App() {
           <CardHeader><CardTitle className="text-sm">Banco</CardTitle></CardHeader>
           <CardContent className="text-sm space-y-1">
             <div>{status?.online ? '● online' : '○ offline'}</div>
-            <div className="text-muted-foreground">{status?.conexao || 'sem conexão configurada'}</div>
+            <div className="text-muted-foreground">{status?.banco}</div>
+            {status && !status.credencial && <div className="text-destructive">usuário e senha não configurados (dock do QGIS)</div>}
             <div className="text-muted-foreground">{status?.detalhe}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader><CardTitle className="text-sm">Usuário</CardTitle></CardHeader>
-          <CardContent className="text-sm">{status?.usuario ?? 'desconhecido (teste a conexão no QGIS)'}</CardContent>
+          <CardContent className="text-sm">{status?.usuario ?? 'desconhecido (informe usuário e senha no dock do QGIS)'}</CardContent>
         </Card>
         <Card>
           <CardHeader><CardTitle className="text-sm">Versões</CardTitle></CardHeader>
