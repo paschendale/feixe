@@ -79,17 +79,24 @@ def test_aplicar_sh_na_ccar_e_idempotente(psycopg2):
 
 @pytest.mark.db
 def test_aplicar_sh_ensaio_no_96(psycopg2):
+    """O ensaio aplica tudo do zero no 9.6 e desfaz: o que havia no mapcartacomp da GGC (o espelho) fica igual."""
     ggc = url("FEIXE_GGC")
-    saida = _rodar("--ensaio", ggc)
-    assert "ensaio ok" in saida
+    sql_objetos = (
+        "SELECT c.relname, c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'mapcartacomp' ORDER BY 1"
+    )
     conn = psycopg2.connect(ggc)
+    conn.autocommit = True
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT split_part(version(), ' ', 2)")
             assert cur.fetchone()[0].startswith("9.6")
-            cur.execute("SELECT count(*) FROM pg_class WHERE relname = 'lote' AND relnamespace IN "
-                        "(SELECT oid FROM pg_namespace WHERE nspname = 'mapcartacomp')")  # fmt: skip
-            assert cur.fetchone()[0] == 0, "o ensaio não pode deixar tabelas no banco da GGC"
+            cur.execute(sql_objetos)
+            antes = cur.fetchall()
+            saida = _rodar("--ensaio", ggc)
+            assert f"ensaio ok: {VERSAO_ESPERADA} migrações (1 a {VERSAO_ESPERADA})" in saida
+            cur.execute(sql_objetos)
+            assert cur.fetchall() == antes
     finally:
         conn.close()
 

@@ -48,9 +48,17 @@ def psycopg2():
 
 @pytest.fixture(params=["FEIXE_CCAR", "FEIXE_GGC"], ids=["ccar17", "ggc96"])
 def banco(request, psycopg2):
-    """Conexão a cada banco de dev, numa transação que é desfeita no fim do teste."""
+    """Conexão a cada banco de dev, numa transação que é desfeita no fim do teste.
+
+    Na GGC o mapcartacomp é o espelho somente leitura (A5): dentro da transação ele é removido para o schema
+    canônico ser aplicado do zero, e o ROLLBACK do fim o devolve intacto.
+    """
     conn = psycopg2.connect(url(request.param))
     conn.autocommit = False
+    if request.param == "FEIXE_GGC":
+        with conn.cursor() as cur:
+            cur.execute("SET LOCAL client_min_messages = warning")
+            cur.execute("DROP SCHEMA IF EXISTS mapcartacomp CASCADE")
     try:
         yield conn
     finally:

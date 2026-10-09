@@ -5,8 +5,9 @@
 #
 #   <conninfo>    string de conexão do psql (URL postgresql://... ou "host=... dbname=...")
 #   [ate_versao]  aplica só até esta versão (padrão: todas)
-#   --ensaio      aplica tudo numa transação e desfaz no fim (ROLLBACK): prova que o SQL roda naquele servidor
-#                 sem deixar nada criado. É como se verifica a compatibilidade com o PostgreSQL 9.6 das GGCs.
+#   --ensaio      dentro de uma transação, remove o mapcartacomp que houver (na GGC, o espelho), aplica todas as
+#                 migrações do zero e desfaz tudo no fim (ROLLBACK): prova que o SQL roda naquele servidor sem
+#                 mudar nada. É como se verifica a compatibilidade com o PostgreSQL 9.6 das GGCs.
 #
 # Todas as migrações pendentes rodam numa única transação: ou entram todas, ou nenhuma.
 # Rodar de novo sem migrações novas não faz nada.
@@ -26,7 +27,7 @@ psqlq() { psql "$CONN" -X -A -t -q -v ON_ERROR_STOP=1 "$@"; }
 tem_tabela=$(psqlq -c "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                        WHERE n.nspname = 'mapcartacomp' AND c.relname = 'schema_version'")
 atual=0
-if [[ "$tem_tabela" == "1" ]]; then
+if [[ "$tem_tabela" == "1" ]] && ((!ENSAIO)); then
     atual=$(psqlq -c "SELECT coalesce(max(versao), 0) FROM mapcartacomp.schema_version")
 fi
 
@@ -46,6 +47,9 @@ fi
 
 {
     echo "BEGIN;"
+    if ((ENSAIO)); then
+        echo "DROP SCHEMA IF EXISTS mapcartacomp CASCADE;"
+    fi
     for f in "${pendentes[@]}"; do
         nome="$(basename "$f")"
         v=$((10#${nome:0:3}))
