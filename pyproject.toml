@@ -1,0 +1,16 @@
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+src = ["feixe", "tests", "scripts"]
+extend-exclude = ["web", "feixe/web"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4"]
+ignore = ["UP035", "UP006", "UP007", "UP045"]  # Optional[...] continua, por compatibilidade visual com 3.9
+
+[tool.ruff.lint.per-file-ignores]
+"feixe/__init__.py" = ["N802"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

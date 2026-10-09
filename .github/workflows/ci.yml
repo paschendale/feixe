@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    name: Lint e testes (Python 3.9, piso do QGIS 3.22)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - run: pip install ruff pytest
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest
+
+  web:
+    name: Front (Vite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - run: pnpm lint
+        working-directory: web
+      - run: pnpm build
+        working-directory: web
+      - name: Empacotar plugin (build de dev, só para inspeção)
+        run: |
+          python3 -c "import json; d=json.load(open('config/ambientes.json'))['dev']; json.dump(d, open('feixe/ambiente.json','w'), indent=2)"
+          VERSAO=$(sed -n 's/^version=//p' feixe/metadata.txt)
+          mkdir -p dist
+          zip -qr "dist/feixe-$VERSAO.zip" feixe -x "*/__pycache__/*" "*.pyc"
+          echo "feixe-$VERSAO.zip" && ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: feixe-zip
+          path: dist/*.zip
+          retention-days: 14

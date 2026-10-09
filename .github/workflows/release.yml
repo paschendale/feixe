@@ -1,0 +1,77 @@
+name: Release
+
+# Tag vX.Y.Z publica no canal estável (plugins.xml) com o banco de PRODUÇÃO chumbado; vX.Y.Z-rc.N publica só em
+# homologação (plugins-hml.xml, experimental) com o banco de HOMOLOGAÇÃO chumbado. O banco de cada ambiente vem dos
+# segredos FEIXE_AMBIENTE_PROD e FEIXE_AMBIENTE_HML (JSON com nome, rotulo, cor, host, porta, banco, sslmode).
+# Os dois XMLs e o índice vão para o GitHub Pages do repositório.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Versão da tag no metadata.txt
+        id: versao
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version=.*/version=$TAG/" feixe/metadata.txt
+          if [[ "$TAG" == *-rc.* ]]; then sed -i "s/^experimental=.*/experimental=True/" feixe/metadata.txt; else sed -i "s/^experimental=.*/experimental=False/" feixe/metadata.txt; fi
+          echo "versao=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Ambiente chumbado no build
+        env:
+          AMBIENTE_PROD: ${{ secrets.FEIXE_AMBIENTE_PROD }}
+          AMBIENTE_HML: ${{ secrets.FEIXE_AMBIENTE_HML }}
+        run: |
+          if [[ "${{ steps.versao.outputs.versao }}" == *-rc.* ]]; then printf '%s' "$AMBIENTE_HML" > feixe/ambiente.json; else printf '%s' "$AMBIENTE_PROD" > feixe/ambiente.json; fi
+          python3 -c "import json,sys; sys.path.insert(0,'.'); from feixe.core.ambiente import carregar; a=carregar('feixe/ambiente.json'); print('ambiente:', a.nome, a.descricao_banco)"
+      - run: pnpm install --frozen-lockfile && pnpm build
+        working-directory: web
+      - name: Empacotar
+        run: |
+          mkdir -p dist
+          zip -qr "dist/feixe-${{ steps.versao.outputs.versao }}.zip" feixe -x "*/__pycache__/*" "*.pyc"
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/feixe-${{ steps.versao.outputs.versao }}.zip
+          prerelease: ${{ contains(steps.versao.outputs.versao, '-rc.') }}
+          generate_release_notes: true
+      - name: Gerar repositórios de plugins
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/ci/gerar_plugins_xml.py "${{ github.repository }}" site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  pages:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
