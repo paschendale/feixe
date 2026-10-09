@@ -4,11 +4,11 @@ PY ?= $(VENV)/bin/python
 QGIS_PLUGINS ?= $(HOME)/Library/Application\ Support/QGIS/QGIS3/profiles/default/python/plugins
 VERSAO := $(shell sed -n 's/^version=//p' feixe/metadata.txt)
 
-.PHONY: setup lint fmt test web web-dev ambiente-dev deploy-local zip clean
+.PHONY: setup lint fmt test test-db web web-dev ambiente-dev deploy-local zip clean
 
 setup:
 	python3 -m venv $(VENV)
-	$(PY) -m pip install -q --upgrade pip ruff pytest
+	$(PY) -m pip install -q --upgrade pip ruff pytest psycopg2-binary
 	cd web && pnpm install --frozen-lockfile || pnpm install
 
 lint:
@@ -21,6 +21,10 @@ fmt:
 
 test:
 	$(PY) -m pytest
+
+# Testes contra os bancos de dev (leem FEIXE_CCAR e FEIXE_GGC do .dev.env). psycopg2-binary só no venv de dev.
+test-db:
+	$(PY) -m pytest -m db
 
 web:
 	cd web && pnpm build
