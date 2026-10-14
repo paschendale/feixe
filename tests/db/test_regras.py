@@ -315,3 +315,23 @@ def test_ctrl_lote(cen):
         (cen.lote,),
     )
     assert cur.fetchone() == ("pendente", "1", "Etapa cq")
+
+
+def test_carga_fora_da_folha_e_recusada(cen, psycopg2):
+    """Carga de lote-folha com menos de metade da área dentro da folha é recusada; vazar um pouco é aceito."""
+    cur = cen.cur
+    le = cen.passagem("aquisicao", "em_andamento")
+    # A 2534 vai de -44,5 a -44,0 e de -20,0 a -19,5. Célula com 60% dentro (vaza 0,02° para oeste): aceita.
+    cen.carga(le, x=-44.52)
+    # Célula com 20% dentro: recusada, tanto no INSERT quanto ao mover a geometria de uma carga aceita.
+    cur.execute("SAVEPOINT s")
+    with pytest.raises(psycopg2.errors.CheckViolation):
+        cen.carga(le, x=-44.54)
+    cur.execute("ROLLBACK TO SAVEPOINT s")
+    c = cen.carga(le)
+    with pytest.raises(psycopg2.errors.CheckViolation):
+        cur.execute(
+            "UPDATE mapcartacomp.carga_trabalho SET geom = ST_Multi(ST_MakeEnvelope(-45, -20, -44.95, -19.95, 4674)) "
+            "WHERE id = %s",
+            (c,),
+        )

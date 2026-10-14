@@ -71,9 +71,13 @@ def mundo(banco):
         for dono, uf in (("feixe_teste_apm_df", "DF"), ("feixe_teste_apm2_df", "DF"), ("feixe_teste_apm_go", "GO")):
             cargas[dono] = _um(
                 cur,
+                # Uma célula de 0,05° no canto da folha do lote.
                 "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, responsavel, geom) "
-                "VALUES (%s, %s, %s, ST_Multi(ST_MakeEnvelope(-44.5, -20, -44.45, -19.95, 4674))) RETURNING id",
-                (str(uuid.uuid4()), dados[uf]["le"], dono),
+                "SELECT %s, %s, %s, ST_Multi(ST_MakeEnvelope(ST_XMin(a.geom), ST_YMin(a.geom), "
+                "ST_XMin(a.geom) + 0.05, ST_YMin(a.geom) + 0.05, 4674)) "
+                "FROM mapcartacomp.lote l JOIN mapcartctrl.t_articulacao_scn a USING (id_articulacao_scn) "
+                "WHERE l.id = %s RETURNING id",
+                (str(uuid.uuid4()), dados[uf]["le"], dono, dados[uf]["lote"]),
             )
         dados["cargas"] = cargas
         yield cur, dados
