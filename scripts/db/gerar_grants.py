@@ -2,14 +2,13 @@
 """Gera os GRANTs do mapcartacomp para as roles de grupo que já existem (role_<projeto><unidade>_atua e _sup).
 
 Uso:
-    python3 scripts/db/gerar_grants.py --roles lista.txt [--espelho] > grants.sql
+    python3 scripts/db/gerar_grants.py --roles lista.txt > grants.sql
 
 `lista.txt` tem uma role por linha (linhas vazias e começadas por # são ignoradas), por exemplo a saída de
     SELECT rolname FROM pg_roles WHERE rolname ~ '^role_.+_(atua|sup)$' ORDER BY 1;
 Nenhuma role é criada: o script só concede privilégios às que vierem na lista.
 
-Sem --espelho: GRANTs no banco da CCAR (tabelas do Feixe; as linhas visíveis vêm do RLS de 008_rls.sql).
-Com --espelho: GRANTs no espelho somente leitura de uma GGC (feixe/db/ggc), só SELECT.
+Os GRANTs dizem quais tabelas e colunas cada role usa; quais linhas, quem decide é o RLS de 008_rls.sql.
 """
 
 from __future__ import annotations
@@ -68,9 +67,9 @@ def _q(nome: str) -> str:
     return f"mapcartacomp.{nome}"
 
 
-def gerar(roles: List[str], espelho: bool = False) -> str:
+def gerar(roles: List[str]) -> str:
     saida = [
-        "-- GRANTs do mapcartacomp gerados por scripts/db/gerar_grants.py" + (" (espelho da GGC)" if espelho else ""),
+        "-- GRANTs do mapcartacomp gerados por scripts/db/gerar_grants.py",
         "-- Idempotente: GRANT repetido não tem efeito.",
         "BEGIN;",
     ]
@@ -80,8 +79,6 @@ def gerar(roles: List[str], espelho: bool = False) -> str:
         saida.append(f"\n-- {role}")
         saida.append(f"GRANT USAGE ON SCHEMA mapcartacomp TO {r};")
         saida.append(f"GRANT SELECT ON {', '.join(_q(t) for t in TODAS + VIEWS)} TO {r};")
-        if espelho:
-            continue
         for tabela, colunas in ATUA_COLUNAS.items():
             saida.append(f"GRANT UPDATE ({', '.join(colunas)}) ON {_q(tabela)} TO {r};")
         saida.append(f"GRANT INSERT ON {', '.join(_q(t) for t in ATUA_INSERE)} TO {r};")
@@ -101,7 +98,6 @@ def gerar(roles: List[str], espelho: bool = False) -> str:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--roles", required=True, help="arquivo com uma role por linha ('-' para a entrada padrão)")
-    p.add_argument("--espelho", action="store_true", help="GRANTs do espelho somente leitura numa GGC")
     a = p.parse_args(argv)
     if a.roles == "-":
         roles = ler_roles(sys.stdin)
@@ -111,7 +107,7 @@ def main(argv=None) -> int:
     if not roles:
         print("nenhuma role na lista", file=sys.stderr)
         return 1
-    sys.stdout.write(gerar(roles, a.espelho))
+    sys.stdout.write(gerar(roles))
     return 0
 
 

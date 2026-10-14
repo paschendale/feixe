@@ -1,7 +1,7 @@
 """A1: migração v1 de mapcartacomp. Roda nos dois bancos de dev (PostgreSQL 17 da CCAR e 9.6 da GGC).
 
-Na CCAR o schema está aplicado de verdade; na GGC só em ensaio (transação desfeita), porque lá o mapcartacomp é o
-espelho somente leitura (A5). Os testes que conferem o modelo aplicam as migrações dentro de uma transação desfeita.
+Na CCAR o schema está aplicado de verdade; na GGC (9.6) só em ensaio, numa transação desfeita, para provar a
+compatibilidade sem criar nada lá. Os testes que conferem o modelo aplicam as migrações numa transação desfeita.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def test_aplicar_sh_na_ccar_e_idempotente(psycopg2):
 
 @pytest.mark.db
 def test_aplicar_sh_ensaio_no_96(psycopg2):
-    """O ensaio aplica tudo do zero no 9.6 e desfaz: o que havia no mapcartacomp da GGC (o espelho) fica igual."""
+    """O ensaio aplica tudo no 9.6 e desfaz: o banco da GGC termina sem nada do Feixe."""
     ggc = url("FEIXE_GGC")
     sql_objetos = (
         "SELECT c.relname, c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "

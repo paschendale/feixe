@@ -111,7 +111,6 @@ def test_gerador_recusa_role_fora_do_padrao():
     with pytest.raises(ValueError):
         ler_roles(["role_bc100ggcdf_atua", "feixe_apm"])
     assert ler_roles(["# comentário", "", "role_bc100grj_sup", "role_bc100grj_sup"]) == ["role_bc100grj_sup"]
-    assert "GRANT INSERT" not in gerar(["role_bc100ggcdf_sup"], espelho=True)
 
 
 def test_atua_so_mexe_no_que_e_seu(mundo, psycopg2):

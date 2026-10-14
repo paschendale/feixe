@@ -27,13 +27,6 @@ LANGUAGE sql STABLE AS $$
     SELECT EXISTS (SELECT 1 FROM mapcartacomp.usuario_feixe WHERE usuario = current_user AND gerente AND ativo)
 $$;
 
--- As derivações escrevem em tabelas que quem as dispara pode não poder alterar (o avaliador avalia a amostra e o
--- plano é recalculado; o supervisor muda a etapa e o lote é recalculado). Rodam com os direitos do dono do schema.
-ALTER FUNCTION mapcartacomp.f_amostra_derivar_um(integer, integer)
-    SECURITY DEFINER SET search_path = mapcartacomp, public, pg_temp;
-ALTER FUNCTION mapcartacomp.f_lote_derivar(integer)
-    SECURITY DEFINER SET search_path = mapcartacomp, public, pg_temp;
-
 -- Políticas. Os (SELECT f(...)) viram InitPlan: avaliados uma vez por consulta, não por linha.
 DO $$
 DECLARE

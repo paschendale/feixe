@@ -1,8 +1,8 @@
 -- 006: regras no banco (PL/pgSQL compatível com PostgreSQL 9.6). Idempotente.
 --
--- Só derivações: nenhuma regra muda a etapa de um lote. Quem avança, pula, volta ou repete etapas é o supervisor;
--- aqui se calculam o que decorre disso (status nacional, revisão, etapa atual) e o que decorre das avaliações
--- (carga de CQ concluída, resultado do plano), que só alimentam a lista "prontas para avançar".
+-- Derivações e uma validação (carga dentro da folha). Nenhuma regra muda a etapa de um lote: quem avança, pula,
+-- volta ou repete etapas é o supervisor. Aqui se calcula o que decorre disso (status nacional, revisão, etapa atual) e
+-- o que decorre das avaliações (carga de CQ concluída, resultado do plano), que só alimenta "prontas para avançar".
 
 -- atualizado_em/atualizado_por em todo UPDATE ------------------------------------------------------------------------
 
@@ -148,8 +148,10 @@ CREATE TRIGGER t10_resultado BEFORE UPDATE ON mapcartacomp.cq_plano
 -- Depois de mudar amostras: a carga de CQ conclui quando todas as suas amostras têm status (e volta a pendente se
 -- alguma avaliação for desfeita), e o plano é recalculado.
 
+-- Roda com os direitos do dono do schema: o avaliador avalia a amostra, mas não pode alterar o plano nem, pelo RLS,
+-- tudo o que a derivação toca.
 CREATE OR REPLACE FUNCTION mapcartacomp.f_amostra_derivar_um(p_carga integer, p_plano integer) RETURNS void
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = mapcartacomp, public, pg_temp AS $$
 BEGIN
     UPDATE mapcartacomp.carga_trabalho c
        SET concluido = d.todas
@@ -213,8 +215,9 @@ CREATE TRIGGER t10_revisao BEFORE INSERT ON mapcartacomp.lote_etapa
 -- registrado pelo supervisor decide entre ENTREGUE_GCQ, CONCLUIDA (aprovada) e DEVOLVIDA (devolvida).
 -- Revisão atual: a maior revisão entre as passagens não puladas.
 
+-- Roda com os direitos do dono do schema: quem muda a etapa (o supervisor) não precisa poder alterar estas colunas.
 CREATE OR REPLACE FUNCTION mapcartacomp.f_lote_derivar(p_lote integer) RETURNS void
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = mapcartacomp, public, pg_temp AS $$
 DECLARE
     v_atual integer;
     v_situacao text;
@@ -279,3 +282,42 @@ $$;
 DROP TRIGGER IF EXISTS t20_derivar ON mapcartacomp.lote_etapa;
 CREATE TRIGGER t20_derivar AFTER INSERT OR UPDATE OR DELETE ON mapcartacomp.lote_etapa
     FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_lote_etapa_derivar();
+
+-- Carga de lote-folha precisa estar, na maior parte, dentro da folha ----------------------------------------------
+-- Recusa INSERT ou UPDATE (da geometria ou da passagem de etapa) quando menos da metade da área da carga cai dentro
+-- da folha. Pega o erro de lançar cargas no rótulo da folha errada; células de grade que vazam um pouco continuam
+-- aceitas. Lotes livres não são verificados. Custo medido no 9.6 do dev: cerca de 60 µs por carga.
+
+CREATE OR REPLACE FUNCTION mapcartacomp.f_fracao_na_folha(p_geom geometry, p_folha integer) RETURNS double precision
+LANGUAGE sql STABLE AS $$
+    SELECT ST_Area(ST_Intersection(CASE WHEN ST_IsValid(p_geom) THEN p_geom ELSE ST_MakeValid(p_geom) END, a.geom))
+           / nullif(ST_Area(p_geom), 0)
+      FROM mapcartctrl.t_articulacao_scn a
+     WHERE a.id_articulacao_scn = p_folha
+$$;
+
+CREATE OR REPLACE FUNCTION mapcartacomp.f_carga_na_folha() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_folha integer;
+    v_nome text;
+    v_fracao double precision;
+BEGIN
+    SELECT l.id_articulacao_scn, l.nome INTO v_folha, v_nome
+      FROM mapcartacomp.lote_etapa le JOIN mapcartacomp.lote l ON l.id = le.id_lote
+     WHERE le.id = NEW.id_lote_etapa AND l.tipo = 'folha';
+    IF v_folha IS NULL THEN
+        RETURN NEW;
+    END IF;
+    v_fracao := mapcartacomp.f_fracao_na_folha(NEW.geom, v_folha);
+    IF v_fracao < 0.5 THEN
+        RAISE EXCEPTION 'carga fora da folha %: só % %% da área está dentro dela', v_nome, round((100 * v_fracao)::numeric, 1)
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS t05_na_folha ON mapcartacomp.carga_trabalho;
+CREATE TRIGGER t05_na_folha BEFORE INSERT OR UPDATE OF geom, id_lote_etapa ON mapcartacomp.carga_trabalho
+    FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_carga_na_folha();

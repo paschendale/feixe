@@ -1,4 +1,4 @@
--- 003: lotes (folhas e lotes livres), passagens pelas etapas, histórico de ações do supervisor e cargas de trabalho.
+-- 003: lotes (folhas e lotes livres), passagens pelas etapas e histórico de ações do supervisor.
 -- Compatível com PostgreSQL 9.6. Idempotente.
 -- Tabelas sincronizadas: uuid gerado no plugin (nunca no banco), uf desnormalizada e (uf, atualizado_em) indexado para o pull.
 
@@ -100,28 +100,3 @@ COMMENT ON COLUMN mapcartacomp.lote_etapa_hist.acao IS
 
 CREATE INDEX IF NOT EXISTS lote_etapa_hist_etapa_idx ON mapcartacomp.lote_etapa_hist (id_lote_etapa);
 CREATE INDEX IF NOT EXISTS lote_etapa_hist_atualizado_em_idx ON mapcartacomp.lote_etapa_hist (uf, atualizado_em);
-
--- Carga de trabalho: unidade padronizada de trabalho dentro de uma passagem de etapa. Responsável nulo = disponível.
-CREATE TABLE IF NOT EXISTS mapcartacomp.carga_trabalho (
-    id serial PRIMARY KEY,
-    uuid uuid NOT NULL UNIQUE,
-    id_lote_etapa integer NOT NULL REFERENCES mapcartacomp.lote_etapa (id) ON DELETE CASCADE,
-    id_cq_plano integer,
-    uf char(2) NOT NULL CHECK (uf ~ '^[A-Z]{2}$'),
-    responsavel text,
-    geom geometry(MultiPolygon, 4674) NOT NULL,
-    concluido boolean NOT NULL DEFAULT false,
-    concluido_em timestamptz,
-    criado_em timestamptz NOT NULL DEFAULT now(),
-    criado_por text NOT NULL DEFAULT current_user,
-    atualizado_em timestamptz NOT NULL DEFAULT now(),
-    atualizado_por text NOT NULL DEFAULT current_user
-);
-
-COMMENT ON COLUMN mapcartacomp.carga_trabalho.responsavel IS
-    'mapcartctrl.t_usuario.nom_contausuario (igual a current_user). Nulo = disponível para atribuição.';
-
-CREATE INDEX IF NOT EXISTS carga_trabalho_lote_etapa_idx ON mapcartacomp.carga_trabalho (id_lote_etapa);
-CREATE INDEX IF NOT EXISTS carga_trabalho_responsavel_idx ON mapcartacomp.carga_trabalho (responsavel);
-CREATE INDEX IF NOT EXISTS carga_trabalho_geom_idx ON mapcartacomp.carga_trabalho USING gist (geom);
-CREATE INDEX IF NOT EXISTS carga_trabalho_atualizado_em_idx ON mapcartacomp.carga_trabalho (uf, atualizado_em);
