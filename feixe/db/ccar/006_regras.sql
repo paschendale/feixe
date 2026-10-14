@@ -148,8 +148,7 @@ CREATE TRIGGER t10_resultado BEFORE UPDATE ON mapcartacomp.cq_plano
 -- Depois de mudar amostras: a carga de CQ conclui quando todas as suas amostras têm status (e volta a pendente se
 -- alguma avaliação for desfeita), e o plano é recalculado.
 
--- Roda com os direitos do dono do schema: o avaliador avalia a amostra, mas não pode alterar o plano nem, pelo RLS,
--- tudo o que a derivação toca.
+-- Roda com os direitos do dono do schema, para que a derivação não dependa dos privilégios de quem avaliou.
 CREATE OR REPLACE FUNCTION mapcartacomp.f_amostra_derivar_um(p_carga integer, p_plano integer) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = mapcartacomp, public, pg_temp AS $$
 BEGIN
@@ -215,7 +214,7 @@ CREATE TRIGGER t10_revisao BEFORE INSERT ON mapcartacomp.lote_etapa
 -- registrado pelo supervisor decide entre ENTREGUE_GCQ, CONCLUIDA (aprovada) e DEVOLVIDA (devolvida).
 -- Revisão atual: a maior revisão entre as passagens não puladas.
 
--- Roda com os direitos do dono do schema: quem muda a etapa (o supervisor) não precisa poder alterar estas colunas.
+-- Roda com os direitos do dono do schema, para que a derivação não dependa dos privilégios de quem mudou a etapa.
 CREATE OR REPLACE FUNCTION mapcartacomp.f_lote_derivar(p_lote integer) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = mapcartacomp, public, pg_temp AS $$
 DECLARE

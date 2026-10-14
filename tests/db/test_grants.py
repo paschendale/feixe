@@ -1,7 +1,8 @@
-"""A4: GRANTs gerados para as roles de grupo e RLS por UF. Roda nos dois bancos, dentro de transações desfeitas.
+"""A4: GRANTs gerados para as roles escolhidas pela DBA. Roda nos dois bancos, dentro de transações desfeitas.
 
-Usa as roles de teste de scripts/dev/roles_teste.sql (role_bc100ggcdf_* e role_bc100ggcgo_*), criadas dentro da
-transação, e troca de usuário com SET LOCAL ROLE.
+Nesta versão o banco não tem RLS: quem tem os GRANTs vê e altera todas as UFs, e os papéis (APM, avaliador,
+supervisor, gerente) são decididos pelo plugin a partir do SGBC. Usa as roles de teste de scripts/dev/roles_teste.sql,
+criadas dentro da transação, e troca de usuário com SET LOCAL ROLE.
 """
 
 from __future__ import annotations
@@ -17,8 +18,6 @@ from tests.db.migracoes import aplicar
 
 pytestmark = pytest.mark.db
 
-ROLES = ["role_bc100ggcdf_atua", "role_bc100ggcdf_sup", "role_bc100ggcgo_atua", "role_bc100ggcgo_sup"]
-
 
 def _um(cur, sql, params=()):
     cur.execute(sql, params)
@@ -31,7 +30,7 @@ def mundo(banco):
     with banco.cursor() as cur:
         with open(os.path.join(RAIZ, "scripts", "dev", "roles_teste.sql"), encoding="utf-8") as f:
             cur.execute(f.read())
-        cur.execute(gerar(ler_roles(ROLES)).replace("BEGIN;", "").replace("COMMIT;", ""))
+        cur.execute(gerar(ler_roles(["feixe_teste_grupo"])).replace("BEGIN;", "").replace("COMMIT;", ""))
         tema = _um(cur, "INSERT INTO mapcartacomp.tema (nome) VALUES ('teste_grants') RETURNING id")
         ativ = _um(
             cur,
@@ -66,29 +65,22 @@ def mundo(banco):
                 "VALUES (%s, %s, %s, 'em_andamento') RETURNING id",
                 (str(uuid.uuid4()), lote, etapa),
             )
-            dados[uf] = {"fluxo": fluxo, "lote": lote, "le": le}
-        cargas = {}
-        for dono, uf in (("feixe_teste_apm_df", "DF"), ("feixe_teste_apm2_df", "DF"), ("feixe_teste_apm_go", "GO")):
-            cargas[dono] = _um(
+            # Uma célula de 0,05° no canto da folha do lote.
+            carga = _um(
                 cur,
-                # Uma célula de 0,05° no canto da folha do lote.
                 "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, responsavel, geom) "
                 "SELECT %s, %s, %s, ST_Multi(ST_MakeEnvelope(ST_XMin(a.geom), ST_YMin(a.geom), "
                 "ST_XMin(a.geom) + 0.05, ST_YMin(a.geom) + 0.05, 4674)) "
                 "FROM mapcartacomp.lote l JOIN mapcartctrl.t_articulacao_scn a USING (id_articulacao_scn) "
                 "WHERE l.id = %s RETURNING id",
-                (str(uuid.uuid4()), dados[uf]["le"], dono, dados[uf]["lote"]),
+                (str(uuid.uuid4()), le, f"feixe_teste_{uf.lower()}", lote),
             )
-        dados["cargas"] = cargas
+            dados[uf] = {"fluxo": fluxo, "lote": lote, "le": le, "carga": carga}
         yield cur, dados
 
 
 def _como(cur, role):
     cur.execute(f'SET LOCAL ROLE "{role}"')
-
-
-def _volta(cur):
-    cur.execute("RESET ROLE")
 
 
 def _negado(cur, psycopg2, sql, params=()):
@@ -102,99 +94,46 @@ def _negado(cur, psycopg2, sql, params=()):
     return False
 
 
-def _lotes_visiveis(cur, dados):
-    cur.execute("SELECT uf FROM mapcartacomp.lote WHERE id_tema = %s ORDER BY uf", (dados["tema"],))
-    return [r[0] for r in cur.fetchall()]
-
-
-def test_gerador_recusa_role_fora_do_padrao():
+def test_gerador_recusa_nome_invalido_e_repete_nada():
     with pytest.raises(ValueError):
-        ler_roles(["role_bc100ggcdf_atua", "feixe_apm"])
-    assert ler_roles(["# comentário", "", "role_bc100grj_sup", "role_bc100grj_sup"]) == ["role_bc100grj_sup"]
+        ler_roles(["role_bc100ggcdf_atua", "x; DROP SCHEMA mapcartacomp"])
+    assert ler_roles(["# comentário", "", "role_a", "role_a"]) == ["role_a"]
 
 
-def test_atua_so_mexe_no_que_e_seu(mundo, psycopg2):
+def test_quem_tem_grant_ve_e_altera_todas_as_ufs(mundo):
     cur, d = mundo
-    _como(cur, "feixe_teste_apm_df")
-    assert _lotes_visiveis(cur, d) == ["DF"]
-    cur.execute("SELECT count(*) FROM mapcartacomp.carga_trabalho WHERE id = ANY(%s)", (list(d["cargas"].values()),))
-    assert cur.fetchone()[0] == 2
-    # Não cria lote.
-    assert _negado(
-        cur,
-        psycopg2,
-        "INSERT INTO mapcartacomp.lote (uuid, cod_projeto, id_tema, id_fluxo, uf, tipo, nome) "
-        "VALUES (%s, 5, %s, %s, 'DF', 'livre', 'x')",
-        (str(uuid.uuid4()), d["tema"], d["DF"]["fluxo"]),
-    )
-    # Conclui a própria carga; a do colega não muda (RLS esconde a linha da escrita).
-    cur.execute(
-        "UPDATE mapcartacomp.carga_trabalho SET concluido = true WHERE id = %s", (d["cargas"]["feixe_teste_apm_df"],)
-    )
+    _como(cur, "feixe_teste_df")
+    cur.execute("SELECT uf FROM mapcartacomp.lote WHERE id_tema = %s ORDER BY uf", (d["tema"],))
+    assert [r[0] for r in cur.fetchall()] == ["DF", "GO"]
+    # O banco não separa papéis nem UFs: altera a carga de GO e cria lote livre. Quem pode o quê é do plugin.
+    cur.execute("UPDATE mapcartacomp.carga_trabalho SET concluido = true WHERE id = %s", (d["GO"]["carga"],))
     assert cur.rowcount == 1
-    cur.execute("UPDATE mapcartacomp.carga_trabalho SET concluido = true WHERE id = %s",
-                (d["cargas"]["feixe_teste_apm2_df"],))  # fmt: skip
-    assert cur.rowcount == 0
-    # Não se auto-atribui nem repassa carga: responsavel não está entre as colunas que _atua altera.
-    assert _negado(cur, psycopg2, "UPDATE mapcartacomp.carga_trabalho SET responsavel = current_user WHERE id = %s",
-                   (d["cargas"]["feixe_teste_apm2_df"],))  # fmt: skip
-    # Mudar a etapa é do supervisor.
-    assert _negado(cur, psycopg2, "UPDATE mapcartacomp.lote_etapa SET situacao = 'concluida' WHERE id = %s",
-                   (d["DF"]["le"],))  # fmt: skip
-    _volta(cur)
-    assert _um(cur, "SELECT concluido FROM mapcartacomp.carga_trabalho WHERE id = %s",
-               (d["cargas"]["feixe_teste_apm2_df"],)) is False  # fmt: skip
-
-
-def test_sup_planeja_so_na_propria_uf(mundo, psycopg2):
-    cur, d = mundo
-    _como(cur, "feixe_teste_sup_df")
-    assert _lotes_visiveis(cur, d) == ["DF"]
     cur.execute(
         "INSERT INTO mapcartacomp.lote (uuid, cod_projeto, id_tema, id_fluxo, uf, tipo, nome) "
         "VALUES (%s, 5, %s, %s, 'DF', 'livre', 'LIVRE_DF')",
         (str(uuid.uuid4()), d["tema"], d["DF"]["fluxo"]),
     )
     assert cur.rowcount == 1
-    # Lote em outra UF: o RLS recusa.
-    assert _negado(
-        cur,
-        psycopg2,
-        "INSERT INTO mapcartacomp.lote (uuid, cod_projeto, id_tema, id_fluxo, uf, tipo, nome) "
-        "VALUES (%s, 5, %s, %s, 'GO', 'livre', 'LIVRE_GO')",
-        (str(uuid.uuid4()), d["tema"], d["GO"]["fluxo"]),
-    )
-    # Reatribui carga de outro APM da UF e avança a etapa (ação explícita do supervisor).
-    cur.execute("UPDATE mapcartacomp.carga_trabalho SET responsavel = NULL WHERE id = %s",
-                (d["cargas"]["feixe_teste_apm2_df"],))  # fmt: skip
-    assert cur.rowcount == 1
-    cur.execute("UPDATE mapcartacomp.lote_etapa SET situacao = 'concluida' WHERE id = %s", (d["DF"]["le"],))
-    assert cur.rowcount == 1
-    # Carga de GO: invisível, nada muda.
-    cur.execute("UPDATE mapcartacomp.carga_trabalho SET responsavel = NULL WHERE id = %s",
-                (d["cargas"]["feixe_teste_apm_go"],))  # fmt: skip
-    assert cur.rowcount == 0
+    assert _um(cur, "SELECT count(*) FROM mapcartacomp.ctrl_lote WHERE id_tema = %s", (d["tema"],)) == 3
 
 
-def test_cada_uf_ve_so_a_sua_e_o_gerente_ve_todas(mundo):
+def test_configuracao_fixa_e_so_leitura(mundo, psycopg2):
+    cur, _ = mundo
+    _como(cur, "feixe_teste_df")
+    assert _negado(cur, psycopg2, "UPDATE mapcartacomp.fase SET nome = 'x' WHERE codigo = 'cq'")
+    assert _negado(cur, psycopg2, "DELETE FROM mapcartacomp.schema_version")
+
+
+def test_quem_nao_tem_grant_nao_le(mundo, psycopg2):
+    cur, _ = mundo
+    _como(cur, "feixe_teste_fora")
+    assert _negado(cur, psycopg2, "SELECT count(*) FROM mapcartacomp.carga_trabalho")
+
+
+def test_avaliacao_recalcula_plano(mundo):
+    """As derivações rodam como dono do schema: a avaliação feita por um usuário fecha a carga e o plano."""
     cur, d = mundo
-    _como(cur, "feixe_teste_apm_go")
-    assert _lotes_visiveis(cur, d) == ["GO"]
-    _volta(cur)
-    # Gerente: papel só do Feixe, em usuario_feixe (que referencia uma conta real de t_usuario).
-    conta = _um(cur, "SELECT nom_contausuario FROM mapcartctrl.t_usuario ORDER BY cod_usuario LIMIT 1")
-    if not _um(cur, "SELECT count(*) FROM pg_roles WHERE rolname = %s", (conta,)):
-        cur.execute(f'CREATE ROLE "{conta}" NOLOGIN')
-    cur.execute(f'GRANT role_bc100ggcgo_atua TO "{conta}"')
-    cur.execute("INSERT INTO mapcartacomp.usuario_feixe (usuario, gerente) VALUES (%s, true)", (conta,))
-    _como(cur, conta)
-    assert _lotes_visiveis(cur, d) == ["DF", "GO"]
-
-
-def test_avaliacao_pelo_avaliador_recalcula_plano(mundo):
-    """As derivações rodam como dono: o avaliador avalia e o plano (que ele não pode alterar) é recalculado."""
-    cur, d = mundo
-    carga = d["cargas"]["feixe_teste_apm_df"]
+    carga = d["DF"]["carga"]
     plano = _um(
         cur,
         "INSERT INTO mapcartacomp.cq_plano (uuid, id_lote_etapa, elementos, numero_aceitacao_ac) "
@@ -207,8 +146,8 @@ def test_avaliacao_pelo_avaliador_recalcula_plano(mundo):
         "VALUES (%s, %s, %s, 'Nome') RETURNING id",
         (str(uuid.uuid4()), plano, carga),
     )
-    _como(cur, "feixe_teste_apm_df")
-    cur.execute("UPDATE mapcartacomp.cq_amostra SET status = 1 WHERE id = %s", (amostra,))
+    _como(cur, "feixe_teste_df")
+    cur.execute("UPDATE mapcartacomp.vw_cq_amostra SET status = 1 WHERE id_cq_amostra = %s", (amostra,))
     assert cur.rowcount == 1
     assert _um(cur, "SELECT resultado FROM mapcartacomp.cq_plano WHERE id = %s", (plano,)) == "aprovado"
     assert _um(cur, "SELECT concluido FROM mapcartacomp.carga_trabalho WHERE id = %s", (carga,)) is True
