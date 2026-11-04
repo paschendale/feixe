@@ -22,8 +22,9 @@ from typing import Iterable, List
 NOME_VALIDO = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 
 TABELAS = [
-    "schema_version", "tema", "fase", "atividade", "fluxo", "fluxo_etapa", "usuario_feixe", "calendario",
-    "lote", "lote_etapa", "lote_etapa_hist", "carga_trabalho", "cq_plano", "cq_amostra", "cq_inspecao", "sync_log",
+    "schema_version", "tema", "fase", "atividade", "fluxo", "fluxo_etapa", "cq_elemento", "usuario_feixe",
+    "calendario", "lote", "lote_etapa", "lote_etapa_hist", "carga_trabalho", "cq_plano", "cq_amostra", "cq_inspecao",
+    "sync_log",
 ]  # fmt: skip
 # Tabelas de configuração fixa: só leitura para os usuários (alteradas pelas migrações).
 SO_LEITURA = ["schema_version", "fase"]

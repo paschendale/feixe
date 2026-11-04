@@ -1,4 +1,5 @@
--- 002: tabelas de referência do Feixe: tema, fase, atividade, fluxo, etapas do fluxo, usuários do Feixe e calendário.
+-- 002: tabelas de referência do Feixe: tema, fase, atividade, fluxo, etapas do fluxo, catálogo de CQ, usuários do Feixe
+-- e calendário.
 -- Compatível com PostgreSQL 9.6. Idempotente.
 -- Projeto, escala, usuário e articulação são lidos de mapcartctrl; aqui só há chaves estrangeiras para lá.
 
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.atividade (
     celula_unidade text,
     elementos_cq text[],
     camada_alvo text,
+    grade_nivel integer CHECK (grade_nivel IN (500000, 100000, 50000, 10000, 5000, 2500, 1000, 200)),
     ativo boolean NOT NULL DEFAULT true,
     criado_em timestamptz NOT NULL DEFAULT now(),
     criado_por text NOT NULL DEFAULT current_user,
@@ -56,6 +58,9 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.atividade (
 COMMENT ON COLUMN mapcartacomp.atividade.geracao IS
     'Como as cargas são geradas. Valores previstos: grade, amostra_area, amostra_feicao, manual, nenhuma.';
 COMMENT ON COLUMN mapcartacomp.atividade.celula_unidade IS 'Unidade de celula_largura/altura: grau, metro, cm_na_escala.';
+COMMENT ON COLUMN mapcartacomp.atividade.grade_nivel IS
+    'Nível da grade estatística do IBGE (lado da célula em metros) em que as cargas da atividade são geradas: 5000, '
+    '2500 (sub-nível do Feixe), 1000... Nulo = atividade que não usa a grade. Contas em mapcartacomp.f_grade_*.';
 
 -- Fluxo da GGC: sequência de etapas por projeto + tema + UF.
 CREATE TABLE IF NOT EXISTS mapcartacomp.fluxo (
@@ -84,6 +89,7 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.fluxo_etapa (
     obrigatoria boolean NOT NULL DEFAULT true,
     repetivel boolean NOT NULL DEFAULT false,
     conta_revisao boolean NOT NULL DEFAULT false,
+    fracao_critica numeric CHECK (fracao_critica > 0 AND fracao_critica < 100),
     criado_em timestamptz NOT NULL DEFAULT now(),
     criado_por text NOT NULL DEFAULT current_user,
     atualizado_em timestamptz NOT NULL DEFAULT now(),
@@ -94,6 +100,53 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.fluxo_etapa (
 
 COMMENT ON COLUMN mapcartacomp.fluxo_etapa.conta_revisao IS
     'Cada passagem por esta etapa incrementa a revisão da folha (o "3" de "2534-3").';
+COMMENT ON COLUMN mapcartacomp.fluxo_etapa.fracao_critica IS
+    'Fração crítica (em %) que a GGC adota nesta etapa de CQ, contra a qual se mostra o nível de conformidade. '
+    'Nula = a fração crítica padrão de cada elemento (cq_elemento).';
+
+-- Catálogo de CQ: os elementos de qualidade são os do SGBC (mapcartctrl.t_qua_medidadequalidade) e não são
+-- replicados aqui. O Feixe guarda só o que acrescenta a eles: se o elemento é núcleo da GCQ e a fração crítica padrão.
+CREATE TABLE IF NOT EXISTS mapcartacomp.cq_elemento (
+    id_medidadequalidade integer PRIMARY KEY REFERENCES mapcartctrl.t_qua_medidadequalidade (id),
+    nucleo boolean NOT NULL DEFAULT false,
+    fracao_critica numeric NOT NULL DEFAULT 4 CHECK (fracao_critica > 0 AND fracao_critica < 100),
+    ordem integer NOT NULL DEFAULT 0,
+    ativo boolean NOT NULL DEFAULT true,
+    criado_em timestamptz NOT NULL DEFAULT now(),
+    criado_por text NOT NULL DEFAULT current_user,
+    atualizado_em timestamptz NOT NULL DEFAULT now(),
+    atualizado_por text NOT NULL DEFAULT current_user
+);
+
+COMMENT ON TABLE mapcartacomp.cq_elemento IS
+    'Elementos de qualidade que o Feixe oferece no CQ. Nome e descrição vêm de mapcartctrl.t_qua_medidadequalidade.';
+COMMENT ON COLUMN mapcartacomp.cq_elemento.nucleo IS 'Elemento núcleo da GCQ, presente no catálogo nacional.';
+COMMENT ON COLUMN mapcartacomp.cq_elemento.fracao_critica IS
+    'Fração crítica padrão da CCAR, em %. A etapa de CQ do fluxo pode adotar outra (fluxo_etapa.fracao_critica).';
+
+-- Elementos núcleo da GCQ, com a fração crítica padrão de 4%. Procurados pelo nome no SGBC: a GCQ chama de
+-- "correta classificação" e "inspeção topológica" o que no SGBC é "Correção da Classificação" e "Consistência
+-- Topológica". Acurácia temporal fica fora: é atividade local do DF.
+DO $$
+DECLARE
+    v_faltam text;
+BEGIN
+    INSERT INTO mapcartacomp.cq_elemento (id_medidadequalidade, nucleo, fracao_critica, ordem)
+    SELECT m.id, true, 4, n.ordem
+      FROM (VALUES ('Comissão', 1), ('Omissão', 2), ('Nome Geográfico', 3), ('Correção da Classificação', 4),
+                   ('Consistência Topológica', 5)) n (nome, ordem)
+      JOIN mapcartctrl.t_qua_medidadequalidade m ON m.nome = n.nome
+    ON CONFLICT (id_medidadequalidade) DO NOTHING;
+
+    SELECT string_agg(n.nome, ', ') INTO v_faltam
+      FROM (VALUES ('Comissão'), ('Omissão'), ('Nome Geográfico'), ('Correção da Classificação'),
+                   ('Consistência Topológica')) n (nome)
+     WHERE NOT EXISTS (SELECT 1 FROM mapcartctrl.t_qua_medidadequalidade m WHERE m.nome = n.nome);
+    IF v_faltam IS NOT NULL THEN
+        RAISE EXCEPTION 'elementos núcleo da GCQ ausentes em mapcartctrl.t_qua_medidadequalidade: %', v_faltam;
+    END IF;
+END
+$$;
 
 -- O que o Feixe guarda sobre o usuário e não existe em mapcartctrl: equipe (subgrupo na GGC) e o papel gerente.
 CREATE TABLE IF NOT EXISTS mapcartacomp.usuario_feixe (
@@ -125,3 +178,4 @@ CREATE INDEX IF NOT EXISTS fluxo_atualizado_em_idx ON mapcartacomp.fluxo (uf, at
 CREATE INDEX IF NOT EXISTS fluxo_etapa_atualizado_em_idx ON mapcartacomp.fluxo_etapa (atualizado_em);
 CREATE INDEX IF NOT EXISTS calendario_atualizado_em_idx ON mapcartacomp.calendario (uf, atualizado_em);
 CREATE INDEX IF NOT EXISTS usuario_feixe_atualizado_em_idx ON mapcartacomp.usuario_feixe (atualizado_em);
+CREATE INDEX IF NOT EXISTS cq_elemento_atualizado_em_idx ON mapcartacomp.cq_elemento (atualizado_em);

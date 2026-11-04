@@ -18,7 +18,7 @@ APLICAR = os.path.join(RAIZ, "scripts", "db", "aplicar.sh")
 VERSAO_ESPERADA = int(os.path.basename(arquivos()[-1])[:3])
 
 TABELAS = {
-    "schema_version", "tema", "fase", "atividade", "fluxo", "fluxo_etapa", "usuario_feixe", "calendario",
+    "schema_version", "tema", "fase", "atividade", "fluxo", "fluxo_etapa", "cq_elemento", "usuario_feixe", "calendario",
     "lote", "lote_etapa", "lote_etapa_hist", "carga_trabalho", "cq_plano", "cq_amostra", "cq_inspecao", "sync_log",
 }  # fmt: skip
 
@@ -154,6 +154,7 @@ def test_chaves_estrangeiras(banco):
         ("mapcartacomp.lote", "mapcartctrl.t_projeto"),
         ("mapcartacomp.lote", "mapcartctrl.t_articulacao_scn"),
         ("mapcartacomp.usuario_feixe", "mapcartctrl.t_usuario"),
+        ("mapcartacomp.cq_elemento", "mapcartctrl.t_qua_medidadequalidade"),
         ("mapcartacomp.lote", "mapcartacomp.fluxo"),
         ("mapcartacomp.lote", "mapcartacomp.lote_etapa"),
         ("mapcartacomp.lote_etapa", "mapcartacomp.lote"),

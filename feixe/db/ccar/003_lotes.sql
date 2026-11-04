@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.lote_etapa (
     revisao integer,
     situacao text NOT NULL DEFAULT 'pendente' CHECK (situacao IN ('pendente', 'em_andamento', 'concluida', 'pulada')),
     resultado text,
+    expor_ocorrencias boolean NOT NULL DEFAULT false,
     iniciada_em timestamptz,
     concluida_em timestamptz,
     concluida_por text,
@@ -62,6 +63,9 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.lote_etapa (
 COMMENT ON COLUMN mapcartacomp.lote_etapa.revisao IS 'Revisão da folha nesta passagem. Nula no INSERT = derivada pelas regras (006).';
 COMMENT ON COLUMN mapcartacomp.lote_etapa.resultado IS
     'Desfecho registrado pelo supervisor quando a etapa tem um (ex.: envio à GCQ: aprovada ou devolvida).';
+COMMENT ON COLUMN mapcartacomp.lote_etapa.expor_ocorrencias IS
+    'O supervisor incluiu as correções a serem feitas ao planejar esta passagem: o responsável vê as ocorrências '
+    'das passagens anteriores. Falso (padrão) = revisão às cegas.';
 
 CREATE INDEX IF NOT EXISTS lote_etapa_lote_idx ON mapcartacomp.lote_etapa (id_lote);
 CREATE INDEX IF NOT EXISTS lote_etapa_atualizado_em_idx ON mapcartacomp.lote_etapa (uf, atualizado_em);

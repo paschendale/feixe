@@ -25,8 +25,9 @@ Scripts auxiliares (na raiz do repositório): `scripts/db/aplicar.sh` (aplica as
 
 ## Pré-requisitos
 
-- Banco da CCAR com PostGIS e o schema `mapcartctrl` (o Feixe referencia `t_projeto`, `t_articulacao_scn` e `t_usuario`, sem copiá-los).
-- Definir a role dona do schema `mapcartacomp` (a mesma role administrativa dos schemas `*_apoio`). Ela precisa de `REFERENCES` em `mapcartctrl.t_projeto`, `mapcartctrl.t_articulacao_scn` e `mapcartctrl.t_usuario` e é quem aplica as migrações.
+- Banco da CCAR com PostGIS 2.3 ou mais novo (as funções da grade estatística usam `ST_Transform` com a projeção em texto, sem SRID cadastrado) e o schema `mapcartctrl` (o Feixe referencia `t_projeto`, `t_articulacao_scn`, `t_usuario` e `t_qua_medidadequalidade`, sem copiá-los).
+- Definir a role dona do schema `mapcartacomp` (a mesma role administrativa dos schemas `*_apoio`). Ela precisa de `REFERENCES` em `mapcartctrl.t_projeto`, `mapcartctrl.t_articulacao_scn`, `mapcartctrl.t_usuario` e `mapcartctrl.t_qua_medidadequalidade` e é quem aplica as migrações.
+- O `002` semeia o catálogo de CQ com os elementos núcleo da GCQ procurando pelo nome em `mapcartctrl.t_qua_medidadequalidade` (Comissão, Omissão, Nome Geográfico, Correção da Classificação, Consistência Topológica); se algum faltar, a aplicação para com a lista dos ausentes.
 - Escolher, entre as roles que já existem na CCAR, as que vão receber acesso ao Feixe (as que reúnem as pessoas da produção cartográfica das GGCs e da CCAR). Nenhuma role nova é criada pelo Feixe.
 - Cliente `psql` (qualquer versão a partir da 9.6) e `bash`; o gerador de GRANTs usa só Python 3 sem pacotes extras.
 
