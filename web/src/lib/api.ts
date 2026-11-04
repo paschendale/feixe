@@ -54,3 +54,21 @@ export type Folha = {
   xmax: number
   ymax: number
 }
+
+export type Papel = 'gerente' | 'supervisor' | 'avaliador' | 'apm' | 'consulta'
+
+export type Eu = {
+  conta: string
+  cadastrada: boolean
+  nome: string
+  siape: number | null
+  lotacao: string | null
+  uf: string | null
+  elegivel: boolean
+  perfis: { cod_projeto: number; projeto: string; perfil: string | null; papel: Papel | null }[]
+  papeis: Papel[]
+  papel: Papel | null
+  papel_rotulo: string
+  gerente: boolean
+  equipe: string | null
+}

@@ -3,11 +3,12 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { api, type Folha, type Status } from '@/lib/api'
+import { api, type Eu, type Folha, type Status } from '@/lib/api'
 import { useEventos } from '@/lib/sse'
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null)
+  const [eu, setEu] = useState<Eu | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [folhas, setFolhas] = useState<Folha[]>([])
   const [busca, setBusca] = useState('')
@@ -15,6 +16,8 @@ export default function App() {
 
   const carregarStatus = useCallback(() => {
     api<Status>('/api/status').then(setStatus).catch((e) => setErro(String(e.message)))
+    // Sem banco ou sem credencial, o cabeçalho fica só com o ambiente; não é erro da tela.
+    api<Eu>('/api/eu').then(setEu).catch(() => setEu(null))
   }, [])
 
   const { conectado } = useEventos(['estado', 'configuracao'], () => carregarStatus())
@@ -49,6 +52,16 @@ export default function App() {
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Feixe</h1>
         <div className="flex items-center gap-2">
+          {eu && (
+            <span className="text-sm text-right leading-tight" title={eu.conta}>
+              <span className="font-medium">{eu.nome}</span>
+              <span className="block text-muted-foreground">
+                {eu.papel_rotulo}
+                {eu.uf ? ` · ${eu.uf}` : ''}
+                {eu.equipe ? ` · ${eu.equipe}` : ''}
+              </span>
+            </span>
+          )}
           {status && (
             <Badge style={{ background: status.cor_ambiente, color: 'white' }}>{status.rotulo_ambiente}</Badge>
           )}
@@ -76,7 +89,17 @@ export default function App() {
         </Card>
         <Card>
           <CardHeader><CardTitle className="text-sm">Usuário</CardTitle></CardHeader>
-          <CardContent className="text-sm">{status?.usuario ?? 'desconhecido (informe usuário e senha no dock do QGIS)'}</CardContent>
+          <CardContent className="text-sm space-y-1">
+            <div>{eu?.nome ?? status?.usuario ?? 'desconhecido (informe usuário e senha no dock do QGIS)'}</div>
+            {eu && (
+              <div className="text-muted-foreground">
+                {eu.conta} · {eu.uf ?? 'sem lotação'} · {eu.papeis.length ? eu.papeis.join(', ') : 'sem papel'}
+              </div>
+            )}
+            {eu && !eu.elegivel && (
+              <div className="text-destructive">conta inativa, de sistema ou super no SGBC: sem papel no Feixe</div>
+            )}
+          </CardContent>
         </Card>
         <Card>
           <CardHeader><CardTitle className="text-sm">Versões</CardTitle></CardHeader>
