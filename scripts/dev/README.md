@@ -27,3 +27,23 @@ scp apoio/banco_df.sql apoio/banco_rj.sql scripts/dev/restaurar_dumps.sh victor@
 3. Erros esperados e inofensivos: triggers de histórico (`*_hist`), duas views de `mapcartctrl` que dependem de `ccar.*`, e `SET` de parâmetros do 17 que o 9.6 não conhece.
 
 Resultado em 2026-10-08: GGC com 220 classes em `bc100ggcdf_base`, 41.436 cargas e 8.666 amostras em `bc100ggcdf_apoio`, 548 usuários e 3.049 folhas 1:100k em `mapcartctrl`; CCAR com 286 classes em `bc100grj_base`, 43 tabelas e 15 views em `mapcartctrl`, 64.831 folhas na articulação.
+
+## Atualizar só alguns schemas (recorte)
+
+Para trazer um dump parcial mais novo (por exemplo `mapcartctrl`, `bc100ggcdf_apoio` e `dominios` da GGC-DF, ou `mapcartctrl`, `mapcartsis` e `dominios` da CCAR) sem refazer o resto:
+
+1. Na sua máquina, gerar e adaptar as seções pre-data e post-data, mantendo as referências a `dominios` (que agora vem no dump):
+
+```bash
+O=/tmp/feixe-recorte; mkdir -p $O
+pg_restore --section=pre-data  --no-owner --no-privileges --no-tablespaces -f $O/pre.raw.sql  apoio/<dump>
+pg_restore --section=post-data --no-owner --no-privileges                  -f $O/post.raw.sql apoio/<dump>
+for f in pre post; do python3 scripts/dev/adaptar_ddl.py $O/$f.raw.sql $O/$f.sql --com-dominios; done
+scp apoio/<dump> $O/pre.sql $O/post.sql scripts/dev/restaurar_recorte.sh victor@disbelief:/home/victor/feixe-dumps/recorte/
+```
+
+2. No disbelief, `FEIXE_DB_PASSWORD=... bash restaurar_recorte.sh <feixe-ggc|feixe-ccar> <dump> pre.sql post.sql <schema,...>`. Os schemas listados são removidos antes (inclua `mapcartacomp`, porque as FKs dele para `mapcartctrl` caem junto). Restaurar pela própria máquina pela tailnet funciona, mas o link é lento e já caiu no meio da carga; pelo disbelief é mais seguro.
+
+3. Depois: `scripts/db/aplicar.sh` na CCAR de dev, `scripts/db/testar_espelho.sh` no GGC de dev e, como a CCAR de dev não é a de produção e não tem as contas do DF, `scripts/dev/copiar_usuarios_df.sh "$FEIXE_GGC" "$FEIXE_CCAR"` (copia as contas lotadas no DF e as citadas em `bc100ggcdf_apoio`, sem senha e sem disparar os triggers de sincronização).
+
+Resultado em 2026-10-14: GGC com 45.009 cargas, 10.974 amostras e 19 ocorrências em `bc100ggcdf_apoio`, 456 contas em `mapcartctrl` e `dominios` com 183 tabelas; CCAR com 548 contas (mais 116 copiadas do DF), 64.831 folhas e `dominios` com 179 tabelas.

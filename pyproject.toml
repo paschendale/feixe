@@ -13,4 +13,5 @@ ignore = ["UP035", "UP006", "UP007", "UP045"]  # Optional[...] continua, por com
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not db'"
+markers = ["db: fala com os bancos de dev (FEIXE_CCAR/FEIXE_GGC do .dev.env); rode com make test-db"]

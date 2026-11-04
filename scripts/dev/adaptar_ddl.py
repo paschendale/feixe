@@ -1,11 +1,17 @@
 """Adapta a DDL dos dumps do IBGE para o ambiente de dev: remove referências a schemas não exportados
-(dominios, bc100grj_hist, ccar), ajusta sintaxe para PostgreSQL 9.6 e tira diretivas de psql 17."""
+(dominios, bc100grj_hist, ccar), ajusta sintaxe para PostgreSQL 9.6 e tira diretivas de psql 17.
+
+Uso: adaptar_ddl.py <entrada.sql> <saida.sql> [schemas_a_criar] [--com-dominios]
+Com --com-dominios (dumps de 2026-10-14 em diante, que trazem o schema dominios) as referências a ele são mantidas."""
 
 import re
 import sys
 
-MISSING = ("dominios.", "bc100grj_hist.", "ccar.")
-src, dst = sys.argv[1], sys.argv[2]
+args = [a for a in sys.argv[1:] if a != "--com-dominios"]
+MISSING = ("bc100grj_hist.", "bc100ggcdf_hist.", "ccar.")
+if "--com-dominios" not in sys.argv:
+    MISSING = ("dominios.",) + MISSING
+src, dst = args[0], args[1]
 with open(src, encoding="utf-8") as f:
     text = f.read()
 text = re.sub(r"^\\(un)?restrict .*\n", "", text, flags=re.M)
@@ -30,8 +36,8 @@ text = re.sub(
 )
 text = re.sub(r"^SET default_table_access_method = heap;\n", "", text, flags=re.M)
 text = re.sub(r"^SET default_tablespace = .*\n", "", text, flags=re.M)
-if len(sys.argv) > 3:  # schemas a criar no inicio (pg_restore -n nao emite CREATE SCHEMA)
-    text = "".join(f"CREATE SCHEMA {s};\n" for s in sys.argv[3].split(",")) + text
+if len(args) > 2:  # schemas a criar no inicio (pg_restore -n nao emite CREATE SCHEMA)
+    text = "".join(f"CREATE SCHEMA {s};\n" for s in args[2].split(",")) + text
 # blocos: cada objeto do pg_dump começa com "--\n-- Name:"; preserva o preâmbulo
 parts = re.split(r"(?=^--\n-- Name: )", text, flags=re.M)
 out, dropped = [], {"blocos": 0, "linhas": 0}
