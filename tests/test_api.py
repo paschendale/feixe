@@ -45,3 +45,44 @@ def test_erro_inesperado_vira_500():
     r = criar_roteador(Contexto(consultar=consultar))
     status, obj = r.despachar("GET", "/api/folhas", {}, None)
     assert status == 500 and "boom" in obj["erro"]
+
+
+def test_eu_com_consultar_falso():
+    """GET /api/eu monta identidade e papel só com o SGBC e usuario_feixe; nenhuma consulta a roles do banco."""
+    from feixe.core import papeis
+
+    vistos = []
+
+    def consultar(sql, params):
+        vistos.append(sql)
+        if sql == papeis.SQL_CONTA_ATUAL:
+            return [{"conta": "u_7654321"}]
+        if sql == papeis.SQL_USUARIO:
+            return [
+                {
+                    "cod_usuario": 42,
+                    "nom_contausuario": "u_7654321",
+                    "nom_usuario": "Beltrano",
+                    "num_siape": 7654321,
+                    "dsc_lotacao": None,
+                    "ind_contaativa": True,
+                    "ind_contasistema": False,
+                    "ind_contasuper": False,
+                }
+            ]
+        if sql == papeis.SQL_PERFIS:
+            return [{"cod_projeto": 5, "projeto": "BC100", "perfil": "S"}]
+        if sql == papeis.SQL_FEIXE:
+            return []
+        raise AssertionError(sql)
+
+    status, eu = criar_roteador(Contexto(consultar=consultar)).despachar("GET", "/api/eu", {}, None)
+    assert status == 200
+    assert eu["conta"] == "u_7654321" and eu["nome"] == "Beltrano"
+    assert eu["uf"] is None and eu["papel"] == "supervisor" and eu["papel_rotulo"] == "Supervisor"
+    assert eu["gerente"] is False and eu["equipe"] is None
+    assert not any("pg_roles" in s or "pg_auth_members" in s or "pg_has_role" in s for s in vistos)
+
+
+def test_eu_sem_banco():
+    assert criar_roteador(Contexto()).despachar("GET", "/api/eu", {}, None)[0] == 503
