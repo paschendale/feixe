@@ -18,8 +18,9 @@ APLICAR = os.path.join(RAIZ, "scripts", "db", "aplicar.sh")
 VERSAO_ESPERADA = int(os.path.basename(arquivos()[-1])[:3])
 
 TABELAS = {
-    "schema_version", "tema", "fase", "atividade", "fluxo", "fluxo_etapa", "cq_elemento", "usuario_feixe", "calendario",
-    "lote", "lote_etapa", "lote_etapa_hist", "carga_trabalho", "cq_plano", "cq_amostra", "cq_inspecao", "sync_log",
+    "schema_version", "tema", "fase", "atividade", "fluxo", "fluxo_etapa", "fluxo_etapa_atividade", "cq_elemento",
+    "usuario_feixe", "calendario", "lote", "lote_etapa", "lote_etapa_hist", "carga_trabalho", "cq_plano", "cq_amostra",
+    "cq_inspecao", "sync_log",
 }  # fmt: skip
 
 # Tabelas sincronizadas com o workspace local: uuid do plugin, uf e auditoria.
@@ -155,6 +156,11 @@ def test_chaves_estrangeiras(banco):
         ("mapcartacomp.lote", "mapcartctrl.t_articulacao_scn"),
         ("mapcartacomp.usuario_feixe", "mapcartctrl.t_usuario"),
         ("mapcartacomp.cq_elemento", "mapcartctrl.t_qua_medidadequalidade"),
+        ("mapcartacomp.atividade", "mapcartacomp.cq_elemento"),
+        ("mapcartacomp.fluxo_etapa_atividade", "mapcartacomp.fluxo_etapa"),
+        ("mapcartacomp.fluxo_etapa_atividade", "mapcartacomp.atividade"),
+        ("mapcartacomp.cq_plano", "mapcartacomp.atividade"),
+        ("mapcartacomp.carga_trabalho", "mapcartacomp.atividade"),
         ("mapcartacomp.lote", "mapcartacomp.fluxo"),
         ("mapcartacomp.lote", "mapcartacomp.lote_etapa"),
         ("mapcartacomp.lote_etapa", "mapcartacomp.lote"),

@@ -96,7 +96,7 @@ class Lote:
     def __init__(self, cur, mi="2534"):
         self.cur = cur
         tema = _um(cur, "INSERT INTO mapcartacomp.tema (nome) VALUES ('teste_grade') RETURNING id")
-        ativ = _um(
+        self.ativ = ativ = _um(
             cur,
             "INSERT INTO mapcartacomp.atividade (cod_projeto, id_tema, fase, nome, geracao, grade_nivel) "
             "VALUES (5, %s, 'aquisicao', 'teste grade', 'grade', 5000) RETURNING id",
@@ -109,9 +109,13 @@ class Lote:
         )
         etapa = _um(
             cur,
-            "INSERT INTO mapcartacomp.fluxo_etapa (id_fluxo, ordem, id_atividade, nome, fracao_critica) "
-            "VALUES (%s, 1, %s, 'Aquisição', 2.5) RETURNING id",
-            (fluxo, ativ),
+            "INSERT INTO mapcartacomp.fluxo_etapa (id_fluxo, ordem, fase, nome, fracao_critica) "
+            "VALUES (%s, 1, 'aquisicao', 'Aquisição', 2.5) RETURNING id",
+            (fluxo,),
+        )
+        cur.execute(
+            "INSERT INTO mapcartacomp.fluxo_etapa_atividade (id_fluxo_etapa, id_atividade) VALUES (%s, %s)",
+            (etapa, ativ),
         )
         self.id_folha, self.texto = _folha(cur, mi)
         self.lote = _um(
@@ -129,9 +133,10 @@ class Lote:
     def carga(self, geocodigo, geom_wkt=None):
         return _um(
             self.cur,
-            "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, geocodigo, geom) "
-            "VALUES (%s, %s, %s, coalesce(ST_GeomFromText(%s, 4674), mapcartacomp.f_grade_celula(%s))) RETURNING id",
-            (str(uuid.uuid4()), self.le, geocodigo, geom_wkt, geocodigo),
+            "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_atividade, geocodigo, geom) "
+            "VALUES (%s, %s, %s, %s, coalesce(ST_GeomFromText(%s, 4674), mapcartacomp.f_grade_celula(%s))) "
+            "RETURNING id",
+            (str(uuid.uuid4()), self.le, self.ativ, geocodigo, geom_wkt, geocodigo),
         )
 
     def fracao(self, geocodigo):
@@ -149,10 +154,11 @@ def test_regra_da_folha_com_e_sem_geocodigo(cur, psycopg2):
     assert 0.40 < lote.fracao(canto) < 0.41
     lon, lat = grade.centroide(canto)
     assert grade.contem(grade.de_wkt(lote.texto), lon, lat)
-    lote.carga(canto)
-    # Todas as células de 5 km da folha entram.
+    aceita = lote.carga(canto)
+    # Todas as outras células de 5 km da folha entram.
     for c in grade.celulas_no_poligono(grade.de_wkt(lote.texto), 5000):
-        lote.carga(c)
+        if c != canto:
+            lote.carga(c)
     # Célula da folha vizinha a leste (2497), com centroide fora da 2496: recusada.
     _, texto_vizinha = _folha(cur, "2497")
     vizinha = next(iter(grade.celulas_no_poligono(grade.de_wkt(texto_vizinha), 5000)))
@@ -161,7 +167,6 @@ def test_regra_da_folha_com_e_sem_geocodigo(cur, psycopg2):
         lote.carga(vizinha)
     cur.execute("ROLLBACK TO SAVEPOINT s")
     # Trocar o geocódigo de uma carga aceita para uma célula de fora também é recusado.
-    aceita = lote.carga(canto)
     cur.execute("SAVEPOINT s")
     with pytest.raises(psycopg2.errors.CheckViolation):
         cur.execute("UPDATE mapcartacomp.carga_trabalho SET geocodigo = %s WHERE id = %s", (vizinha, aceita))
@@ -187,9 +192,10 @@ def test_carga_legada_sem_geocodigo_continua_na_regra_da_metade(cur, psycopg2):
 
 
 def test_catalogo_de_cq(cur):
+    # As migrações semeiam os elementos núcleo; a conversão do DF acrescenta Acurácia Temporal como não núcleo.
     cur.execute(
         "SELECT m.nome, e.nucleo, e.fracao_critica FROM mapcartacomp.cq_elemento e "
-        "JOIN mapcartctrl.t_qua_medidadequalidade m ON m.id = e.id_medidadequalidade ORDER BY e.ordem"
+        "JOIN mapcartctrl.t_qua_medidadequalidade m ON m.id = e.id_medidadequalidade WHERE e.nucleo ORDER BY e.ordem"
     )
     assert cur.fetchall() == [
         ("Comissão", True, 4),
@@ -220,7 +226,7 @@ def test_nivel_da_grade_na_atividade(cur, psycopg2):
     with pytest.raises(psycopg2.errors.CheckViolation):
         cur.execute(
             "INSERT INTO mapcartacomp.atividade (cod_projeto, id_tema, fase, nome, grade_nivel) "
-            "VALUES (5, %s, 'cq', 'x', 4000)",
+            "VALUES (5, %s, 'aquisicao', 'x', 4000)",
             (tema,),
         )
 

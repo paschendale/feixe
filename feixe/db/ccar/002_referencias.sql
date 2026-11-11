@@ -1,5 +1,5 @@
--- 002: tabelas de referência do Feixe: tema, fase, atividade, fluxo, etapas do fluxo, catálogo de CQ, usuários do Feixe
--- e calendário.
+-- 002: tabelas de referência do Feixe: tema, fase, catálogo de CQ, atividade, fluxo, etapas do fluxo e suas atividades,
+-- usuários do Feixe e calendário.
 -- Compatível com PostgreSQL 9.6. Idempotente.
 -- Projeto, escala, usuário e articulação são lidos de mapcartctrl; aqui só há chaves estrangeiras para lá.
 
@@ -31,78 +31,6 @@ INSERT INTO mapcartacomp.fase (codigo, nome, ordem, status_nacional) VALUES
     ('envio_gcq', 'Envio à GCQ', 6, 'ENTREGUE_GCQ'),
     ('outra', 'Outra produção', 7, 'EM_PRODUCAO')
 ON CONFLICT (codigo) DO NOTHING;
-
--- Atividade = projeto + tema + fase, com os padrões de geração de cargas.
--- Os campos de geração e de CQ ficam abertos de propósito (sem lista fechada): o módulo de CQ ainda vai defini-los.
-CREATE TABLE IF NOT EXISTS mapcartacomp.atividade (
-    id serial PRIMARY KEY,
-    cod_projeto integer NOT NULL REFERENCES mapcartctrl.t_projeto (cod_projeto),
-    id_tema integer NOT NULL REFERENCES mapcartacomp.tema (id),
-    fase text NOT NULL REFERENCES mapcartacomp.fase (codigo),
-    nome text NOT NULL,
-    geracao text,
-    celula_largura numeric,
-    celula_altura numeric,
-    celula_unidade text,
-    elementos_cq text[],
-    camada_alvo text,
-    grade_nivel integer CHECK (grade_nivel IN (500000, 100000, 50000, 10000, 5000, 2500, 1000, 200)),
-    ativo boolean NOT NULL DEFAULT true,
-    criado_em timestamptz NOT NULL DEFAULT now(),
-    criado_por text NOT NULL DEFAULT current_user,
-    atualizado_em timestamptz NOT NULL DEFAULT now(),
-    atualizado_por text NOT NULL DEFAULT current_user,
-    UNIQUE (cod_projeto, nome)
-);
-
-COMMENT ON COLUMN mapcartacomp.atividade.geracao IS
-    'Como as cargas são geradas. Valores previstos: grade, amostra_area, amostra_feicao, manual, nenhuma.';
-COMMENT ON COLUMN mapcartacomp.atividade.celula_unidade IS 'Unidade de celula_largura/altura: grau, metro, cm_na_escala.';
-COMMENT ON COLUMN mapcartacomp.atividade.grade_nivel IS
-    'Nível da grade estatística do IBGE (lado da célula em metros) em que as cargas da atividade são geradas: 5000, '
-    '2500 (sub-nível do Feixe), 1000... Nulo = atividade que não usa a grade. Contas em mapcartacomp.f_grade_*.';
-
--- Fluxo da GGC: sequência de etapas por projeto + tema + UF.
-CREATE TABLE IF NOT EXISTS mapcartacomp.fluxo (
-    id serial PRIMARY KEY,
-    cod_projeto integer NOT NULL REFERENCES mapcartctrl.t_projeto (cod_projeto),
-    id_tema integer NOT NULL REFERENCES mapcartacomp.tema (id),
-    uf char(2) NOT NULL CHECK (uf ~ '^[A-Z]{2}$'),
-    nome text NOT NULL,
-    ativo boolean NOT NULL DEFAULT true,
-    criado_em timestamptz NOT NULL DEFAULT now(),
-    criado_por text NOT NULL DEFAULT current_user,
-    atualizado_em timestamptz NOT NULL DEFAULT now(),
-    atualizado_por text NOT NULL DEFAULT current_user,
-    UNIQUE (cod_projeto, id_tema, uf, nome),
-    -- Alvo da FK composta de lote: garante que o lote usa um fluxo do mesmo projeto e tema.
-    UNIQUE (id, cod_projeto, id_tema)
-);
-
--- Etapa do fluxo, ligada a uma atividade. O supervisor anda com a folha pelas etapas; nada avança sozinho.
-CREATE TABLE IF NOT EXISTS mapcartacomp.fluxo_etapa (
-    id serial PRIMARY KEY,
-    id_fluxo integer NOT NULL REFERENCES mapcartacomp.fluxo (id) ON DELETE CASCADE,
-    ordem integer NOT NULL,
-    id_atividade integer NOT NULL REFERENCES mapcartacomp.atividade (id),
-    nome text NOT NULL,
-    obrigatoria boolean NOT NULL DEFAULT true,
-    repetivel boolean NOT NULL DEFAULT false,
-    conta_revisao boolean NOT NULL DEFAULT false,
-    fracao_critica numeric CHECK (fracao_critica > 0 AND fracao_critica < 100),
-    criado_em timestamptz NOT NULL DEFAULT now(),
-    criado_por text NOT NULL DEFAULT current_user,
-    atualizado_em timestamptz NOT NULL DEFAULT now(),
-    atualizado_por text NOT NULL DEFAULT current_user,
-    -- Adiável para permitir reordenar etapas numa transação.
-    UNIQUE (id_fluxo, ordem) DEFERRABLE INITIALLY IMMEDIATE
-);
-
-COMMENT ON COLUMN mapcartacomp.fluxo_etapa.conta_revisao IS
-    'Cada passagem por esta etapa incrementa a revisão da folha (o "3" de "2534-3").';
-COMMENT ON COLUMN mapcartacomp.fluxo_etapa.fracao_critica IS
-    'Fração crítica (em %) que a GGC adota nesta etapa de CQ, contra a qual se mostra o nível de conformidade. '
-    'Nula = a fração crítica padrão de cada elemento (cq_elemento).';
 
 -- Catálogo de CQ: os elementos de qualidade são os do SGBC (mapcartctrl.t_qua_medidadequalidade) e não são
 -- replicados aqui. O Feixe guarda só o que acrescenta a eles: se o elemento é núcleo da GCQ e a fração crítica padrão.
@@ -148,6 +76,99 @@ BEGIN
 END
 $$;
 
+-- Atividade = projeto + tema + fase, com os padrões de geração de cargas. Atividade de CQ é tema + medida de
+-- qualidade: cada medida inspecionada tem a sua atividade (ex.: "CQ ADE - Omissão"), com plano e cargas próprios.
+-- Os campos de geração ficam abertos de propósito (sem lista fechada): o módulo de CQ ainda vai defini-los.
+CREATE TABLE IF NOT EXISTS mapcartacomp.atividade (
+    id serial PRIMARY KEY,
+    cod_projeto integer NOT NULL REFERENCES mapcartctrl.t_projeto (cod_projeto),
+    id_tema integer NOT NULL REFERENCES mapcartacomp.tema (id),
+    fase text NOT NULL REFERENCES mapcartacomp.fase (codigo),
+    nome text NOT NULL,
+    geracao text,
+    celula_largura numeric,
+    celula_altura numeric,
+    celula_unidade text,
+    id_medidadequalidade integer REFERENCES mapcartacomp.cq_elemento (id_medidadequalidade),
+    camada_alvo text,
+    grade_nivel integer CHECK (grade_nivel IN (500000, 100000, 50000, 10000, 5000, 2500, 1000, 200)),
+    ativo boolean NOT NULL DEFAULT true,
+    criado_em timestamptz NOT NULL DEFAULT now(),
+    criado_por text NOT NULL DEFAULT current_user,
+    atualizado_em timestamptz NOT NULL DEFAULT now(),
+    atualizado_por text NOT NULL DEFAULT current_user,
+    UNIQUE (cod_projeto, nome),
+    -- Toda atividade de CQ tem a sua medida; as outras fases não têm medida.
+    CHECK ((fase = 'cq') = (id_medidadequalidade IS NOT NULL))
+);
+
+COMMENT ON COLUMN mapcartacomp.atividade.geracao IS
+    'Como as cargas são geradas. Valores previstos: grade, amostra_area, amostra_feicao, manual, nenhuma.';
+COMMENT ON COLUMN mapcartacomp.atividade.celula_unidade IS 'Unidade de celula_largura/altura: grau, metro, cm_na_escala.';
+COMMENT ON COLUMN mapcartacomp.atividade.id_medidadequalidade IS
+    'Medida de qualidade que a atividade de CQ inspeciona (cq_elemento, nome no SGBC). Obrigatória na fase cq.';
+COMMENT ON COLUMN mapcartacomp.atividade.grade_nivel IS
+    'Nível da grade estatística do IBGE (lado da célula em metros) em que as cargas da atividade são geradas: 5000, '
+    '2500 (sub-nível do Feixe), 1000... Nulo = atividade que não usa a grade. Contas em mapcartacomp.f_grade_*.';
+
+-- Fluxo da GGC: sequência de etapas por projeto + tema + UF.
+CREATE TABLE IF NOT EXISTS mapcartacomp.fluxo (
+    id serial PRIMARY KEY,
+    cod_projeto integer NOT NULL REFERENCES mapcartctrl.t_projeto (cod_projeto),
+    id_tema integer NOT NULL REFERENCES mapcartacomp.tema (id),
+    uf char(2) NOT NULL CHECK (uf ~ '^[A-Z]{2}$'),
+    nome text NOT NULL,
+    ativo boolean NOT NULL DEFAULT true,
+    criado_em timestamptz NOT NULL DEFAULT now(),
+    criado_por text NOT NULL DEFAULT current_user,
+    atualizado_em timestamptz NOT NULL DEFAULT now(),
+    atualizado_por text NOT NULL DEFAULT current_user,
+    UNIQUE (cod_projeto, id_tema, uf, nome),
+    -- Alvo da FK composta de lote: garante que o lote usa um fluxo do mesmo projeto e tema.
+    UNIQUE (id, cod_projeto, id_tema)
+);
+
+-- Etapa do fluxo. A fase decide o status nacional; as atividades da etapa ficam em fluxo_etapa_atividade (uma na
+-- aquisição, uma por medida no CQ). O supervisor anda com a folha pelas etapas; nada avança sozinho.
+CREATE TABLE IF NOT EXISTS mapcartacomp.fluxo_etapa (
+    id serial PRIMARY KEY,
+    id_fluxo integer NOT NULL REFERENCES mapcartacomp.fluxo (id) ON DELETE CASCADE,
+    ordem integer NOT NULL,
+    fase text NOT NULL REFERENCES mapcartacomp.fase (codigo),
+    nome text NOT NULL,
+    obrigatoria boolean NOT NULL DEFAULT true,
+    repetivel boolean NOT NULL DEFAULT false,
+    conta_revisao boolean NOT NULL DEFAULT false,
+    fracao_critica numeric CHECK (fracao_critica > 0 AND fracao_critica < 100),
+    criado_em timestamptz NOT NULL DEFAULT now(),
+    criado_por text NOT NULL DEFAULT current_user,
+    atualizado_em timestamptz NOT NULL DEFAULT now(),
+    atualizado_por text NOT NULL DEFAULT current_user,
+    -- Adiável para permitir reordenar etapas numa transação.
+    UNIQUE (id_fluxo, ordem) DEFERRABLE INITIALLY IMMEDIATE
+);
+
+COMMENT ON COLUMN mapcartacomp.fluxo_etapa.conta_revisao IS
+    'Cada passagem por esta etapa incrementa a revisão da folha (o "3" de "2534-3").';
+COMMENT ON COLUMN mapcartacomp.fluxo_etapa.fracao_critica IS
+    'Fração crítica (em %) que a GGC adota nesta etapa de CQ, contra a qual se mostra o nível de conformidade. '
+    'Nula = a fração crítica padrão de cada elemento (cq_elemento).';
+
+-- Atividades de cada etapa do fluxo, escolhidas pela GGC: na etapa de CQ, uma por medida inspecionada (o DF põe
+-- acurácia temporal na ADE, outra GGC pode ficar só com as medidas núcleo). Cargas e planos da passagem só podem ser
+-- de atividades da etapa, da mesma fase e do mesmo projeto e tema do fluxo (006).
+CREATE TABLE IF NOT EXISTS mapcartacomp.fluxo_etapa_atividade (
+    id_fluxo_etapa integer NOT NULL REFERENCES mapcartacomp.fluxo_etapa (id) ON DELETE CASCADE,
+    id_atividade integer NOT NULL REFERENCES mapcartacomp.atividade (id),
+    criado_em timestamptz NOT NULL DEFAULT now(),
+    criado_por text NOT NULL DEFAULT current_user,
+    atualizado_em timestamptz NOT NULL DEFAULT now(),
+    atualizado_por text NOT NULL DEFAULT current_user,
+    PRIMARY KEY (id_fluxo_etapa, id_atividade)
+);
+
+CREATE INDEX IF NOT EXISTS fluxo_etapa_atividade_atividade_idx ON mapcartacomp.fluxo_etapa_atividade (id_atividade);
+
 -- O que o Feixe guarda sobre o usuário e não existe em mapcartctrl: equipe (subgrupo na GGC) e o papel gerente.
 CREATE TABLE IF NOT EXISTS mapcartacomp.usuario_feixe (
     usuario text PRIMARY KEY REFERENCES mapcartctrl.t_usuario (nom_contausuario),
@@ -176,6 +197,7 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.calendario (
 CREATE INDEX IF NOT EXISTS atividade_atualizado_em_idx ON mapcartacomp.atividade (atualizado_em);
 CREATE INDEX IF NOT EXISTS fluxo_atualizado_em_idx ON mapcartacomp.fluxo (uf, atualizado_em);
 CREATE INDEX IF NOT EXISTS fluxo_etapa_atualizado_em_idx ON mapcartacomp.fluxo_etapa (atualizado_em);
+CREATE INDEX IF NOT EXISTS fluxo_etapa_atividade_atualizado_em_idx ON mapcartacomp.fluxo_etapa_atividade (atualizado_em);
 CREATE INDEX IF NOT EXISTS calendario_atualizado_em_idx ON mapcartacomp.calendario (uf, atualizado_em);
 CREATE INDEX IF NOT EXISTS usuario_feixe_atualizado_em_idx ON mapcartacomp.usuario_feixe (atualizado_em);
 CREATE INDEX IF NOT EXISTS cq_elemento_atualizado_em_idx ON mapcartacomp.cq_elemento (atualizado_em);

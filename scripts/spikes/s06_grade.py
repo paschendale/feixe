@@ -141,11 +141,14 @@ def gravar(cur, mi: str, nivel: int) -> dict:
     )
     fluxo = cur.fetchone()[0]
     cur.execute(
-        "INSERT INTO mapcartacomp.fluxo_etapa (id_fluxo, ordem, id_atividade, nome) VALUES (%s, 1, %s, 'a') "
+        "INSERT INTO mapcartacomp.fluxo_etapa (id_fluxo, ordem, fase, nome) VALUES (%s, 1, 'aquisicao', 'a') "
         "RETURNING id",
-        (fluxo, ativ),
+        (fluxo,),
     )
     etapa = cur.fetchone()[0]
+    cur.execute(
+        "INSERT INTO mapcartacomp.fluxo_etapa_atividade (id_fluxo_etapa, id_atividade) VALUES (%s, %s)", (etapa, ativ)
+    )
     cur.execute(
         "INSERT INTO mapcartacomp.lote (uuid, cod_projeto, id_tema, id_fluxo, uf, tipo, id_articulacao_scn, nome) "
         "SELECT %s, 5, %s, %s, 'DF', 'folha', id_articulacao_scn, cd_mi FROM mapcartctrl.v_articulacao_scn_100000 "
@@ -172,9 +175,9 @@ def gravar(cur, mi: str, nivel: int) -> dict:
     assert cur.fetchone()[0] == sorted(cods)
     t = time.perf_counter()
     cur.execute(
-        "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, geom, geocodigo) "
-        "SELECT md5(geocodigo || %s)::uuid, %s, geom, geocodigo FROM s06_celulas",
-        (str(uuid.uuid4()), le),
+        "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_atividade, geom, geocodigo) "
+        "SELECT md5(geocodigo || %s)::uuid, %s, %s, geom, geocodigo FROM s06_celulas",
+        (str(uuid.uuid4()), le, ativ),
     )
     inserir = time.perf_counter() - t
     cur.execute("DROP TABLE s06_celulas")

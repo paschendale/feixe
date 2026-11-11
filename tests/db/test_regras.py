@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from feixe.core import grade
 
 from tests.db.migracoes import aplicar
 
@@ -24,17 +25,30 @@ def _um(cur, sql, params=()):
     return cur.fetchone()[0]
 
 
+# Medidas das atividades de CQ do cenário (nomes do SGBC).
+MEDIDAS = ("Nome Geográfico", "Omissão", "Comissão")
+
+
 class Cenario:
     def __init__(self, cur):
         self.cur = cur
         self.tema = _um(cur, "INSERT INTO mapcartacomp.tema (nome) VALUES ('teste_regras') RETURNING id")
         self.ativ = {}
-        for fase in ("aquisicao", "cq", "correcao_inspecao", "envio_gcq"):
+        for fase in ("aquisicao", "correcao_inspecao", "envio_gcq"):
             self.ativ[fase] = _um(
                 cur,
                 "INSERT INTO mapcartacomp.atividade (cod_projeto, id_tema, fase, nome) "
                 "VALUES (5, %s, %s, %s) RETURNING id",
                 (self.tema, fase, f"teste {fase}"),
+            )
+        # CQ: uma atividade por medida.
+        self.ativ_cq = {}
+        for medida in MEDIDAS:
+            self.ativ_cq[medida] = _um(
+                cur,
+                "INSERT INTO mapcartacomp.atividade (cod_projeto, id_tema, fase, nome, id_medidadequalidade) "
+                "SELECT 5, %s, 'cq', %s, id FROM mapcartctrl.t_qua_medidadequalidade WHERE nome = %s RETURNING id",
+                (self.tema, f"teste CQ {medida}", medida),
             )
         self.fluxo = _um(
             cur,
@@ -54,10 +68,15 @@ class Cenario:
         ):
             self.etapa[fase] = _um(
                 cur,
-                "INSERT INTO mapcartacomp.fluxo_etapa (id_fluxo, ordem, id_atividade, nome, conta_revisao, repetivel) "
+                "INSERT INTO mapcartacomp.fluxo_etapa (id_fluxo, ordem, fase, nome, conta_revisao, repetivel) "
                 "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                (self.fluxo, ordem, self.ativ[fase], f"Etapa {fase}", conta, repetivel),
+                (self.fluxo, ordem, fase, f"Etapa {fase}", conta, repetivel),
             )
+            for a in self.ativ_cq.values() if fase == "cq" else [self.ativ[fase]]:
+                cur.execute(
+                    "INSERT INTO mapcartacomp.fluxo_etapa_atividade (id_fluxo_etapa, id_atividade) VALUES (%s, %s)",
+                    (self.etapa[fase], a),
+                )
         folha = _um(cur, "SELECT id_articulacao_scn FROM mapcartctrl.v_articulacao_scn_100000 WHERE cd_mi = '2534'")
         self.lote = _um(
             cur,
@@ -65,15 +84,18 @@ class Cenario:
             "VALUES (%s, 5, %s, %s, 'DF', 'folha', %s, '2534') RETURNING id",
             (_uid(), self.tema, self.fluxo, folha),
         )
+        self.fase_da_passagem = {}
 
     def passagem(self, fase, situacao="pendente", revisao=None, instancia=1):
-        return _um(
+        le = _um(
             self.cur,
             "INSERT INTO mapcartacomp.lote_etapa (uuid, id_lote, id_fluxo_etapa, instancia, situacao, revisao, "
             "iniciada_em) VALUES (%s, %s, %s, %s, %s, %s, CASE WHEN %s <> 'pendente' THEN clock_timestamp() END) "
             "RETURNING id",
             (_uid(), self.lote, self.etapa[fase], instancia, situacao, revisao, situacao),
         )
+        self.fase_da_passagem[le] = fase
+        return le
 
     def mudar(self, lote_etapa, situacao, resultado=None):
         self.cur.execute(
@@ -83,13 +105,50 @@ class Cenario:
             (situacao, resultado, situacao, lote_etapa),
         )
 
-    def carga(self, lote_etapa, responsavel=None, concluido=False, concluido_em=None, plano=None, x=-44.5):
+    def plano(self, lote_etapa, medida, ac):
         return _um(
             self.cur,
-            "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_cq_plano, responsavel, geom, concluido, "
-            "concluido_em) VALUES (%s, %s, %s, %s, ST_Multi(ST_MakeEnvelope(%s, -20.0, %s + 0.05, -19.95, 4674)), "
-            "%s, %s) RETURNING id",
-            (_uid(), lote_etapa, plano, responsavel, x, x, concluido, concluido_em),
+            "INSERT INTO mapcartacomp.cq_plano (uuid, id_lote_etapa, id_atividade, numero_aceitacao_ac) "
+            "VALUES (%s, %s, %s, %s) RETURNING id",
+            (_uid(), lote_etapa, self.ativ_cq[medida], ac),
+        )
+
+    def carga(self, lote_etapa, responsavel=None, concluido=False, concluido_em=None, plano=None, x=-44.5,
+              atividade=None, geocodigo=None):  # fmt: skip
+        """Carga na passagem. Sem atividade: a do plano (CQ) ou a única da etapa."""
+        if atividade is None:
+            if plano is not None:
+                atividade = _um(self.cur, "SELECT id_atividade FROM mapcartacomp.cq_plano WHERE id = %s", (plano,))
+            else:
+                atividade = self.ativ[self.fase_da_passagem[lote_etapa]]
+        return _um(
+            self.cur,
+            "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_atividade, id_cq_plano, responsavel, "
+            "geom, geocodigo, concluido, concluido_em) VALUES (%s, %s, %s, %s, %s, "
+            "CASE WHEN %s::text IS NULL THEN ST_Multi(ST_MakeEnvelope(%s, -20.0, %s + 0.05, -19.95, 4674)) "
+            "ELSE mapcartacomp.f_grade_celula(%s) END, %s, %s, %s) RETURNING id",
+            (
+                _uid(),
+                lote_etapa,
+                atividade,
+                plano,
+                responsavel,
+                geocodigo,
+                x,
+                x,
+                geocodigo,
+                geocodigo,
+                concluido,
+                concluido_em,
+            ),  # fmt: skip
+        )
+
+    def amostra(self, plano, carga):
+        return _um(
+            self.cur,
+            "INSERT INTO mapcartacomp.cq_amostra (uuid, id_cq_plano, id_carga_trabalho) VALUES (%s, %s, %s) "
+            "RETURNING id",
+            (_uid(), plano, carga),
         )
 
     def lote_estado(self):
@@ -105,6 +164,14 @@ def cen(banco):
     aplicar(banco)
     with banco.cursor() as cur:
         yield Cenario(cur)
+
+
+def _erro(cur, erro, fn, *args, **kwargs):
+    """Confere que fn levanta o erro, sem perder a transação do teste."""
+    cur.execute("SAVEPOINT s")
+    with pytest.raises(erro):
+        fn(*args, **kwargs)
+    cur.execute("ROLLBACK TO SAVEPOINT s")
 
 
 def test_concluir_e_desfazer_carga(cen):
@@ -146,66 +213,116 @@ def test_uf_herdada_do_pai(cen):
     assert _um(cen.cur, "SELECT uf FROM mapcartacomp.carga_trabalho WHERE id = %s", (c,)) == "DF"
 
 
-def _plano(cen, le, ac):
-    return _um(
-        cen.cur,
-        "INSERT INTO mapcartacomp.cq_plano (uuid, id_lote_etapa, elementos, numero_aceitacao_ac) "
-        "VALUES (%s, %s, ARRAY['Nome', 'Omissão', 'Comissão'], %s) RETURNING id",
-        (_uid(), le, ac),
-    )
-
-
-def _amostras(cen, plano, carga):
-    ids = {}
-    for el in ("Nome", "Omissão", "Comissão"):
-        ids[el] = _um(
-            cen.cur,
-            "INSERT INTO mapcartacomp.cq_amostra (uuid, id_cq_plano, id_carga_trabalho, elemento) "
-            "VALUES (%s, %s, %s, %s) RETURNING id",
-            (_uid(), plano, carga, el),
-        )
-    return ids
-
-
 def test_cq_conclui_carga_e_fecha_plano(cen):
+    """Um plano por atividade (medida); cada carga sorteada tem uma amostra e conclui quando ela é avaliada."""
     cur = cen.cur
     le = cen.passagem("cq", "em_andamento")
-    plano = _plano(cen, le, ac=1)
-    cargas = [cen.carga(le, plano=plano, x=-44.5 + i * 0.05) for i in range(3)]
-    amostras = [_amostras(cen, plano, c) for c in cargas]
+    planos = {m: cen.plano(le, m, ac=1) for m in MEDIDAS}
+    # As mesmas três células sorteadas nas três medidas: três cargas por célula, uma de cada atividade.
+    cargas = {m: [cen.carga(le, plano=planos[m], x=-44.5 + i * 0.05) for i in range(3)] for m in MEDIDAS}
+    amostras = {m: [cen.amostra(planos[m], c) for c in cargas[m]] for m in MEDIDAS}
 
-    def avaliar(i, el, status):
-        cur.execute("UPDATE mapcartacomp.cq_amostra SET status = %s WHERE id = %s", (status, amostras[i][el]))
+    def avaliar(m, i, status):
+        cur.execute("UPDATE mapcartacomp.cq_amostra SET status = %s WHERE id = %s", (status, amostras[m][i]))
 
-    def estado():
+    def estado(m):
         cur.execute(
-            "SELECT array_agg(concluido ORDER BY id) FROM mapcartacomp.carga_trabalho WHERE id_cq_plano = %s", (plano,)
+            "SELECT array_agg(concluido ORDER BY id) FROM mapcartacomp.carga_trabalho WHERE id_cq_plano = %s",
+            (planos[m],),
         )
         concl = cur.fetchone()[0]
-        return concl, _um(cur, "SELECT resultado FROM mapcartacomp.cq_plano WHERE id = %s", (plano,))
+        return concl, _um(cur, "SELECT resultado FROM mapcartacomp.cq_plano WHERE id = %s", (planos[m],))
 
-    assert estado() == ([False, False, False], "pendente")
-    avaliar(0, "Nome", 1)
-    avaliar(0, "Omissão", 0)
-    assert estado() == ([False, False, False], "pendente")
-    avaliar(0, "Comissão", 1)
-    assert estado() == ([True, False, False], "pendente")
+    assert estado("Omissão") == ([False, False, False], "pendente")
+    avaliar("Omissão", 0, 0)
+    assert estado("Omissão") == ([True, False, False], "pendente")
+    # Avaliar uma medida não mexe nas cargas da mesma célula nas outras medidas.
+    assert estado("Comissão") == ([False, False, False], "pendente")
     assert _um(cur, "SELECT avaliado_por = current_user FROM mapcartacomp.cq_amostra WHERE id = %s",
-               (amostras[0]["Nome"],))  # fmt: skip
-    for i in (1, 2):
-        avaliar(i, "Nome", 1)
-        avaliar(i, "Comissão", 1)
-    avaliar(1, "Omissão", 1)
-    avaliar(2, "Omissão", 0)
+               (amostras["Omissão"][0],))  # fmt: skip
+    avaliar("Omissão", 1, 1)
+    avaliar("Omissão", 2, 0)
     # Dois não conformes em Omissão com Ac = 1: reprovado.
-    assert estado() == ([True, True, True], "reprovado")
-    avaliar(2, "Omissão", 1)
-    assert estado() == ([True, True, True], "aprovado")
+    assert estado("Omissão") == ([True, True, True], "reprovado")
+    avaliar("Omissão", 2, 1)
+    assert estado("Omissão") == ([True, True, True], "aprovado")
+    for i in range(3):
+        avaliar("Comissão", i, 1)
+    assert estado("Comissão") == ([True, True, True], "aprovado")
     # Desfazer uma avaliação reabre a carga e o plano.
-    avaliar(1, "Nome", None)
-    assert estado() == ([True, False, True], "pendente")
+    avaliar("Omissão", 1, None)
+    assert estado("Omissão") == ([True, False, True], "pendente")
+    assert estado("Nome Geográfico") == ([False, False, False], "pendente")
     # Etapa de CQ continua como o supervisor deixou: nada avança sozinho.
     assert _um(cur, "SELECT situacao FROM mapcartacomp.lote_etapa WHERE id = %s", (le,)) == "em_andamento"
+
+
+def test_carga_se_faz_uma_vez(cen, psycopg2):
+    """A mesma célula não vira duas cargas da mesma atividade na mesma passagem; em outra atividade, sim."""
+    cur = cen.cur
+    celula = grade.celula_do_ponto(5000, -44.25, -19.75)
+    aq = cen.passagem("aquisicao", "em_andamento")
+    cen.carga(aq, geocodigo=celula)
+    _erro(cur, psycopg2.errors.UniqueViolation, cen.carga, aq, geocodigo=celula)
+    # Outra passagem (revisão seguinte) gera a célula de novo.
+    cen.carga(cen.passagem("aquisicao", "pendente", instancia=2), geocodigo=celula)
+    cq = cen.passagem("cq", "em_andamento")
+    om, co = cen.plano(cq, "Omissão", 0), cen.plano(cq, "Comissão", 0)
+    cen.carga(cq, plano=om, geocodigo=celula)
+    cen.carga(cq, plano=co, geocodigo=celula)
+    _erro(cur, psycopg2.errors.UniqueViolation, cen.carga, cq, plano=om, geocodigo=celula)
+    # Uma carga, uma amostra.
+    c = cen.carga(cq, plano=om, geocodigo=grade.celula_do_ponto(5000, -44.15, -19.75))
+    cen.amostra(om, c)
+    _erro(cur, psycopg2.errors.UniqueViolation, cen.amostra, om, c)
+
+
+def test_atividade_da_carga_e_do_plano(cen, psycopg2):
+    cur = cen.cur
+    aq = cen.passagem("aquisicao", "em_andamento")
+    cq = cen.passagem("cq", "em_andamento")
+    # Atividade que não é da etapa da passagem: recusada na carga e no plano.
+    _erro(cur, psycopg2.errors.CheckViolation, cen.carga, aq, atividade=cen.ativ_cq["Omissão"])
+    _erro(cur, psycopg2.errors.CheckViolation, cen.carga, cq, atividade=cen.ativ["aquisicao"])
+    _erro(cur, psycopg2.errors.CheckViolation, cen.plano, aq, "Omissão", 0)
+    # Carga de CQ tem a atividade e a passagem do plano que a sorteou.
+    om = cen.plano(cq, "Omissão", 0)
+    _erro(cur, psycopg2.errors.ForeignKeyViolation, cen.carga, cq, plano=om, atividade=cen.ativ_cq["Comissão"])
+    # Amostra só em carga do mesmo plano.
+    c = cen.carga(cq, plano=cen.plano(cq, "Comissão", 0))
+    _erro(cur, psycopg2.errors.ForeignKeyViolation, cen.amostra, om, c)
+
+
+def test_atividade_de_cq_tem_medida_e_etapa_so_aceita_a_sua_fase(cen, psycopg2):
+    cur = cen.cur
+
+    def atividade(fase, medida):
+        cur.execute(
+            "INSERT INTO mapcartacomp.atividade (cod_projeto, id_tema, fase, nome, id_medidadequalidade) "
+            "VALUES (5, %s, %s, 'x', (SELECT id FROM mapcartctrl.t_qua_medidadequalidade WHERE nome = %s))",
+            (cen.tema, fase, medida),
+        )
+
+    _erro(cur, psycopg2.errors.CheckViolation, atividade, "cq", None)
+    _erro(cur, psycopg2.errors.CheckViolation, atividade, "aquisicao", "Omissão")
+    # Medida fora do catálogo de CQ do Feixe (Acurácia Posicional não é semeada).
+    _erro(cur, psycopg2.errors.ForeignKeyViolation, atividade, "cq", "Acurácia Posicional")
+
+    def ligar(etapa, ativ):
+        cur.execute(
+            "INSERT INTO mapcartacomp.fluxo_etapa_atividade (id_fluxo_etapa, id_atividade) VALUES (%s, %s)",
+            (etapa, ativ),
+        )
+
+    _erro(cur, psycopg2.errors.CheckViolation, ligar, cen.etapa["cq"], cen.ativ["aquisicao"])
+    outro_tema = _um(cur, "INSERT INTO mapcartacomp.tema (nome) VALUES ('teste_regras_2') RETURNING id")
+    de_outro_tema = _um(
+        cur,
+        "INSERT INTO mapcartacomp.atividade (cod_projeto, id_tema, fase, nome) VALUES (5, %s, 'aquisicao', 'y') "
+        "RETURNING id",
+        (outro_tema,),
+    )
+    _erro(cur, psycopg2.errors.CheckViolation, ligar, cen.etapa["aquisicao"], de_outro_tema)
 
 
 def test_status_nacional_e_revisao_seguem_o_supervisor(cen):
@@ -268,16 +385,19 @@ def test_views_de_compatibilidade(cen):
     eu = _um(cur, "SELECT current_user")
     cq1 = cen.passagem("cq", "concluida")
     cq2 = cen.passagem("cq", "em_andamento", instancia=2)
-    p1, p2 = _plano(cen, cq1, 2), _plano(cen, cq2, 2)
-    a1 = _amostras(cen, p1, cen.carga(cq1, responsavel=eu, plano=p1))
-    a2 = _amostras(cen, p2, cen.carga(cq2, responsavel=eu, plano=p2, x=-44.3))
-    cur.execute("SELECT id_cq_amostra FROM mapcartacomp.vw_cq_amostra WHERE id_cq_amostra = ANY(%s)",
+    a1, a2 = {}, {}
+    for m in MEDIDAS:
+        p1, p2 = cen.plano(cq1, m, 2), cen.plano(cq2, m, 2)
+        a1[m] = cen.amostra(p1, cen.carga(cq1, responsavel=eu, plano=p1))
+        a2[m] = cen.amostra(p2, cen.carga(cq2, responsavel=eu, plano=p2, x=-44.3))
+    cur.execute("SELECT id_cq_amostra, elemento FROM mapcartacomp.vw_cq_amostra WHERE id_cq_amostra = ANY(%s)",
                 (list(a1.values()) + list(a2.values()),))  # fmt: skip
-    assert sorted(r[0] for r in cur.fetchall()) == sorted(a2.values())
+    assert sorted(cur.fetchall()) == sorted((a, m) for m, a in a2.items())
     cur.execute("UPDATE mapcartacomp.vw_cq_amostra SET status = 0, observacao = 'x' WHERE id_cq_amostra = %s",
-                (a2["Nome"],))  # fmt: skip
-    assert _um(cur, "SELECT status FROM mapcartacomp.cq_amostra WHERE id = %s", (a2["Nome"],)) == 0
-    assert _um(cur, "SELECT count(*) FROM mapcartacomp.vw_cq_amostra_all WHERE id_cq_amostra = %s", (a1["Nome"],)) == 1
+                (a2["Nome Geográfico"],))  # fmt: skip
+    assert _um(cur, "SELECT status FROM mapcartacomp.cq_amostra WHERE id = %s", (a2["Nome Geográfico"],)) == 0
+    assert _um(cur, "SELECT count(*) FROM mapcartacomp.vw_cq_amostra_all WHERE id_cq_amostra = %s",
+               (a1["Nome Geográfico"],)) == 1  # fmt: skip
 
     # Ocorrência inserida pela view sem lote: herda lote e carga da carga do usuário que contém o ponto.
     u = _uid()
@@ -289,7 +409,8 @@ def test_views_de_compatibilidade(cen):
     )
     lote, carga, meu = cur.fetchone()
     assert lote == cen.lote and meu
-    assert carga == _um(cur, "SELECT id_carga_trabalho FROM mapcartacomp.cq_amostra WHERE id = %s", (a2["Nome"],))
+    cur.execute("SELECT id_carga_trabalho FROM mapcartacomp.cq_amostra WHERE id = ANY(%s)", (list(a2.values()),))
+    assert carga in {r[0] for r in cur.fetchall()}
     assert _um(cur, "SELECT uf FROM mapcartacomp.cq_inspecao WHERE uuid = %s", (u,)) == "DF"
 
 
@@ -306,15 +427,17 @@ def test_ctrl_lote(cen):
     assert cur.fetchone() == ("2534-1", "EM_PRODUCAO", "Etapa aquisicao", 4, 3, 75)
     cen.mudar(aq1, "concluida")
     cq1 = cen.passagem("cq", "em_andamento")
-    p = _plano(cen, cq1, 0)
-    a = _amostras(cen, p, cen.carga(cq1, plano=p))
-    cur.execute("UPDATE mapcartacomp.cq_amostra SET status = 0 WHERE id = %s", (a["Omissão"],))
+    p = cen.plano(cq1, "Omissão", 0)
+    a = cen.amostra(p, cen.carga(cq1, plano=p))
+    pc = cen.plano(cq1, "Comissão", 0)
+    cen.amostra(pc, cen.carga(cq1, plano=pc))
+    cur.execute("UPDATE mapcartacomp.cq_amostra SET status = 0 WHERE id = %s", (a,))
     cur.execute(
-        "SELECT ultimo_cq_resultado, ultimo_cq_por_elemento -> 'Omissão' ->> 'nao_conformes', etapa "
-        "FROM mapcartacomp.ctrl_lote WHERE id_lote = %s",
+        "SELECT ultimo_cq_resultado, ultimo_cq_por_elemento -> 'Omissão' ->> 'nao_conformes', "
+        "ultimo_cq_por_elemento -> 'Comissão' ->> 'pendentes', etapa FROM mapcartacomp.ctrl_lote WHERE id_lote = %s",
         (cen.lote,),
     )
-    assert cur.fetchone() == ("pendente", "1", "Etapa cq")
+    assert cur.fetchone() == ("reprovado", "1", "1", "Etapa cq")
 
 
 def test_carga_fora_da_folha_e_recusada(cen, psycopg2):

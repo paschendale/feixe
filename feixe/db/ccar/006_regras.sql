@@ -1,6 +1,6 @@
 -- 006: regras no banco (PL/pgSQL compatível com PostgreSQL 9.6). Idempotente.
 --
--- Derivações e uma validação (carga dentro da folha). Nenhuma regra muda a etapa de um lote: quem avança, pula,
+-- Derivações e validações (atividade da carga dentro da etapa, carga dentro da folha). Nenhuma regra muda a etapa de um lote: quem avança, pula,
 -- volta ou repete etapas é o supervisor. Aqui se calcula o que decorre disso (status nacional, revisão, etapa atual) e
 -- o que decorre das avaliações (carga de CQ concluída, resultado do plano), que só alimenta "prontas para avançar".
 
@@ -19,9 +19,9 @@ DO $$
 DECLARE
     t text;
 BEGIN
-    FOREACH t IN ARRAY ARRAY['tema', 'atividade', 'fluxo', 'fluxo_etapa', 'cq_elemento', 'usuario_feixe', 'calendario',
-                             'lote', 'lote_etapa', 'lote_etapa_hist', 'carga_trabalho', 'cq_plano', 'cq_amostra',
-                             'cq_inspecao']
+    FOREACH t IN ARRAY ARRAY['tema', 'atividade', 'fluxo', 'fluxo_etapa', 'fluxo_etapa_atividade', 'cq_elemento',
+                             'usuario_feixe', 'calendario', 'lote', 'lote_etapa', 'lote_etapa_hist', 'carga_trabalho',
+                             'cq_plano', 'cq_amostra', 'cq_inspecao']
     LOOP
         EXECUTE format('DROP TRIGGER IF EXISTS t00_atualizado ON mapcartacomp.%I', t);
         EXECUTE format('CREATE TRIGGER t00_atualizado BEFORE UPDATE ON mapcartacomp.%I '
@@ -117,21 +117,18 @@ CREATE TRIGGER t10_avaliacao BEFORE INSERT OR UPDATE ON mapcartacomp.cq_amostra
     FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_amostra_avaliacao();
 
 -- resultado do plano de CQ ----------------------------------------------------------------------------------------
--- pendente enquanto houver amostra sem avaliação (ou sem Ac definido); reprovado se em algum elemento os não
--- conformes excedem Ac; aprovado caso contrário. Não muda etapa nenhuma.
+-- O plano é de uma medida só (a da sua atividade): pendente enquanto houver amostra sem avaliação (ou sem Ac
+-- definido); reprovado se os não conformes excedem Ac; aprovado caso contrário. Não muda etapa nenhuma.
 
 CREATE OR REPLACE FUNCTION mapcartacomp.f_cq_plano_resultado(p_plano integer, p_ac integer) RETURNS text
 LANGUAGE sql STABLE AS $$
     SELECT CASE
-        WHEN count(*) = 0 OR count(*) FILTER (WHERE status IS NULL) > 0 OR p_ac IS NULL THEN 'pendente'
-        WHEN max(nc) > p_ac THEN 'reprovado'
+        WHEN count(*) = 0 OR count(*) FILTER (WHERE a.status IS NULL) > 0 OR p_ac IS NULL THEN 'pendente'
+        WHEN count(*) FILTER (WHERE a.status = 0) > p_ac THEN 'reprovado'
         ELSE 'aprovado'
     END
-    FROM (
-        SELECT a.status, count(*) FILTER (WHERE a.status = 0) OVER (PARTITION BY a.elemento) AS nc
-        FROM mapcartacomp.cq_amostra a
-        WHERE a.id_cq_plano = p_plano
-    ) s
+    FROM mapcartacomp.cq_amostra a
+    WHERE a.id_cq_plano = p_plano
 $$;
 
 CREATE OR REPLACE FUNCTION mapcartacomp.f_cq_plano_recalcular() RETURNS trigger
@@ -146,8 +143,8 @@ DROP TRIGGER IF EXISTS t10_resultado ON mapcartacomp.cq_plano;
 CREATE TRIGGER t10_resultado BEFORE UPDATE ON mapcartacomp.cq_plano
     FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_cq_plano_recalcular();
 
--- Depois de mudar amostras: a carga de CQ conclui quando todas as suas amostras têm status (e volta a pendente se
--- alguma avaliação for desfeita), e o plano é recalculado.
+-- Depois de mudar a amostra: a carga de CQ conclui quando a sua amostra tem status (e volta a pendente se a
+-- avaliação for desfeita), e o plano é recalculado.
 
 -- Roda com os direitos do dono do schema, para que a derivação não dependa dos privilégios de quem avaliou.
 CREATE OR REPLACE FUNCTION mapcartacomp.f_amostra_derivar_um(p_carga integer, p_plano integer) RETURNS void
@@ -227,12 +224,11 @@ DECLARE
     v_status text;
     v_revisao integer;
 BEGIN
-    SELECT le.id, le.situacao, fe_at.fase, fa.status_nacional, le.resultado
+    SELECT le.id, le.situacao, fe.fase, fa.status_nacional, le.resultado
       INTO v_atual, v_situacao, v_fase, v_status_fase, v_resultado
       FROM mapcartacomp.lote_etapa le
       JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa
-      JOIN mapcartacomp.atividade fe_at ON fe_at.id = fe.id_atividade
-      JOIN mapcartacomp.fase fa ON fa.codigo = fe_at.fase
+      JOIN mapcartacomp.fase fa ON fa.codigo = fe.fase
      WHERE le.id_lote = p_lote AND le.situacao <> 'pulada'
      ORDER BY CASE le.situacao WHEN 'em_andamento' THEN 0 WHEN 'concluida' THEN 1 ELSE 2 END,
               CASE WHEN le.situacao = 'pendente' THEN fe.ordem END,
@@ -282,6 +278,57 @@ $$;
 DROP TRIGGER IF EXISTS t20_derivar ON mapcartacomp.lote_etapa;
 CREATE TRIGGER t20_derivar AFTER INSERT OR UPDATE OR DELETE ON mapcartacomp.lote_etapa
     FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_lote_etapa_derivar();
+
+-- Atividades da etapa ------------------------------------------------------------------------------------------------
+-- A atividade ligada a uma etapa do fluxo tem a fase da etapa e o projeto e o tema do fluxo. Carga e plano de CQ de
+-- uma passagem só podem ser de uma atividade da etapa dessa passagem.
+
+CREATE OR REPLACE FUNCTION mapcartacomp.f_etapa_atividade_valida() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NOT EXISTS (SELECT 1
+                     FROM mapcartacomp.fluxo_etapa fe
+                     JOIN mapcartacomp.fluxo f ON f.id = fe.id_fluxo
+                     JOIN mapcartacomp.atividade a ON a.id = NEW.id_atividade
+                    WHERE fe.id = NEW.id_fluxo_etapa AND a.fase = fe.fase
+                      AND a.cod_projeto = f.cod_projeto AND a.id_tema = f.id_tema) THEN
+        RAISE EXCEPTION 'atividade % não serve à etapa %: fase, projeto ou tema diferente', NEW.id_atividade,
+            NEW.id_fluxo_etapa USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS t05_valida ON mapcartacomp.fluxo_etapa_atividade;
+CREATE TRIGGER t05_valida BEFORE INSERT OR UPDATE ON mapcartacomp.fluxo_etapa_atividade
+    FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_etapa_atividade_valida();
+
+CREATE OR REPLACE FUNCTION mapcartacomp.f_atividade_na_etapa() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NOT EXISTS (SELECT 1
+                     FROM mapcartacomp.lote_etapa le
+                     JOIN mapcartacomp.fluxo_etapa_atividade fa ON fa.id_fluxo_etapa = le.id_fluxo_etapa
+                    WHERE le.id = NEW.id_lote_etapa AND fa.id_atividade = NEW.id_atividade) THEN
+        RAISE EXCEPTION 'atividade % não é da etapa da passagem %', NEW.id_atividade, NEW.id_lote_etapa
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+DO $$
+DECLARE
+    t text;
+BEGIN
+    FOREACH t IN ARRAY ARRAY['carga_trabalho', 'cq_plano']
+    LOOP
+        EXECUTE format('DROP TRIGGER IF EXISTS t04_atividade ON mapcartacomp.%I', t);
+        EXECUTE format('CREATE TRIGGER t04_atividade BEFORE INSERT OR UPDATE OF id_atividade, id_lote_etapa '
+                       'ON mapcartacomp.%I FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_atividade_na_etapa()', t);
+    END LOOP;
+END
+$$;
 
 -- Grade estatística do IBGE -----------------------------------------------------------------------------------------
 -- Célula calculada por fórmula na projeção equivalente de Albers sobre SIRGAS2000, a mesma conta de
