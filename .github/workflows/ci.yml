@@ -8,7 +8,8 @@ on:
 jobs:
   python:
     name: Lint e testes (Python 3.9, piso do QGIS 3.22)
-    runs-on: ubuntu-latest
+    # O ubuntu-latest (26.04) não tem mais Python 3.9 no setup-python; o 22.04 ainda tem.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
