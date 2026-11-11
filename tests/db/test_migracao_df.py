@@ -22,6 +22,7 @@ MOTIVOS_ESPERADOS = {
     "lote de teste (u_3448274)",
     "mais da metade da área fora da folha do rótulo",
     "CQ de ADE sem amostra (planejamento incompleto)",
+    "CQ sem amostra",
     "correção de inspeção fora da folha do rótulo",
     "FINAL: nenhuma folha tem metade da carga",
     "CORTE_M_DAGUA: nenhuma folha tem metade da carga",
@@ -70,8 +71,15 @@ def test_nada_se_perde_sem_registro(convertido):
     assert c["cargas convertidas"] + c["cargas ignoradas"] == c["cargas na origem"]
     assert c["amostras convertidas"] + sum(rel.amostras_ignoradas.values()) == c["amostras na origem"]
     assert set(rel.ignoradas) <= MOTIVOS_ESPERADOS, set(rel.ignoradas) - MOTIVOS_ESPERADOS
+    # Uma carga por amostra no CQ: cada carga de CQ convertida tem exatamente uma amostra.
     cargas, amostras, *_ = convertido["contagens"][0]
-    assert (cargas, amostras) == (c["cargas convertidas"], c["amostras convertidas"])
+    assert (cargas, amostras) == (c["cargas gravadas"], c["amostras convertidas"])
+    with convertido["ccar"].cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM mapcartacomp.carga_trabalho c WHERE c.uf = 'DF' AND c.id_cq_plano IS NOT NULL "
+            "AND (SELECT count(*) FROM mapcartacomp.cq_amostra a WHERE a.id_carga_trabalho = c.id) <> 1"
+        )
+        assert cur.fetchone()[0] == 0
 
 
 def test_rodar_de_novo_nao_duplica(convertido):
@@ -158,8 +166,8 @@ def test_ctrl_lote_reproduz_ctrl_folha_revisao(convertido):
         esperado = (r[0], r[1] or 0, r[2:5], r[5:8], r[8:11])
         obtido = (
             n["perc"],
-            ((cq or {}).get("Nome") or {}).get("amostras", 0),
-            el(cq, "Nome"),
+            ((cq or {}).get("Nome Geográfico") or {}).get("amostras", 0),
+            el(cq, "Nome Geográfico"),
             el(cq, "Omissão"),
             el(cq, "Comissão"),
         )
@@ -170,3 +178,35 @@ def test_ctrl_lote_reproduz_ctrl_folha_revisao(convertido):
     print(f"\nctrl_lote_etapa x ctrl_folha_revisao: {comparadas} folhas-revisão de hidrografia comparadas")
     assert not diferentes, diferentes[:5]
     assert comparadas >= 5
+
+
+def test_cq_tem_uma_atividade_e_um_plano_por_medida(convertido):
+    """CQ do DF: atividade por tema + medida; cada passagem tem no máximo um plano por atividade, do tamanho n."""
+    with convertido["ccar"].cursor() as cur:
+        cur.execute(
+            "SELECT t.nome, m.nome FROM mapcartacomp.fluxo f JOIN mapcartacomp.tema t ON t.id = f.id_tema "
+            "JOIN mapcartacomp.fluxo_etapa fe ON fe.id_fluxo = f.id "
+            "JOIN mapcartacomp.fluxo_etapa_atividade fa ON fa.id_fluxo_etapa = fe.id "
+            "JOIN mapcartacomp.atividade a ON a.id = fa.id_atividade "
+            "JOIN mapcartctrl.t_qua_medidadequalidade m ON m.id = a.id_medidadequalidade "
+            "WHERE f.uf = 'DF' AND fe.fase = 'cq'"
+        )
+        assert set(cur.fetchall()) == {
+            ("Hidrografia", "Nome Geográfico"),
+            ("Hidrografia", "Omissão"),
+            ("Hidrografia", "Comissão"),
+            ("Áreas densamente edificadas", "Omissão"),
+            ("Áreas densamente edificadas", "Acurácia Temporal"),
+            ("Áreas densamente edificadas", "Comissão"),
+            ("Áreas densamente edificadas", "Consistência Topológica"),
+        }
+        cur.execute(
+            "SELECT count(*) FROM (SELECT id_lote_etapa, id_atividade FROM mapcartacomp.cq_plano WHERE uf = 'DF' "
+            "GROUP BY 1, 2 HAVING count(*) > 1) s"
+        )
+        assert cur.fetchone()[0] == 0
+        cur.execute(
+            "SELECT count(*) FROM mapcartacomp.cq_plano p WHERE p.uf = 'DF' AND p.tamanho_amostra_n <> "
+            "(SELECT count(*) FROM mapcartacomp.carga_trabalho c WHERE c.id_cq_plano = p.id)"
+        )
+        assert cur.fetchone()[0] == 0

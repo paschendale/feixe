@@ -13,9 +13,12 @@ Mapeamento (decisões no build log do projeto):
 - folha_revisao "2534-3" -> lote 2534 do tema, passagem de etapa na revisão 3;
 - "NNNN-E" e "NNNN-R" -> correção de inspeção; "FINAL" -> correção topológica; "INSUMO_NOME" e "CORTE_M_DAGUA" ->
   revisões pontuais que não contam revisão; estas três são repartidas pela folha onde está a maior parte da carga;
-- CQ: um plano retroativo por passagem (na ADE, dois: omissão + acurácia temporal na grade completa, comissão +
-  consistência topológica nas células com ADE). O elemento vem da amostra, não da atividade da carga. A letra-código
-  é a do tamanho de amostra tabelado mais próximo do n observado; LQA e Ac ficam abertos;
+- CQ: uma atividade por tema + medida (o nome da medida é o do SGBC) e um plano retroativo por medida em cada
+  passagem. Cada amostra de origem vira uma carga da atividade da sua medida, com uma amostra: a carga de hidrografia
+  com três amostras (nome, omissão, comissão) vira três cargas na mesma célula. A medida vem da amostra, não da
+  atividade da carga. Na ADE, omissão e acurácia temporal foram sorteadas na grade completa e comissão e consistência
+  topológica nas células com ADE. A letra-código é a do tamanho de amostra tabelado mais próximo do n observado; LQA e
+  Ac ficam abertos;
 - ignorados (e listados no relatório): atividade nula, massa d'água (não executado), "NNNN-X", "SHOW",
   "u_3448274", CQ sem amostras e cargas com mais da metade da área fora da folha (exceto grupos de CQ inteiros fora
   da folha do rótulo, que são erro de digitação do rótulo e vão para a folha onde estão).
@@ -38,58 +41,73 @@ FUSO = "America/Sao_Paulo"
 
 TEMAS = {"hid": "Hidrografia", "ade": "Áreas densamente edificadas", "lml": "LML"}
 
-# chave: (tema, fase, nome, geracao, largura, altura, unidade, elementos)
+# Medidas de qualidade (nome em mapcartctrl.t_qua_medidadequalidade) das atividades de CQ do DF.
+NOME, OMISSAO, COMISSAO = "Nome Geográfico", "Omissão", "Comissão"
+ACURACIA, TOPOLOGIA = "Acurácia Temporal", "Consistência Topológica"
+
+# chave: (tema, fase, nome, geracao, largura, altura, unidade, medida de qualidade)
 _HID = "BC100 - Hidrografia"
 _ADE = "BC100 - Áreas densamente edificadas"
 ATIVIDADES = {
     "hid_aq": ("hid", "aquisicao", f"Aquisição {_HID}", "grade", 0.05, 0.05, "grau", None),
-    "hid_cq": ("hid", "cq", f"CQ {_HID}", "amostra_area", None, None, None, ["Nome", "Omissão", "Comissão"]),
+    "hid_cq_nome": ("hid", "cq", f"CQ {_HID} - {NOME}", "amostra_area", None, None, None, NOME),
+    "hid_cq_omi": ("hid", "cq", f"CQ {_HID} - {OMISSAO}", "amostra_area", None, None, None, OMISSAO),
+    "hid_cq_com": ("hid", "cq", f"CQ {_HID} - {COMISSAO}", "amostra_area", None, None, None, COMISSAO),
     "hid_ci": ("hid", "correcao_inspecao", f"Correção de inspeção {_HID}", "manual", None, None, None, None),
     "hid_ct": ("hid", "correcao_topologica", f"Correção topológica {_HID}", "manual", None, None, None, None),
     "hid_gcq": ("hid", "envio_gcq", f"Envio à GCQ {_HID}", "nenhuma", None, None, None, None),
     "hid_ins": ("hid", "revisao", f"Revisão pontual {_HID} - nomes de insumo", "grade", 0.05, 0.05, "grau", None),
     "hid_cor": ("hid", "revisao", f"Revisão pontual {_HID} - corte de massa d'água", "manual", None, None, None, None),
     "ade_aq": ("ade", "aquisicao", f"Aquisição {_ADE}", "grade", 0.025, 0.025, "grau", None),
-    "ade_cq": ("ade", "cq", f"CQ {_ADE}", "amostra_area", None, None, None,
-               ["Omissão", "Acurácia temporal", "Comissão", "Consistência topológica"]),
+    "ade_cq_omi": ("ade", "cq", f"CQ {_ADE} - {OMISSAO}", "amostra_area", None, None, None, OMISSAO),
+    "ade_cq_acu": ("ade", "cq", f"CQ {_ADE} - {ACURACIA}", "amostra_area", None, None, None, ACURACIA),
+    "ade_cq_com": ("ade", "cq", f"CQ {_ADE} - {COMISSAO}", "amostra_area", None, None, None, COMISSAO),
+    "ade_cq_top": ("ade", "cq", f"CQ {_ADE} - {TOPOLOGIA}", "amostra_area", None, None, None, TOPOLOGIA),
     "lml_aq": ("lml", "aquisicao", "Aquisição BC100 - LML", "grade", 0.025, 0.025, "grau", None),
-    "lml_cq": ("lml", "cq", "CQ BC100 - LML", "amostra_area", None, None, None, None),
 }  # fmt: skip
 
-# Fluxos: tema -> (nome, [(chave da etapa, atividade, nome, obrigatória, repetível, conta revisão)])
+# Fluxos: tema -> (nome, [(chave da etapa, fase, [atividades], nome, obrigatória, repetível, conta revisão)]).
+# O CQ de LML nunca teve amostra no DF: a etapa fica sem atividade até a GGC escolher as medidas.
 FLUXOS = {
     "hid": ("DF Hidrografia", [
-        ("aq", "hid_aq", "Aquisição e revisão", True, True, True),
-        ("cq", "hid_cq", "Controle de qualidade", False, True, False),
-        ("ci", "hid_ci", "Correção de inspeção", False, True, False),
-        ("ct", "hid_ct", "Correção topológica", True, True, False),
-        ("gcq", "hid_gcq", "Envio à GCQ", True, True, False),
-        ("ins", "hid_ins", "Revisão pontual: nomes de insumo", False, True, False),
-        ("cor", "hid_cor", "Revisão pontual: corte de massa d'água", False, True, False),
+        ("aq", "aquisicao", ["hid_aq"], "Aquisição e revisão", True, True, True),
+        ("cq", "cq", ["hid_cq_nome", "hid_cq_omi", "hid_cq_com"], "Controle de qualidade", False, True, False),
+        ("ci", "correcao_inspecao", ["hid_ci"], "Correção de inspeção", False, True, False),
+        ("ct", "correcao_topologica", ["hid_ct"], "Correção topológica", True, True, False),
+        ("gcq", "envio_gcq", ["hid_gcq"], "Envio à GCQ", True, True, False),
+        ("ins", "revisao", ["hid_ins"], "Revisão pontual: nomes de insumo", False, True, False),
+        ("cor", "revisao", ["hid_cor"], "Revisão pontual: corte de massa d'água", False, True, False),
     ]),
     "ade": ("DF ADE", [
-        ("aq", "ade_aq", "Aquisição e revisão", True, True, True),
-        ("cq", "ade_cq", "Controle de qualidade", False, True, False),
+        ("aq", "aquisicao", ["ade_aq"], "Aquisição e revisão", True, True, True),
+        ("cq", "cq", ["ade_cq_omi", "ade_cq_acu", "ade_cq_com", "ade_cq_top"], "Controle de qualidade", False, True,
+         False),
     ]),
     "lml": ("DF LML", [
-        ("aq", "lml_aq", "Aquisição e revisão", True, True, True),
-        ("cq", "lml_cq", "Controle de qualidade", False, True, False),
+        ("aq", "aquisicao", ["lml_aq"], "Aquisição e revisão", True, True, True),
+        ("cq", "cq", [], "Controle de qualidade", False, True, False),
     ]),
 }  # fmt: skip
 
+# Elemento gravado no sistema atual -> medida de qualidade.
 ELEMENTOS = {
-    "Nome": "Nome",
-    "nome": "Nome",
-    "Omissão": "Omissão",
-    "Comissão": "Comissão",
-    "Omissão - ADE": "Omissão",
-    "Comissão - ADE": "Comissão",
-    "Acuracia Temporal - ADE": "Acurácia temporal",
-    "Consistência Topológica - ADE": "Consistência topológica",
+    "Nome": NOME,
+    "nome": NOME,
+    "Omissão": OMISSAO,
+    "Comissão": COMISSAO,
+    "Omissão - ADE": OMISSAO,
+    "Comissão - ADE": COMISSAO,
+    "Acuracia Temporal - ADE": ACURACIA,
+    "Consistência Topológica - ADE": TOPOLOGIA,
 }
-ELEMENTOS_ADE = {
-    "area": (["Omissão", "Acurácia temporal"], "todas as células da grade sobre a folha"),
-    "ade": (["Comissão", "Consistência topológica"], "células da grade que intersectam ADE"),
+# Atividade de CQ de cada tema + medida.
+ATIVIDADE_DA_MEDIDA = {(v[0], v[7]): k for k, v in ATIVIDADES.items() if v[1] == "cq"}
+# Universo de sorteio de cada medida na ADE (oficina de 2026-09-29).
+UNIVERSO_ADE = {
+    OMISSAO: "todas as células da grade sobre a folha",
+    ACURACIA: "todas as células da grade sobre a folha",
+    COMISSAO: "células da grade que intersectam ADE",
+    TOPOLOGIA: "células da grade que intersectam ADE",
 }
 
 # Tamanhos de amostra do quadro de amostragem simples (letra-código -> n).
@@ -346,19 +364,33 @@ def _referencias(cur, rel) -> dict:
             (nome,),
         )
         temas[k] = cur.fetchone()[0]
+    # Medidas das atividades de CQ, pelo nome no SGBC. Acurácia temporal não é núcleo da GCQ: o DF a acrescenta ao
+    # catálogo de CQ do Feixe (as núcleo já vêm do 002).
+    medidas = {}
+    for nome in sorted({v[7] for v in ATIVIDADES.values() if v[7]}):
+        cur.execute("SELECT id FROM mapcartctrl.t_qua_medidadequalidade WHERE nome = %s", (nome,))
+        linha = cur.fetchone()
+        if linha is None:
+            raise RuntimeError(f"medida de qualidade {nome!r} ausente em mapcartctrl.t_qua_medidadequalidade")
+        medidas[nome] = linha[0]
+    cur.execute(
+        "INSERT INTO mapcartacomp.cq_elemento (id_medidadequalidade, nucleo, ordem) VALUES (%s, false, 10) "
+        "ON CONFLICT (id_medidadequalidade) DO NOTHING",
+        (medidas[ACURACIA],),
+    )
     ativ = {}
-    for k, (tema, fase, nome, geracao, larg, alt, unid, elementos) in ATIVIDADES.items():
+    for k, (tema, fase, nome, geracao, larg, alt, unid, medida) in ATIVIDADES.items():
         cur.execute(
             "INSERT INTO mapcartacomp.atividade (cod_projeto, id_tema, fase, nome, geracao, celula_largura, "
-            "celula_altura, celula_unidade, elementos_cq) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "celula_altura, celula_unidade, id_medidadequalidade) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (cod_projeto, nome) DO UPDATE SET id_tema = EXCLUDED.id_tema, fase = EXCLUDED.fase, "
             "geracao = EXCLUDED.geracao, celula_largura = EXCLUDED.celula_largura, "
             "celula_altura = EXCLUDED.celula_altura, celula_unidade = EXCLUDED.celula_unidade, "
-            "elementos_cq = EXCLUDED.elementos_cq RETURNING id",
-            (projeto, temas[tema], fase, nome, geracao, larg, alt, unid, elementos),
+            "id_medidadequalidade = EXCLUDED.id_medidadequalidade RETURNING id",
+            (projeto, temas[tema], fase, nome, geracao, larg, alt, unid, medidas.get(medida)),
         )
         ativ[k] = cur.fetchone()[0]
-    fluxos, etapas = {}, {}
+    fluxos, etapas, etapa_ativ = {}, {}, {}
     for tema, (nome, lista) in FLUXOS.items():
         cur.execute(
             "INSERT INTO mapcartacomp.fluxo (cod_projeto, id_tema, uf, nome) VALUES (%s, %s, %s, %s) "
@@ -366,42 +398,76 @@ def _referencias(cur, rel) -> dict:
             (projeto, temas[tema], UF, nome),
         )
         fluxos[tema] = cur.fetchone()[0]
-        for ordem, (chave, a, nome_etapa, obrig, repet, conta) in enumerate(lista, start=1):
+        for ordem, (chave, fase, atividades, nome_etapa, obrig, repet, conta) in enumerate(lista, start=1):
             # A unicidade (fluxo, ordem) é adiável e não serve para ON CONFLICT: atualiza ou insere à mão.
             cur.execute(
-                "UPDATE mapcartacomp.fluxo_etapa SET id_atividade = %s, nome = %s, obrigatoria = %s, repetivel = %s, "
+                "UPDATE mapcartacomp.fluxo_etapa SET fase = %s, nome = %s, obrigatoria = %s, repetivel = %s, "
                 "conta_revisao = %s WHERE id_fluxo = %s AND ordem = %s RETURNING id",
-                (ativ[a], nome_etapa, obrig, repet, conta, fluxos[tema], ordem),
+                (fase, nome_etapa, obrig, repet, conta, fluxos[tema], ordem),
             )
             linha = cur.fetchone()
             if linha is None:
                 cur.execute(
-                    "INSERT INTO mapcartacomp.fluxo_etapa (id_fluxo, ordem, id_atividade, nome, obrigatoria, "
-                    "repetivel, conta_revisao) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                    (fluxos[tema], ordem, ativ[a], nome_etapa, obrig, repet, conta),
+                    "INSERT INTO mapcartacomp.fluxo_etapa (id_fluxo, ordem, fase, nome, obrigatoria, repetivel, "
+                    "conta_revisao) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                    (fluxos[tema], ordem, fase, nome_etapa, obrig, repet, conta),
                 )
                 linha = cur.fetchone()
             etapas[(tema, chave)] = linha[0]
+            ids = [ativ[a] for a in atividades]
+            cur.execute(
+                "DELETE FROM mapcartacomp.fluxo_etapa_atividade WHERE id_fluxo_etapa = %s AND id_atividade <> ALL(%s)",
+                (linha[0], ids),
+            )
+            for i in ids:
+                cur.execute(
+                    "INSERT INTO mapcartacomp.fluxo_etapa_atividade (id_fluxo_etapa, id_atividade) VALUES (%s, %s) "
+                    "ON CONFLICT DO NOTHING",
+                    (linha[0], i),
+                )
+            if len(ids) == 1:
+                etapa_ativ[(tema, chave)] = ids[0]
     cur.execute("SELECT cd_mi::text, id_articulacao_scn FROM mapcartctrl.v_articulacao_scn_100000")
     folhas = dict(cur.fetchall())
-    return {"projeto": projeto, "temas": temas, "fluxos": fluxos, "etapas": etapas, "folhas": folhas}
+    return {
+        "projeto": projeto,
+        "temas": temas,
+        "fluxos": fluxos,
+        "etapas": etapas,
+        "etapa_ativ": etapa_ativ,
+        "ativ": ativ,
+        "folhas": folhas,
+    }
 
 
-def _planos(p: Passagem, amostras_por_carga) -> List[dict]:
-    """Planos retroativos de uma passagem de CQ, com as cargas e amostras de cada um."""
-    if p.tema == "ade":
-        planos = []
-        for chave, (elementos, universo) in ELEMENTOS_ADE.items():
-            cargas = [
-                c
-                for c in p.cargas
-                if ELEMENTOS.get(amostras_por_carga[c["id_carga_trabalho"]][0]["elemento"]) in elementos
-            ]
-            if cargas:
-                planos.append({"chave": chave, "elementos": elementos, "universo": universo, "cargas": cargas})
-        return planos
-    elementos = ["Nome", "Omissão", "Comissão"] if p.tema == "hid" else []
-    return [{"chave": "unico", "elementos": elementos, "universo": None, "cargas": p.cargas}]
+def _planos(p: Passagem, amostras_por_carga, rel: Relatorio) -> List[dict]:
+    """Planos retroativos de uma passagem de CQ: um por medida, com os pares (carga de origem, amostra) dela.
+
+    Carga sem amostra é ignorada (não há medida para dar a ela); amostra de elemento sem atividade também.
+    """
+    por_medida: Dict[str, list] = collections.defaultdict(list)
+    for c in p.cargas:
+        amostras = amostras_por_carga.get(c["id_carga_trabalho"], [])
+        if not amostras:
+            rel.ignorar("CQ sem amostra", c)
+            continue
+        medidas = [ELEMENTOS.get((a["elemento"] or "").strip()) for a in amostras]
+        usadas = [(m, a) for m, a in zip(medidas, amostras) if (p.tema, m) in ATIVIDADE_DA_MEDIDA]
+        if not usadas:
+            rel.ignorar("CQ com elemento fora dos planos", c)  # as amostras contam como "da carga ignorada"
+            continue
+        rel.amostras_ignoradas["elemento sem atividade de CQ no tema"] += len(amostras) - len(usadas)
+        for m, a in usadas:
+            por_medida[m].append((c, a))
+    planos = []
+    for medida, itens in sorted(por_medida.items()):
+        planos.append({
+            "medida": medida,
+            "atividade": ATIVIDADE_DA_MEDIDA[(p.tema, medida)],
+            "universo": UNIVERSO_ADE.get(medida) if p.tema == "ade" else None,
+            "itens": itens,
+        })  # fmt: skip
+    return planos
 
 
 def carregar(ccar, dados: dict, passagens: Dict[tuple, Passagem], amostras_por_carga, rel: Relatorio) -> None:
@@ -433,6 +499,7 @@ def carregar(ccar, dados: dict, passagens: Dict[tuple, Passagem], amostras_por_c
         rel.contagens["lotes"] = len(lotes)
 
         cargas_linhas, amostras_linhas, hist = [], [], []
+        convertidas = set()
         n_planos = 0
         for p in sorted(passagens.values(), key=lambda q: (q.tema, q.folha, q.inicio)):
             if (p.tema, p.folha) not in lotes:
@@ -465,54 +532,53 @@ def carregar(ccar, dados: dict, passagens: Dict[tuple, Passagem], amostras_por_c
             hist.append((uid("lote_etapa_hist", le_uuid), id_le, UF, "importar", p.inicio,
                          f"convertido de bc100ggcdf_apoio ({p.rotulo})"))  # fmt: skip
 
-            planos = _planos(p, amostras_por_carga) if p.etapa == "cq" else [{"chave": None, "cargas": p.cargas}]
-            nos_planos = {c["id_carga_trabalho"] for pl in planos for c in pl["cargas"]}
-            for c in p.cargas:
-                if c["id_carga_trabalho"] not in nos_planos:
-                    rel.ignorar("CQ com elemento fora dos planos", c)
-            for plano in planos:
-                id_plano = None
-                if plano["chave"] is not None:
-                    n = max(collections.Counter(
-                        a["elemento"] for c in plano["cargas"] for a in amostras_por_carga[c["id_carga_trabalho"]]
-                    ).values(), default=0) if p.tema == "ade" else len(plano["cargas"])  # fmt: skip
-                    cur.execute(
-                        "INSERT INTO mapcartacomp.cq_plano (uuid, id_lote_etapa, uf, elementos, orientacao, universo, "
-                        "nivel_inspecao, letra_codigo, tamanho_amostra_n, lqa) "
-                        "VALUES (%s, %s, %s, %s, 'area', %s, %s, %s, %s, %s) ON CONFLICT (uuid) DO UPDATE SET "
-                        "elementos = EXCLUDED.elementos, universo = EXCLUDED.universo, "
-                        "nivel_inspecao = EXCLUDED.nivel_inspecao, letra_codigo = EXCLUDED.letra_codigo, "
-                        "tamanho_amostra_n = EXCLUDED.tamanho_amostra_n, lqa = EXCLUDED.lqa RETURNING id",
-                        (
-                            uid("cq_plano", le_uuid, plano["chave"]),
-                            id_le,
-                            UF,
-                            plano["elementos"],
-                            plano["universo"],
-                            p.nivel,
-                            letra_mais_proxima(n),
-                            n,
-                            4.0 if p.tema == "hid" else None,
-                        ),  # fmt: skip
-                    )
-                    id_plano = cur.fetchone()[0]
-                    n_planos += 1
-                for c in plano["cargas"]:
-                    concluido, concluido_em = c["concluido"], c["concluido_em"]
-                    amostras = amostras_por_carga.get(c["id_carga_trabalho"], []) if id_plano else []
-                    if amostras and not concluido and all(a["status"] is not None for a in amostras):
-                        concluido, concluido_em = True, max(a["criado_em"] for a in amostras)
-                        rel.contagens["cargas de CQ concluídas na conversão (todas as amostras avaliadas)"] += 1
+            if p.etapa != "cq":
+                for c in p.cargas:
                     responsavel = None if c["responsavel"] in (None, "", "DISPONIVEL") else c["responsavel"]
-                    cargas_linhas.append((uid("carga_trabalho", c["id_carga_trabalho"]), id_le, id_plano, UF,
-                                          responsavel, c["geom"], concluido, concluido_em, c["criada_em"]))  # fmt: skip
-                    for a in amostras:
-                        elemento = ELEMENTOS.get(a["elemento"], a["elemento"])
-                        avaliada = a["status"] is not None
-                        amostras_linhas.append((uid("cq_amostra", a["id_cq_amostra"]), id_plano,
-                                                uid("carga_trabalho", c["id_carga_trabalho"]), UF, elemento,
-                                                a["status"], concluido_em if avaliada else None,
-                                                responsavel if avaliada else None, a["criado_em"]))  # fmt: skip
+                    cargas_linhas.append((uid("carga_trabalho", c["id_carga_trabalho"]), id_le,
+                                          ref["etapa_ativ"][(p.tema, p.etapa)], None, UF, responsavel, c["geom"],
+                                          c["concluido"], c["concluido_em"], c["criada_em"]))  # fmt: skip
+                    convertidas.add(c["id_carga_trabalho"])
+                continue
+            for plano in _planos(p, amostras_por_carga, rel):
+                n = len(plano["itens"])
+                id_ativ = ref["ativ"][plano["atividade"]]
+                cur.execute(
+                    "INSERT INTO mapcartacomp.cq_plano (uuid, id_lote_etapa, id_atividade, uf, orientacao, universo, "
+                    "nivel_inspecao, letra_codigo, tamanho_amostra_n, lqa) "
+                    "VALUES (%s, %s, %s, %s, 'area', %s, %s, %s, %s, %s) ON CONFLICT (uuid) DO UPDATE SET "
+                    "id_atividade = EXCLUDED.id_atividade, universo = EXCLUDED.universo, "
+                    "nivel_inspecao = EXCLUDED.nivel_inspecao, letra_codigo = EXCLUDED.letra_codigo, "
+                    "tamanho_amostra_n = EXCLUDED.tamanho_amostra_n, lqa = EXCLUDED.lqa RETURNING id",
+                    (
+                        uid("cq_plano", le_uuid, plano["medida"]),
+                        id_le,
+                        id_ativ,
+                        UF,
+                        plano["universo"],
+                        p.nivel,
+                        letra_mais_proxima(n),
+                        n,
+                        4.0 if p.tema == "hid" else None,
+                    ),  # fmt: skip
+                )
+                id_plano = cur.fetchone()[0]
+                n_planos += 1
+                for c, a in plano["itens"]:
+                    # Uma carga por amostra: concluída se a amostra foi avaliada, na hora de conclusão da carga de
+                    # origem ou, sem ela, na da amostra.
+                    avaliada = a["status"] is not None
+                    concluido_em = (c["concluido_em"] if c["concluido"] else None) or a["criado_em"]
+                    if avaliada and not c["concluido"]:
+                        rel.contagens["cargas de CQ concluídas na conversão (amostra avaliada)"] += 1
+                    responsavel = None if c["responsavel"] in (None, "", "DISPONIVEL") else c["responsavel"]
+                    u_carga = uid("carga_trabalho", c["id_carga_trabalho"], plano["medida"])
+                    cargas_linhas.append((u_carga, id_le, id_ativ, id_plano, UF, responsavel, c["geom"], avaliada,
+                                          concluido_em if avaliada else None, c["criada_em"]))  # fmt: skip
+                    amostras_linhas.append((uid("cq_amostra", a["id_cq_amostra"]), id_plano, u_carga, UF, a["status"],
+                                            concluido_em if avaliada else None, responsavel if avaliada else None,
+                                            a["criado_em"]))  # fmt: skip
+                    convertidas.add(c["id_carga_trabalho"])
         rel.contagens["passagens de etapa"] = len(hist)
         rel.contagens["planos de CQ"] = n_planos
 
@@ -525,22 +591,24 @@ def carregar(ccar, dados: dict, passagens: Dict[tuple, Passagem], amostras_por_c
         ids_carga = {}
         for u, i in _executar_valores(
             cur,
-            "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_cq_plano, uf, responsavel, geom, "
-            "concluido, concluido_em, criado_em) VALUES %s ON CONFLICT (uuid) DO UPDATE SET "
-            "id_lote_etapa = EXCLUDED.id_lote_etapa, id_cq_plano = EXCLUDED.id_cq_plano, "
+            "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_atividade, id_cq_plano, uf, responsavel, "
+            "geom, concluido, concluido_em, criado_em) VALUES %s ON CONFLICT (uuid) DO UPDATE SET "
+            "id_lote_etapa = EXCLUDED.id_lote_etapa, id_atividade = EXCLUDED.id_atividade, "
+            "id_cq_plano = EXCLUDED.id_cq_plano, "
             "responsavel = EXCLUDED.responsavel, geom = EXCLUDED.geom, concluido = EXCLUDED.concluido, "
             "concluido_em = EXCLUDED.concluido_em RETURNING uuid::text, id",
             cargas_linhas,
-            template="(%s, %s, %s, %s, %s, %s::geometry, %s, %s, %s)",
+            template="(%s, %s, %s, %s, %s, %s, %s::geometry, %s, %s, %s)",
         ):
             ids_carga[u] = i
-        rel.contagens["cargas convertidas"] = len(ids_carga)
+        rel.contagens["cargas convertidas"] = len(convertidas)
+        rel.contagens["cargas gravadas"] = len(ids_carga)
 
         _executar_valores(
             cur,
-            "INSERT INTO mapcartacomp.cq_amostra (uuid, id_cq_plano, id_carga_trabalho, uf, elemento, status, "
+            "INSERT INTO mapcartacomp.cq_amostra (uuid, id_cq_plano, id_carga_trabalho, uf, status, "
             "avaliado_em, avaliado_por, criado_em) VALUES %s ON CONFLICT (uuid) DO UPDATE SET "
-            "id_cq_plano = EXCLUDED.id_cq_plano, elemento = EXCLUDED.elemento, status = EXCLUDED.status, "
+            "id_cq_plano = EXCLUDED.id_cq_plano, status = EXCLUDED.status, "
             "avaliado_em = EXCLUDED.avaliado_em, avaliado_por = EXCLUDED.avaliado_por RETURNING id",
             [(a[0], a[1], ids_carga[a[2]], *a[3:]) for a in amostras_linhas],
         )
