@@ -6,13 +6,15 @@ Cada thread abre a própria conexão (psycopg2 não compartilha conexões entre 
 from __future__ import annotations
 
 import socket
-from typing import Optional
+from contextlib import contextmanager
+from typing import Iterator, Optional
 
 import psycopg2
 import psycopg2.extras
 
 from . import config
 from .ambiente import Ambiente
+from .dados import ExecutorPg
 
 
 class SemCredencial(Exception):
@@ -95,5 +97,16 @@ def consultar(amb: Ambiente, sql: str, params=None) -> list:
         with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
             return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+@contextmanager
+def transacao(amb: Ambiente, usuario: str = None, senha: str = None) -> Iterator[ExecutorPg]:
+    """Transação com conexão própria e a credencial do usuário: commit ao sair, rollback em qualquer erro."""
+    conn = conectar(amb, usuario, senha)
+    try:
+        with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            yield ExecutorPg(cur)
     finally:
         conn.close()

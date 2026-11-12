@@ -33,7 +33,10 @@ class FeixePlugin:
         except ambmod.AmbienteInvalido as e:
             self.erro_ambiente = str(e)
         self.servidor = None
+        self.ctx = None
         self.broker = Broker()
+        # Ações que as rotas pedem ao QGIS, por nome; cada item da fase B registra as suas. Rodam na thread principal.
+        self.acoes_qgis = {}
         self.dock = None
         self.acao = None
         self.sinais = _Sinais()
@@ -86,7 +89,11 @@ class FeixePlugin:
             zoom_para=lambda xmin, ymin, xmax, ymax, srid: dispatch.na_thread_principal(
                 self.zoom_para, xmin, ymin, xmax, ymax, srid
             ),
+            transacao=lambda: db.transacao(self.amb),
+            publicar=self.broker.publicar,
+            qgis=self.acao_qgis,
         )
+        self.ctx = ctx
         pasta = os.path.join(raiz_plugin(), "web", "dist")
         self.servidor = ServidorLocal(criar_roteador(ctx), self.broker, pasta).iniciar()
         log.info(f"servidor local em {self.servidor.origem}")
@@ -117,6 +124,8 @@ class FeixePlugin:
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self.iface.mainWindow(), "Feixe", f"Não foi possível guardar a credencial:\n{e}")
             return
+        if self.ctx:
+            self.ctx.esquecer_eu()
         r = dlg.resultado_teste or {}
         schema = "sim" if r.get("schema_feixe") else "não"
         self._publicar_estado(
@@ -169,6 +178,13 @@ class FeixePlugin:
         self._publicar_estado(novo)
 
     # --- QGIS ----------------------------------------------------------------------------------
+    def acao_qgis(self, nome, *args):
+        """Ponte das rotas para o QGIS: despacha a ação registrada para a thread principal e espera o resultado."""
+        fn = self.acoes_qgis.get(nome)
+        if fn is None:
+            raise KeyError(f"ação do QGIS desconhecida: {nome}")
+        return dispatch.na_thread_principal(fn, *args)
+
     def zoom_para(self, xmin, ymin, xmax, ymax, srid=4674):
         canvas = self.iface.mapCanvas()
         origem = QgsCoordinateReferenceSystem(f"EPSG:{srid}")
