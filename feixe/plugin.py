@@ -13,6 +13,7 @@ from qgis.PyQt.QtWidgets import QLabel, QMessageBox
 from .core import ambiente as ambmod
 from .core import camadas, config, db, dispatch, log
 from .core.dados import ErroDados
+from .core.dados import lotes as lotes_dados
 from .core.versao import raiz_plugin, versao_plugin
 from .server.api import Contexto, ErroApi, criar_roteador
 from .server.http import ServidorLocal
@@ -20,6 +21,7 @@ from .server.rotas import camadas as rotas_camadas
 from .server.rotas import cargas as rotas_cargas
 from .server.sse import Broker
 from .ui.barra import BarraFeixe, DialogoCredenciais
+from .ui.ferramentas import FerramentaFolha, SemSelecao, selecao_wkt
 
 
 class _Sinais(QObject):
@@ -53,6 +55,7 @@ class FeixePlugin:
         }
         self.barra = None
         self.rotulo_status = None
+        self.ferramenta_folha = None
         self.sinais = _Sinais()
         self.estado = {"online": False, "usuario": None, "detalhe": "não verificado"}
         self._timer = QTimer()
@@ -265,6 +268,49 @@ class FeixePlugin:
         if self.rotulo_status and progresso:
             p = progresso
             self.rotulo_status.setText(f"Feixe · {p['folha_revisao']} · {p['concluidas']}/{p['total']}")
+
+    # --- ferramentas de mapa do supervisor (B3, B4) ---------------------------------------------
+    def ligar_ferramenta_folhas(self):
+        """Liga o clique no mapa: cada folha clicada vai para o painel pelo evento qgis {acao: folha}."""
+        canvas = self.iface.mapCanvas()
+        if self.ferramenta_folha is None:
+            self.ferramenta_folha = FerramentaFolha(canvas, self._folha_clicada)
+        canvas.setMapTool(self.ferramenta_folha)
+        self.iface.mainWindow().activateWindow()
+        self.iface.messageBar().pushMessage(
+            "Feixe",
+            "Clique nas folhas no mapa para mandá-las ao painel. Troque de ferramenta para parar.",
+            Qgis.Info,
+            6,
+        )
+
+    def _folha_clicada(self, x, y):
+        try:
+            with db.transacao(self.amb) as ex:
+                folha = lotes_dados.folha_no_ponto(ex, x, y)
+        except Exception as e:  # noqa: BLE001
+            self.iface.messageBar().pushMessage("Feixe", f"Não deu para ler a folha: {e}", Qgis.Warning, 6)
+            return
+        if folha is None:
+            self.iface.messageBar().pushMessage("Feixe", "Nenhuma folha 1:100.000 neste ponto.", Qgis.Info, 3)
+            return
+        self.broker.publicar("qgis", {"acao": "folha", "folha": folha})
+        self.iface.messageBar().pushMessage("Feixe", f"Folha {folha['cd_mi']} enviada ao painel.", Qgis.Success, 2)
+
+    def previa_cargas(self, celulas):
+        camada = camadas.mostrar_previa(celulas)
+        ext = camada.extent()
+        self.zoom_para(ext.xMinimum(), ext.yMinimum(), ext.xMaximum(), ext.yMaximum(), 4674)
+
+    def cargas_geradas(self):
+        camadas.remover_previa()
+        camadas.recarregar_cargas()
+
+    def selecao_wkt(self):
+        try:
+            return selecao_wkt(self.iface.activeLayer())
+        except SemSelecao as e:
+            raise ErroApi(400, str(e)) from None
 
     # --- QGIS ----------------------------------------------------------------------------------
     def montar_camadas(self):
