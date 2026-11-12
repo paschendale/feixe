@@ -9,7 +9,8 @@ Com --ensaio tudo é desfeito no fim. Pode ser rodado de novo: os uuid são deri
 cada linha é inserida ou atualizada, nunca duplicada. Precisa de psycopg2 (o Python do QGIS já traz).
 
 Mapeamento (decisões no build log do projeto):
-- atividade -> projeto BC100 + tema + fase; fluxos "DF Hidrografia", "DF ADE" e "DF LML";
+- atividade -> as atividades do BC100 do pré-seed do catálogo (002_referencias.sql), pelo nome; fluxos
+  "DF Hidrografia", "DF ADE" e "DF LML";
 - folha_revisao "2534-3" -> lote 2534 do tema, passagem de etapa na revisão 3;
 - "NNNN-E" e "NNNN-R" -> correção de inspeção; "FINAL" -> correção topológica; "INSUMO_NOME" e "CORTE_M_DAGUA" ->
   revisões pontuais que não contam revisão; estas três são repartidas pela folha onde está a maior parte da carga;
@@ -45,25 +46,26 @@ TEMAS = {"hid": "Hidrografia", "ade": "Áreas densamente edificadas", "lml": "LM
 NOME, OMISSAO, COMISSAO = "Nome Geográfico", "Omissão", "Comissão"
 ACURACIA, TOPOLOGIA = "Acurácia Temporal", "Consistência Topológica"
 
-# chave: (tema, fase, nome, geracao, largura, altura, unidade, medida de qualidade)
+# Atividades do DF: as do pré-seed do catálogo (002_referencias.sql, D-87), procuradas pelo nome; a conversão não as
+# cria nem muda os padrões de geração delas. chave: (tema, fase, nome, medida de qualidade)
 _HID = "BC100 - Hidrografia"
 _ADE = "BC100 - Áreas densamente edificadas"
 ATIVIDADES = {
-    "hid_aq": ("hid", "aquisicao", f"Aquisição {_HID}", "grade", 0.05, 0.05, "grau", None),
-    "hid_cq_nome": ("hid", "cq", f"CQ {_HID} - {NOME}", "amostra_area", None, None, None, NOME),
-    "hid_cq_omi": ("hid", "cq", f"CQ {_HID} - {OMISSAO}", "amostra_area", None, None, None, OMISSAO),
-    "hid_cq_com": ("hid", "cq", f"CQ {_HID} - {COMISSAO}", "amostra_area", None, None, None, COMISSAO),
-    "hid_ci": ("hid", "correcao_inspecao", f"Correção de inspeção {_HID}", "manual", None, None, None, None),
-    "hid_ct": ("hid", "correcao_topologica", f"Correção topológica {_HID}", "manual", None, None, None, None),
-    "hid_gcq": ("hid", "envio_gcq", f"Envio à GCQ {_HID}", "nenhuma", None, None, None, None),
-    "hid_ins": ("hid", "revisao", f"Revisão pontual {_HID} - nomes de insumo", "grade", 0.05, 0.05, "grau", None),
-    "hid_cor": ("hid", "revisao", f"Revisão pontual {_HID} - corte de massa d'água", "manual", None, None, None, None),
-    "ade_aq": ("ade", "aquisicao", f"Aquisição {_ADE}", "grade", 0.025, 0.025, "grau", None),
-    "ade_cq_omi": ("ade", "cq", f"CQ {_ADE} - {OMISSAO}", "amostra_area", None, None, None, OMISSAO),
-    "ade_cq_acu": ("ade", "cq", f"CQ {_ADE} - {ACURACIA}", "amostra_area", None, None, None, ACURACIA),
-    "ade_cq_com": ("ade", "cq", f"CQ {_ADE} - {COMISSAO}", "amostra_area", None, None, None, COMISSAO),
-    "ade_cq_top": ("ade", "cq", f"CQ {_ADE} - {TOPOLOGIA}", "amostra_area", None, None, None, TOPOLOGIA),
-    "lml_aq": ("lml", "aquisicao", "Aquisição BC100 - LML", "grade", 0.025, 0.025, "grau", None),
+    "hid_aq": ("hid", "aquisicao", f"Aquisição {_HID}", None),
+    "hid_cq_nome": ("hid", "cq", f"CQ {_HID} - {NOME}", NOME),
+    "hid_cq_omi": ("hid", "cq", f"CQ {_HID} - {OMISSAO}", OMISSAO),
+    "hid_cq_com": ("hid", "cq", f"CQ {_HID} - {COMISSAO}", COMISSAO),
+    "hid_ci": ("hid", "correcao_inspecao", f"Correção de inspeção {_HID}", None),
+    "hid_ct": ("hid", "correcao_topologica", f"Correção topológica {_HID}", None),
+    "hid_gcq": ("hid", "envio_gcq", f"Envio à GCQ {_HID}", None),
+    "hid_ins": ("hid", "revisao", f"Revisão pontual {_HID} - nomes de insumo", None),
+    "hid_cor": ("hid", "revisao", f"Revisão pontual {_HID} - corte de massa d'água", None),
+    "ade_aq": ("ade", "aquisicao", f"Aquisição {_ADE}", None),
+    "ade_cq_omi": ("ade", "cq", f"CQ {_ADE} - {OMISSAO}", OMISSAO),
+    "ade_cq_acu": ("ade", "cq", f"CQ {_ADE} - {ACURACIA}", ACURACIA),
+    "ade_cq_com": ("ade", "cq", f"CQ {_ADE} - {COMISSAO}", COMISSAO),
+    "ade_cq_top": ("ade", "cq", f"CQ {_ADE} - {TOPOLOGIA}", TOPOLOGIA),
+    "lml_aq": ("lml", "aquisicao", "Aquisição BC100 - LML", None),
 }  # fmt: skip
 
 # Fluxos: tema -> (nome, [(chave da etapa, fase, [atividades], nome, obrigatória, repetível, conta revisão)]).
@@ -101,7 +103,7 @@ ELEMENTOS = {
     "Consistência Topológica - ADE": TOPOLOGIA,
 }
 # Atividade de CQ de cada tema + medida.
-ATIVIDADE_DA_MEDIDA = {(v[0], v[7]): k for k, v in ATIVIDADES.items() if v[1] == "cq"}
+ATIVIDADE_DA_MEDIDA = {(v[0], v[3]): k for k, v in ATIVIDADES.items() if v[1] == "cq"}
 # Universo de sorteio de cada medida na ADE (oficina de 2026-09-29).
 UNIVERSO_ADE = {
     OMISSAO: "todas as células da grade sobre a folha",
@@ -356,40 +358,24 @@ def _executar_valores(cur, sql, linhas, template=None, page_size=500):
 def _referencias(cur, rel) -> dict:
     cur.execute("SELECT cod_projeto FROM mapcartctrl.t_projeto WHERE nom_projeto = %s", (PROJETO,))
     projeto = cur.fetchone()[0]
+    # Temas e atividades vêm do pré-seed do catálogo (002_referencias.sql): aqui só se procura pelo nome.
     temas = {}
     for k, nome in TEMAS.items():
-        cur.execute(
-            "INSERT INTO mapcartacomp.tema (nome) VALUES (%s) ON CONFLICT (nome) DO UPDATE SET nome = EXCLUDED.nome "
-            "RETURNING id",
-            (nome,),
-        )
-        temas[k] = cur.fetchone()[0]
-    # Medidas das atividades de CQ, pelo nome no SGBC. Acurácia temporal não é núcleo da GCQ: o DF a acrescenta ao
-    # catálogo de CQ do Feixe (as núcleo já vêm do 002).
-    medidas = {}
-    for nome in sorted({v[7] for v in ATIVIDADES.values() if v[7]}):
-        cur.execute("SELECT id FROM mapcartctrl.t_qua_medidadequalidade WHERE nome = %s", (nome,))
+        cur.execute("SELECT id FROM mapcartacomp.tema WHERE nome = %s", (nome,))
         linha = cur.fetchone()
         if linha is None:
-            raise RuntimeError(f"medida de qualidade {nome!r} ausente em mapcartctrl.t_qua_medidadequalidade")
-        medidas[nome] = linha[0]
-    cur.execute(
-        "INSERT INTO mapcartacomp.cq_elemento (id_medidadequalidade, nucleo, ordem) VALUES (%s, false, 10) "
-        "ON CONFLICT (id_medidadequalidade) DO NOTHING",
-        (medidas[ACURACIA],),
-    )
+            raise RuntimeError(f"tema {nome!r} ausente: aplique as migrações (pré-seed do 002) antes da conversão")
+        temas[k] = linha[0]
     ativ = {}
-    for k, (tema, fase, nome, geracao, larg, alt, unid, medida) in ATIVIDADES.items():
+    for k, (tema, fase, nome, _medida) in ATIVIDADES.items():
         cur.execute(
-            "INSERT INTO mapcartacomp.atividade (cod_projeto, id_tema, fase, nome, geracao, celula_largura, "
-            "celula_altura, celula_unidade, id_medidadequalidade) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
-            "ON CONFLICT (cod_projeto, nome) DO UPDATE SET id_tema = EXCLUDED.id_tema, fase = EXCLUDED.fase, "
-            "geracao = EXCLUDED.geracao, celula_largura = EXCLUDED.celula_largura, "
-            "celula_altura = EXCLUDED.celula_altura, celula_unidade = EXCLUDED.celula_unidade, "
-            "id_medidadequalidade = EXCLUDED.id_medidadequalidade RETURNING id",
-            (projeto, temas[tema], fase, nome, geracao, larg, alt, unid, medidas.get(medida)),
+            "SELECT id, id_tema, fase FROM mapcartacomp.atividade WHERE cod_projeto = %s AND nome = %s",
+            (projeto, nome),
         )
-        ativ[k] = cur.fetchone()[0]
+        linha = cur.fetchone()
+        if linha is None or (linha[1], linha[2]) != (temas[tema], fase):
+            raise RuntimeError(f"atividade {nome!r} ausente ou diferente no pré-seed do 002 (tema e fase)")
+        ativ[k] = linha[0]
     fluxos, etapas, etapa_ativ = {}, {}, {}
     for tema, (nome, lista) in FLUXOS.items():
         cur.execute(
