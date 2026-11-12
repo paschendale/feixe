@@ -165,3 +165,33 @@ export type ResultadoCriacao = {
   criados: { cd_mi?: string; nome?: string; id_lote: number }[]
   existentes: { cd_mi: string; id_lote: number; uf: string }[]
 }
+
+export type Atividade = {
+  id: number
+  nome: string
+  cod_projeto: number
+  projeto: string
+  id_tema: number
+  tema: string
+  fase: string
+  fase_nome: string
+  geracao: string | null
+  grade_nivel: number | null
+  id_medidadequalidade: number | null
+  medida: string | null
+  ativo: boolean
+  em_uso: boolean
+  tem_cargas: boolean
+}
+
+export type Tema = { id: number; nome: string; ativo: boolean; atividades: number }
+
+export type Catalogo = {
+  temas: Tema[]
+  atividades: Atividade[]
+  elementos_cq: { id: number; nome: string; nucleo: boolean; fracao_critica: number; ativo: boolean }[]
+  fases: { codigo: string; nome: string; ordem: number; status_nacional: string }[]
+  projetos: { cod_projeto: number; nome: string }[]
+  geracoes: string[]
+  niveis_grade: number[]
+}

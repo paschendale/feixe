@@ -2,6 +2,7 @@ import type { ComponentType } from 'react'
 import { ClipboardList, Info, ListOrdered, Map, Network, Settings2, Users } from 'lucide-react'
 import type { Papel } from '@/lib/api'
 import EmConstrucao from './EmConstrucao'
+import Atividades from './atividades/Atividades'
 import Folhas from './folhas/Folhas'
 import MinhasCargas from './MinhasCargas'
 import Sobre from './Sobre'
@@ -24,7 +25,7 @@ export const TELAS: Tela[] = [
   { id: 'equipe', rotulo: 'Equipe', icone: Users, papeis: ['supervisor'], componente: emBreve('B5') },
   { id: 'filas', rotulo: 'Filas', icone: ListOrdered, papeis: ['supervisor'], componente: emBreve('B8') },
   { id: 'fluxos', rotulo: 'Fluxos', icone: Network, papeis: ['supervisor', 'gerente'], componente: emBreve('B6') },
-  { id: 'atividades', rotulo: 'Atividades', icone: Settings2, papeis: [], componente: emBreve('B7') },
+  { id: 'atividades', rotulo: 'Atividades', icone: Settings2, papeis: [], componente: Atividades },
   { id: 'sobre', rotulo: 'Sobre', icone: Info, papeis: [], componente: Sobre },
 ]
 

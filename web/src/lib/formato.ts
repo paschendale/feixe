@@ -12,3 +12,17 @@ export function mesAno(iso: string | null) {
 }
 
 export const plural = (n: number, um: string, varios: string) => `${num(n)} ${n === 1 ? um : varios}`
+
+// Nível da grade estatística: 5000 -> "5 km", 2500 -> "2,5 km", 200 -> "200 m".
+export function nivelGrade(m: number | null) {
+  if (m == null) return '—'
+  return m >= 1000 ? `${(m / 1000).toLocaleString('pt-BR')} km` : `${m} m`
+}
+
+export const GERACAO: Record<string, string> = {
+  grade: 'Grade estatística',
+  amostra_area: 'Amostra por área',
+  amostra_feicao: 'Amostra por feição',
+  manual: 'Manual',
+  nenhuma: 'Sem cargas',
+}
