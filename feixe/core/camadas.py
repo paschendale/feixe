@@ -99,6 +99,9 @@ def _por_responsavel(camada: QgsVectorLayer, responsaveis: List[Dict]) -> None:
             {"color": f"{cor.red()},{cor.green()},{cor.blue()},110", "outline_color": "50,50,50,200"}
         )
         categorias.append(QgsRendererCategory(r["conta"], simbolo, f"{r['nome']} ({r['cargas']})"))
+    # Valor vazio = "todos os outros": quem recebeu cargas depois de montar aparece em cinza até remontar.
+    outros = QgsFillSymbol.createSimple({"color": "150,150,150,90", "outline_color": "80,80,80,200"})
+    categorias.append(QgsRendererCategory("", outros, "Outros (remonte as camadas)"))
     camada.setRenderer(QgsCategorizedSymbolRenderer("responsavel", categorias))
 
 
@@ -231,3 +234,20 @@ def mostrar_previa(celulas: List[Dict]) -> QgsVectorLayer:
     QgsProject.instance().addMapLayer(camada, False)
     QgsProject.instance().layerTreeRoot().insertLayer(0, camada)
     return camada
+
+
+def cargas_selecionadas() -> Dict:
+    """Ids das cargas selecionadas nas camadas do grupo Feixe que têm cargas (id da carga em `id` ou
+    `id_carga_trabalho`)."""
+    grupo = QgsProject.instance().layerTreeRoot().findGroup(GRUPO)
+    ids, camadas_ = set(), []
+    for no in grupo.findLayers() if grupo else []:
+        camada = no.layer()
+        if not isinstance(camada, QgsVectorLayer) or not camada.selectedFeatureCount():
+            continue
+        campo = "id_carga_trabalho" if camada.fields().indexOf("id_carga_trabalho") >= 0 else "id"
+        if camada.fields().indexOf("geocodigo") < 0 and campo == "id":
+            continue  # não é camada de cargas (Folhas)
+        ids.update(int(f[campo]) for f in camada.getSelectedFeatures())
+        camadas_.append(camada.name())
+    return {"ids": sorted(ids), "camadas": camadas_}

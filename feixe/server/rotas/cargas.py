@@ -82,6 +82,49 @@ def gerar(ctx, ids_lote_etapa, previa: bool, uf: Optional[str]) -> Dict:
 
 
 def registrar(r, ctx) -> None:
+    @r.rota("GET", "/api/equipe", exige=("supervisor",))
+    def _equipe(req):
+        from .lotes import uf_de
+
+        projeto = req.query.get("projeto")
+        with ctx.tx() as ex:
+            return 200, {"itens": dc.equipe(ex, uf_de(ctx.eu()), inteiro(projeto, "projeto") if projeto else None)}
+
+    @r.rota("POST", "/api/cargas/atribuir", exige=("supervisor",))
+    def _atribuir(req):
+        from .lotes import uf_de
+
+        lista = lambda v: [int(x) for x in v]  # noqa: E731
+        with ctx.tx() as ex:
+            res = dc.atribuir(
+                ex, uf_de(ctx.eu()), campo(req, "responsavel", str, padrao=None), campo(req, "ids", lista, padrao=None),
+                campo(req, "lote_etapas", lista, padrao=None), campo(req, "so_disponiveis", bool, padrao=False),
+                campo(req, "de", str, padrao=None),
+            )  # fmt: skip
+        if res["atribuidas"]:
+            ctx.publicar("carga", {"atribuidas": res["atribuidas"]})
+            ctx.publicar("lote", {"atribuidas": res["atribuidas"]})
+            _no_qgis(ctx, "cargas_mudaram", None)
+        return 200, res
+
+    @r.rota("POST", "/api/cargas/dividir", exige=("supervisor",))
+    def _dividir(req):
+        from .lotes import uf_de
+
+        previa = campo(req, "previa", bool, padrao=True)
+        with ctx.tx() as ex:
+            res = dc.dividir(ex, uf_de(ctx.eu()), campo(req, "id_lote_etapa", int), campo(req, "pessoas", list), previa)
+        if not previa:
+            ctx.publicar("carga", {"divididas": res["disponiveis"]})
+            ctx.publicar("lote", {"divididas": res["disponiveis"]})
+            _no_qgis(ctx, "cargas_mudaram", None)
+        return 200, res
+
+    @r.rota("POST", "/api/qgis/selecao_cargas", exige=("supervisor",))
+    def _selecao(req):
+        # Cargas selecionadas no QGIS (em qualquer camada do grupo Feixe que tenha as cargas).
+        return 200, ctx.qgis("selecao_cargas")
+
     @r.rota("POST", "/api/cargas/gerar", exige=("supervisor",))
     def _gerar(req):
         from .lotes import uf_de
