@@ -337,6 +337,55 @@ def b3(amb, usuario, senha):
             ex.executar("DELETE FROM mapcartacomp.lote WHERE id = ANY(%s)", (criados,))
 
 
+@secao("b4")
+def b4(amb, usuario, senha):
+    """Gerar cargas pela grade: prévia numa camada temporária do QGIS, gravar, e recusar gravar de novo."""
+    from feixe.core import camadas
+    from feixe.core.dados import lotes as dl
+    from feixe.server.api import Contexto
+    from feixe.server.rotas import cargas as rc
+    from qgis.core import QgsProject
+
+    with db.transacao(amb, usuario, senha) as ex:
+        fluxo = ex.um("SELECT id FROM mapcartacomp.fluxo WHERE uf = 'DF' AND nome = 'DF Hidrografia'")["id"]
+        folha = ex.um(
+            "SELECT a.id_articulacao_scn AS id FROM mapcartctrl.v_articulacao_scn_100000 a WHERE a.cd_mi LIKE '25__' "
+            "AND NOT EXISTS (SELECT 1 FROM mapcartacomp.lote l WHERE l.id_articulacao_scn = a.id_articulacao_scn "
+            "AND l.id_fluxo = %s) ORDER BY a.cd_mi LIMIT 1",
+            (fluxo,),
+        )["id"]
+        lote = dl.criar_folhas(ex, "DF", fluxo, [folha])["criados"][0]["id_lote"]
+        le = ex.um("SELECT id FROM mapcartacomp.lote_etapa WHERE id_lote = %s", (lote,))["id"]
+    try:
+        ctx = Contexto(
+            transacao=lambda: db.transacao(amb, usuario, senha),
+            qgis=lambda nome, *a: {
+                "previa_cargas": lambda c: camadas.mostrar_previa(c),
+                "cargas_geradas": lambda: camadas.remover_previa(),
+            }[nome](*a),
+        )
+        r = rc.gerar(ctx, [le], True, "DF")
+        n = r["resultados"][0]["celulas"]
+        previa = QgsProject.instance().mapLayersByName(camadas.NOME_PREVIA)
+        assert len(previa) == 1 and previa[0].featureCount() == n and previa[0].isValid(), previa
+        ok(f"prévia de {n} células numa camada temporária do QGIS; nada gravado")
+        r = rc.gerar(ctx, [le], False, "DF")
+        assert r["resultados"][0]["gravadas"] == n and not QgsProject.instance().mapLayersByName(camadas.NOME_PREVIA)
+        with db.transacao(amb, usuario, senha) as ex:
+            k = ex.um(
+                "SELECT count(DISTINCT geocodigo) AS n FROM mapcartacomp.carga_trabalho WHERE id_lote_etapa = %s", (le,)
+            )
+        assert k["n"] == n, k
+        ok(f"{n} cargas gravadas, uma por célula, e a prévia some do QGIS")
+        r = rc.gerar(ctx, [le], False, "DF")
+        assert not r["resultados"] and "já tem cargas" in r["erros"][0]["erro"], r
+        ok("gravar de novo é recusado com mensagem")
+    finally:
+        QgsProject.instance().clear()
+        with db.transacao(amb, usuario, senha) as ex:
+            ex.executar("DELETE FROM mapcartacomp.lote WHERE id = %s", (lote,))
+
+
 def _renderizar(caminho, camada_extensao):
     """Renderiza as camadas do projeto num PNG, na extensão da camada indicada (para conferir os estilos)."""
     from qgis.core import QgsMapRendererParallelJob, QgsMapSettings, QgsProject

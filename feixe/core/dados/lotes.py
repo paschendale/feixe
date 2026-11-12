@@ -143,6 +143,7 @@ _CAMPOS_LOTE = (
     "c.id_lote AS id, c.tipo, c.nome, c.folha_revisao, c.cod_projeto, p.nom_projeto AS projeto, c.id_tema, c.tema, "
     "c.uf, c.status_nacional, c.etapa, c.fase, c.situacao, c.revisao_atual, c.cargas_total, c.cargas_concluidas, "
     "c.perc_concluidas, c.responsavel_principal, c.responsavel_nome, c.ultimo_cq_resultado, c.inicio, c.lead_time, "
+    "(SELECT x.id_lote_etapa_atual FROM mapcartacomp.lote x WHERE x.id = c.id_lote) AS id_lote_etapa_atual, "
     "ST_XMin(c.geom) AS xmin, ST_YMin(c.geom) AS ymin, ST_XMax(c.geom) AS xmax, ST_YMax(c.geom) AS ymax"
 )
 

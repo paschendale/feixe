@@ -45,6 +45,8 @@ class FeixePlugin:
             ),
             "focar_carga": self.focar_carga,
             "ferramenta_folhas": self.ligar_ferramenta_folhas,
+            "previa_cargas": self.previa_cargas,
+            "cargas_geradas": self.cargas_geradas,
             "selecao_wkt": self.selecao_wkt,
             "cargas_mudaram": self.cargas_mudaram,
         }

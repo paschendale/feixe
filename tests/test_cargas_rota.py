@@ -35,7 +35,7 @@ def montar(monkeypatch):
             publicar=lambda e, d: chamadas["eventos"].append((e, d)),
             qgis=(lambda nome, *a: chamadas["qgis"].append(nome)) if com_qgis else None,
         )
-        ctx._eu = {"papeis": papeis, "uf": "DF"}
+        ctx._eu = {"papeis": papeis, "uf": "DF", "perfis": []}
         return criar_roteador(ctx), chamadas
 
     return fazer
@@ -76,3 +76,23 @@ def test_lista_valida_filtro_e_consulta_nao_entra(montar):
     assert r.despachar("GET", "/api/cargas", {"lote_etapa": "x"}, None)[0] == 400
     r, _ = montar(["consulta"])
     assert r.despachar("POST", "/api/cargas/5/concluir", {}, None)[0] == 403
+
+
+def test_gerar_varias_passagens_com_recusa_de_uma(montar, monkeypatch):
+    def gerar(ex, le, previa, uf):
+        if le == 2:
+            raise ErroDados("2535-0: esta etapa já tem cargas")
+        r = {"id_lote_etapa": le, "folha_revisao": "2534-0", "celulas": 112, "gravadas": 0 if previa else 112}
+        return {**r, "previa": [{"geocodigo": "5KME1N1", "wkt": "MULTIPOLYGON EMPTY"}]} if previa else r
+
+    monkeypatch.setattr(dc, "gerar_pela_grade", gerar)
+    r, ch = montar(["supervisor"])
+    status, obj = r.despachar("POST", "/api/cargas/gerar", {}, {"lote_etapas": [1, 2], "previa": True})
+    assert status == 200 and [x["celulas"] for x in obj["resultados"]] == [112] and "previa" not in obj["resultados"][0]
+    assert obj["erros"] == [{"id_lote_etapa": 2, "erro": "2535-0: esta etapa já tem cargas"}]
+    assert ch["qgis"] == ["previa_cargas"] and ch["eventos"] == []
+    status, obj = r.despachar("POST", "/api/cargas/gerar", {}, {"lote_etapas": [1], "previa": False})
+    assert obj["resultados"][0]["gravadas"] == 112 and [e for e, _ in ch["eventos"]] == ["carga", "lote"]
+    assert r.despachar("POST", "/api/cargas/gerar", {}, {"lote_etapas": []})[0] == 400
+    r, _ = montar(["apm"])
+    assert r.despachar("POST", "/api/cargas/gerar", {}, {"lote_etapas": [1]})[0] == 403

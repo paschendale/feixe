@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 from typing import Dict, Optional
 
+from ...core.dados import ErroDados
 from ...core.dados import cargas as dc
 from ..api import ErroApi, campo, inteiro
 
@@ -57,7 +58,39 @@ def proxima(ctx, referencia: Optional[int] = None) -> Dict:
     return {"carga": carga, "progresso": progresso}
 
 
+def gerar(ctx, ids_lote_etapa, previa: bool, uf: Optional[str]) -> Dict:
+    """Gera (ou só mostra) as cargas de várias passagens. Cada passagem vai na sua transação: a recusa de uma não
+    impede as outras, e volta em `erros`. Na prévia, as células aparecem no QGIS numa camada temporária."""
+    resultados, erros, celulas = [], [], []
+    for id_le in ids_lote_etapa:
+        try:
+            with ctx.tx() as ex:
+                r = dc.gerar_pela_grade(ex, id_le, previa, uf)
+        except ErroDados as e:
+            erros.append({"id_lote_etapa": id_le, "erro": e.mensagem})
+            continue
+        for c in r.pop("previa", []):
+            celulas.append({**c, "folha": r["folha_revisao"]})
+        resultados.append(r)
+    if previa and celulas:
+        _no_qgis(ctx, "previa_cargas", celulas)
+    if not previa and resultados:
+        ctx.publicar("carga", {"geradas": [r["id_lote_etapa"] for r in resultados]})
+        ctx.publicar("lote", {"cargas_geradas": [r["id_lote_etapa"] for r in resultados]})
+        _no_qgis(ctx, "cargas_geradas")
+    return {"resultados": resultados, "erros": erros}
+
+
 def registrar(r, ctx) -> None:
+    @r.rota("POST", "/api/cargas/gerar", exige=("supervisor",))
+    def _gerar(req):
+        from .lotes import uf_de
+
+        ids = campo(req, "lote_etapas", lambda v: [int(x) for x in v])
+        if not ids:
+            raise ErroApi(400, "escolha pelo menos uma passagem")
+        return 200, gerar(ctx, ids, campo(req, "previa", bool, padrao=True), uf_de(ctx.eu()))
+
     @r.rota("GET", "/api/cargas", exige=EXECUTORES)
     def _lista(req):
         le = req.query.get("lote_etapa")
