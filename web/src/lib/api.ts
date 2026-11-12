@@ -134,10 +134,13 @@ export type Lote = {
   responsavel_nome: string | null
   ultimo_cq_resultado: string | null
   id_lote_etapa_atual: number | null
+  id_fluxo: number
 }
 
 export type PassagemLote = {
   id: number
+  id_fluxo_etapa: number
+  expor_ocorrencias: boolean
   etapa: string
   fase: string
   ordem: number
@@ -201,3 +204,40 @@ export type ResultadoGeracao = {
   resultados: { id_lote_etapa: number; folha_revisao: string; etapa: string; atividade: string; grade_nivel: number; celulas: number; gravadas: number }[]
   erros: { id_lote_etapa: number; erro: string }[]
 }
+
+export type EtapaFluxo = {
+  id?: number
+  ordem?: number
+  fase: string
+  fase_nome?: string
+  nome: string
+  obrigatoria: boolean
+  repetivel: boolean
+  conta_revisao: boolean
+  fracao_critica: number | null
+  passagens?: number
+  atividades: { id: number; nome: string }[]
+}
+
+export type FluxoCompleto = {
+  id: number
+  nome: string
+  uf: string
+  ativo: boolean
+  cod_projeto: number
+  projeto: string
+  id_tema: number
+  tema: string
+  lotes: number
+  etapas: EtapaFluxo[]
+}
+
+export type EstadoLote = {
+  id: number
+  status_nacional: StatusNacional
+  situacao: string | null
+  etapa: string | null
+  sugestao: { id: number; nome: string; ordem: number } | null
+}
+
+export type Historico = { em: string; acao: string; observacao: string | null; por: string; por_nome: string; etapa: string; instancia: number }

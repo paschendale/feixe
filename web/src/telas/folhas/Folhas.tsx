@@ -12,6 +12,7 @@ import { useSessao } from '@/lib/sessao'
 import { SITUACAO, STATUS, Status } from '@/lib/status'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
+import { AndarFolha } from './AndarFolha'
 import { GerarCargas } from './GerarCargas'
 import { NovaFolha } from './NovaFolha'
 import { NovoLoteLivre } from './NovoLoteLivre'
@@ -34,7 +35,7 @@ function Progresso({ feitas, total }: { feitas: number | null; total: number | n
 // Painel lateral da folha: trilho das passagens (D-72). As ações de andar com a folha chegam no B6.
 function Lateral({ id, fechar }: { id: number; fechar: () => void }) {
   const avisar = useAvisar()
-  const { conectado } = useSessao()
+  const { conectado, tem, eu } = useSessao()
   const { dados, erro } = useApi<Lote & { passagens: PassagemLote[] }>(`/api/lotes/${id}`, ['lote', 'carga'])
   return (
     <aside className="fixed top-[52px] right-0 bottom-0 z-40 flex w-[380px] flex-col gap-4 overflow-auto border-l bg-card p-6 shadow-[-8px_0_24px_rgba(0,0,0,.06)]">
@@ -91,6 +92,7 @@ function Lateral({ id, fechar }: { id: number; fechar: () => void }) {
               )
             })}
           </ol>
+          {tem('supervisor') && dados.uf === eu?.uf && <AndarFolha lote={dados} passagens={dados.passagens} />}
         </>
       )}
     </aside>
@@ -106,6 +108,10 @@ export default function Folhas() {
   const [marcados, setMarcados] = useState<Set<number>>(new Set())
   const [gerar, setGerar] = useState<Lote[]>([])
   const { dados, erro } = useApi<{ itens: Lote[] }>(`/api/lotes${status ? `?status=${status}` : ''}`, ['lote', 'carga'])
+  const { dados: prontas } = useApi<{ itens: { id_lote: number; folha_revisao: string; tema: string; etapa: string; cargas_total: number }[] }>(
+    tem('supervisor') ? '/api/prontas' : null,
+    ['lote', 'carga'],
+  )
   const selecionado = rota.partes[0] ? Number(rota.partes[0]) : null
   const temas = useMemo(() => [...new Set((dados?.itens ?? []).map((l) => l.tema))].sort(), [dados])
   const itens = (dados?.itens ?? []).filter((l) => !tema || l.tema === tema)
@@ -152,6 +158,19 @@ export default function Folhas() {
           </div>
         )}
       </div>
+
+      {prontas && prontas.itens.length > 0 && (
+        <Card className="gap-2 px-4 py-3">
+          <p className="text-sm font-semibold">Prontas para avançar · {prontas.itens.length}</p>
+          <div className="flex flex-wrap gap-2">
+            {prontas.itens.map((p) => (
+              <button key={p.id_lote} onClick={() => navegar(`folhas/${p.id_lote}`)} className="rounded-full border bg-background px-3 py-1 text-sm hover:bg-accent">
+                <b className="tab">{p.folha_revisao}</b> <span className="text-muted-foreground">· {p.tema} · {p.etapa} · {p.cargas_total}/{p.cargas_total}</span>
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <div>
         <Card className="gap-0 overflow-hidden py-0">
