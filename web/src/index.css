@@ -1,26 +1,31 @@
 @import "tailwindcss";
+@import "@fontsource-variable/public-sans";
 
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: oklch(0.99 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  /* Identidade do Feixe (deck e protótipo): azul IBGE, azul-aço e neutros frios. */
+  --ibge: #004182;
+  --aco: #7492c1;
+  --aco-claro: #dce5f2;
+  --background: #f5f7fa;
+  --foreground: #1c2733;
+  --card: #ffffff;
+  --card-foreground: #1c2733;
+  --popover: #ffffff;
+  --popover-foreground: #1c2733;
+  --primary: #004182;
+  --primary-foreground: #ffffff;
+  --secondary: #e9edf2;
+  --secondary-foreground: #1c2733;
+  --muted: #e9edf2;
+  --muted-foreground: #66768a;
+  --accent: #eef3fa;
+  --accent-foreground: #004182;
+  --destructive: #c8443a;
+  --border: #e3e8ef;
+  --input: #cbd3dd;
+  --ring: #7492c1;
   --radius: 0.625rem;
 }
 
@@ -46,6 +51,10 @@
 }
 
 @theme inline {
+  --font-sans: 'Public Sans Variable', 'Segoe UI', Arial, sans-serif;
+  --color-ibge: var(--ibge);
+  --color-aco: var(--aco);
+  --color-aco-claro: var(--aco-claro);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -72,5 +81,6 @@
 
 @layer base {
   * { @apply border-border outline-ring/50; }
-  body { @apply bg-background text-foreground; }
+  body { @apply bg-background text-foreground font-sans; font-size: 14px; }
+  .tab { font-variant-numeric: tabular-nums; }
 }

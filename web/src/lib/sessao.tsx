@@ -6,6 +6,8 @@ type Sessao = {
   status: Status | null
   eu: Eu | null
   conectado: boolean
+  // Já se tentou carregar o usuário (com ou sem sucesso): antes disso o menu ainda não sabe o papel.
+  pronta: boolean
   tem: (...papeis: Papel[]) => boolean
   // Último evento SSE recebido: as telas recarregam os dados quando chega um evento que lhes interessa.
   ultimo: Evento | null
@@ -20,17 +22,21 @@ export const EVENTOS = ['estado', 'configuracao', 'carga', 'lote', 'fluxo', 'ati
 export function SessaoProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status | null>(null)
   const [eu, setEu] = useState<Eu | null>(null)
+  const [pronta, setPronta] = useState(false)
   const recarregar = useCallback(() => {
     api<Status>('/api/status').then(setStatus).catch(() => setStatus(null))
     // Sem banco ou sem credencial, fica sem usuário; não é erro da tela.
-    api<Eu>('/api/eu').then(setEu).catch(() => setEu(null))
+    api<Eu>('/api/eu')
+      .then(setEu)
+      .catch(() => setEu(null))
+      .finally(() => setPronta(true))
   }, [])
   const { conectado, ultimo } = useEventos(EVENTOS, (e) => {
     if (e.evento === 'estado' || e.evento === 'configuracao') recarregar()
   })
   useEffect(() => recarregar(), [recarregar])
   const tem = useCallback((...p: Papel[]) => !!eu && p.some((x) => eu.papeis.includes(x)), [eu])
-  return <Ctx.Provider value={{ status, eu, conectado, tem, ultimo, recarregar }}>{children}</Ctx.Provider>
+  return <Ctx.Provider value={{ status, eu, conectado, pronta, tem, ultimo, recarregar }}>{children}</Ctx.Provider>
 }
 
 export function useSessao(): Sessao {
