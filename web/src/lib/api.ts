@@ -241,3 +241,6 @@ export type EstadoLote = {
 }
 
 export type Historico = { em: string; acao: string; observacao: string | null; por: string; por_nome: string; etapa: string; instancia: number }
+
+export type Pessoa = { conta: string; nome: string; perfis: string; pendentes: number; folhas: number; ultima: string | null }
+export type ResultadoAtribuicao = { atribuidas: number; ja_estavam: number; fora: number }

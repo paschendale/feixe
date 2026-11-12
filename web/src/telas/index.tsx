@@ -3,6 +3,7 @@ import { ClipboardList, Info, ListOrdered, Map, Network, Settings2, Users } from
 import type { Papel } from '@/lib/api'
 import EmConstrucao from './EmConstrucao'
 import Atividades from './atividades/Atividades'
+import Equipe from './equipe/Equipe'
 import Folhas from './folhas/Folhas'
 import Fluxos from './fluxos/Fluxos'
 import MinhasCargas from './MinhasCargas'
@@ -23,7 +24,7 @@ const emBreve = (item: string) => () => <EmConstrucao item={item} />
 export const TELAS: Tela[] = [
   { id: 'minhas-cargas', rotulo: 'Minhas cargas', icone: ClipboardList, papeis: ['apm', 'avaliador', 'supervisor'], componente: MinhasCargas },
   { id: 'folhas', rotulo: 'Folhas', icone: Map, papeis: ['supervisor', 'gerente'], componente: Folhas },
-  { id: 'equipe', rotulo: 'Equipe', icone: Users, papeis: ['supervisor'], componente: emBreve('B5') },
+  { id: 'equipe', rotulo: 'Equipe', icone: Users, papeis: ['supervisor'], componente: Equipe },
   { id: 'filas', rotulo: 'Filas', icone: ListOrdered, papeis: ['supervisor'], componente: emBreve('B8') },
   { id: 'fluxos', rotulo: 'Fluxos', icone: Network, papeis: ['supervisor', 'gerente'], componente: Fluxos },
   { id: 'atividades', rotulo: 'Atividades', icone: Settings2, papeis: [], componente: Atividades },

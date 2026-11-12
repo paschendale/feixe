@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Crosshair, Grid3x3, Plus, X } from 'lucide-react'
+import { Crosshair, Grid3x3, Plus, UserPlus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Select } from '@/components/ui/select'
@@ -13,6 +13,7 @@ import { SITUACAO, STATUS, Status } from '@/lib/status'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 import { AndarFolha } from './AndarFolha'
+import { Atribuir } from './Atribuir'
 import { GerarCargas } from './GerarCargas'
 import { NovaFolha } from './NovaFolha'
 import { NovoLoteLivre } from './NovoLoteLivre'
@@ -107,6 +108,7 @@ export default function Folhas() {
   const [dialogo, setDialogo] = useState<'folha' | 'livre' | null>(null)
   const [marcados, setMarcados] = useState<Set<number>>(new Set())
   const [gerar, setGerar] = useState<Lote[]>([])
+  const [atribuir, setAtribuir] = useState<Lote[]>([])
   const { dados, erro } = useApi<{ itens: Lote[] }>(`/api/lotes${status ? `?status=${status}` : ''}`, ['lote', 'carga'])
   const { dados: prontas } = useApi<{ itens: { id_lote: number; folha_revisao: string; tema: string; etapa: string; cargas_total: number }[] }>(
     tem('supervisor') ? '/api/prontas' : null,
@@ -145,9 +147,14 @@ export default function Folhas() {
         {supervisor && (
           <div className="ml-auto flex gap-2">
             {marcados.size > 0 && (
-              <Button variant="outline" onClick={() => setGerar(itens.filter((l) => marcados.has(l.id)))}>
-                <Grid3x3 /> Gerar cargas ({marcados.size})
-              </Button>
+              <>
+                <Button variant="outline" onClick={() => setGerar(itens.filter((l) => marcados.has(l.id)))}>
+                  <Grid3x3 /> Gerar cargas ({marcados.size})
+                </Button>
+                <Button variant="outline" onClick={() => setAtribuir(itens.filter((l) => marcados.has(l.id)))}>
+                  <UserPlus /> Atribuir ({marcados.size})
+                </Button>
+              </>
             )}
             <Button variant="outline" onClick={() => setDialogo('livre')}>
               <Plus /> Lote livre
@@ -228,6 +235,13 @@ export default function Folhas() {
         fechar={(gravou) => {
           setGerar([])
           if (gravou) setMarcados(new Set())
+        }}
+      />
+      <Atribuir
+        lotes={atribuir}
+        fechar={(feito) => {
+          setAtribuir([])
+          if (feito) setMarcados(new Set())
         }}
       />
       <NovaFolha aberto={dialogo === 'folha'} fechar={() => setDialogo(null)} />
