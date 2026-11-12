@@ -230,3 +230,114 @@ def gerar_pela_grade(ex: Executor, id_lote_etapa: int, previa: bool, uf: Optiona
         (id_lote_etapa, a["id"], p["geom"], a["grade_nivel"], geocodigos, [novo_uuid() for _ in geocodigos]),
     )
     return {**resumo, "gravadas": gravadas}
+
+
+# --- Equipe e atribuição (B5) ----------------------------------------------------------------------------------------
+# Atribuição é do supervisor e não é transição de etapa: não grava lote_etapa_hist. Só cargas pendentes de passagens
+# abertas mudam de mão; carga concluída fica com quem a fez.
+
+PERFIS_EXECUTORES = ("O", "V", "S")  # APM, avaliador, supervisor (que também executa)
+
+
+def equipe(ex: Executor, uf: str, cod_projeto: Optional[int] = None) -> List[Dict]:
+    """Contas elegíveis (P-16) lotadas na UF com perfil de execução no projeto, e o que cada uma tem nas mãos."""
+    sql = (
+        "SELECT u.nom_contausuario AS conta, u.nom_usuario::text AS nome, "
+        "string_agg(DISTINCT pr.nom_projeto || ':' || p.cd_perfil, ', ') AS perfis, "
+        "coalesce(max(c.pendentes), 0) AS pendentes, coalesce(max(c.folhas), 0) AS folhas, max(c.ultima) AS ultima "
+        "FROM mapcartctrl.t_usuario u "
+        "JOIN mapcartctrl.t_prd_perfil_usuarioprojeto p ON p.cd_usuario = u.cod_usuario "
+        "JOIN mapcartctrl.t_projeto pr ON pr.cod_projeto = p.cd_projeto "
+        "LEFT JOIN (SELECT c.responsavel, count(*) FILTER (WHERE NOT c.concluido) AS pendentes, "
+        "count(DISTINCT c.id_lote_etapa) FILTER (WHERE NOT c.concluido) AS folhas, max(c.concluido_em) AS ultima "
+        "FROM mapcartacomp.carga_trabalho c JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa "
+        "WHERE le.situacao IN ('pendente', 'em_andamento') AND c.uf = %s GROUP BY c.responsavel) c "
+        "ON c.responsavel = u.nom_contausuario "
+        "WHERE upper(trim(u.dsc_lotacao)) = %s AND u.ind_contaativa AND NOT coalesce(u.ind_contasistema, false) "
+        "AND NOT coalesce(u.ind_contasuper, false) AND p.cd_perfil = ANY(%s)"
+    )
+    params: list = [uf, uf, list(PERFIS_EXECUTORES)]
+    if cod_projeto is not None:
+        sql += " AND p.cd_projeto = %s"
+        params.append(cod_projeto)
+    return ex.todos(sql + " GROUP BY u.nom_contausuario, u.nom_usuario ORDER BY u.nom_usuario", tuple(params))
+
+
+def atribuir(
+    ex: Executor,
+    uf: str,
+    responsavel: Optional[str],
+    ids: Optional[List[int]] = None,
+    lote_etapas: Optional[List[int]] = None,
+    so_disponiveis: bool = False,
+    de: Optional[str] = None,
+) -> Dict:
+    """Passa cargas para `responsavel` (None = devolve para disponível). Alvo: `ids` de cargas e/ou todas as cargas de
+    `lote_etapas`; `so_disponiveis` restringe às sem responsável; `de` restringe às de uma pessoa (troca no meio)."""
+    if not ids and not lote_etapas:
+        raise ErroDados("escolha as cargas ou as folhas", 400)
+    filtro = (
+        "c.uf = %s AND NOT c.concluido AND le.situacao IN ('pendente', 'em_andamento') "
+        "AND (c.id = ANY(%s) OR c.id_lote_etapa = ANY(%s))"
+    )
+    params: list = [uf, list(ids or []), list(lote_etapas or [])]
+    if so_disponiveis:
+        filtro += " AND c.responsavel IS NULL"
+    if de:
+        filtro += " AND c.responsavel = %s"
+        params.append(de)
+    if responsavel is not None:
+        projetos = ex.todos(
+            "SELECT DISTINCT l.cod_projeto, p.nom_projeto FROM mapcartacomp.carga_trabalho c "
+            "JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa JOIN mapcartacomp.lote l ON l.id = le.id_lote "
+            f"JOIN mapcartctrl.t_projeto p ON p.cod_projeto = l.cod_projeto WHERE {filtro}",
+            tuple(params),
+        )
+        aptos = {r["conta"] for p in projetos for r in equipe(ex, uf, p["cod_projeto"])}
+        if projetos and responsavel not in aptos:
+            raise ErroDados(
+                f"{responsavel} não pode receber cargas aqui: precisa de conta ativa, lotação {uf} e perfil de "
+                f"execução (O, V ou S) em {', '.join(p['nom_projeto'] for p in projetos)}"
+            )
+    feitas = ex.um(
+        "WITH alvo AS (SELECT c.id FROM mapcartacomp.carga_trabalho c "
+        f"JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa WHERE {filtro} FOR UPDATE OF c), "
+        "mudou AS (UPDATE mapcartacomp.carga_trabalho c SET responsavel = %s FROM alvo "
+        "WHERE c.id = alvo.id AND c.responsavel IS DISTINCT FROM %s RETURNING c.id) "
+        "SELECT (SELECT count(*) FROM alvo) AS alvo, (SELECT count(*) FROM mudou) AS atribuidas",
+        tuple(params) + (responsavel, responsavel),
+    )
+    pedidas = ex.um(
+        "SELECT count(*) AS n FROM mapcartacomp.carga_trabalho c WHERE c.id = ANY(%s) OR c.id_lote_etapa = ANY(%s)",
+        (list(ids or []), list(lote_etapas or [])),
+    )["n"]
+    return {"atribuidas": feitas["atribuidas"], "ja_estavam": feitas["alvo"] - feitas["atribuidas"],
+            "fora": pedidas - feitas["alvo"]}  # fmt: skip
+
+
+def dividir(ex: Executor, uf: str, id_lote_etapa: int, pessoas: List[str], previa: bool = True) -> Dict:
+    """Sugestão de balanceamento (B5): as cargas disponíveis da passagem divididas entre as pessoas em blocos contíguos
+    (de norte a sul, de oeste a leste), o mais iguais possível. Com previa, só devolve quantas fica com cada uma."""
+    if not pessoas:
+        raise ErroDados("escolha pelo menos uma pessoa", 400)
+    ids = [
+        r["id"]
+        for r in ex.todos(
+            "SELECT c.id FROM mapcartacomp.carga_trabalho c JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa "
+            "WHERE c.id_lote_etapa = %s AND c.uf = %s AND c.responsavel IS NULL AND NOT c.concluido "
+            "AND le.situacao IN ('pendente', 'em_andamento') "
+            "ORDER BY round(ST_Y(ST_Centroid(c.geom))::numeric, 3) DESC, ST_X(ST_Centroid(c.geom)), c.id",
+            (id_lote_etapa, uf),
+        )
+    ]
+    base, sobra = divmod(len(ids), len(pessoas))
+    plano, i = [], 0
+    for k, conta in enumerate(pessoas):
+        n = base + (1 if k < sobra else 0)
+        plano.append({"conta": conta, "cargas": n, "ids": ids[i : i + n]})
+        i += n
+    if not previa:
+        for p in plano:
+            if p["ids"]:
+                atribuir(ex, uf, p["conta"], ids=p["ids"], so_disponiveis=True)
+    return {"disponiveis": len(ids), "plano": [{"conta": p["conta"], "cargas": p["cargas"]} for p in plano]}
