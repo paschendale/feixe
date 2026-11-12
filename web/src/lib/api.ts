@@ -133,6 +133,7 @@ export type Lote = {
   responsavel_principal: string | null
   responsavel_nome: string | null
   ultimo_cq_resultado: string | null
+  id_lote_etapa_atual: number | null
 }
 
 export type PassagemLote = {
@@ -194,4 +195,9 @@ export type Catalogo = {
   projetos: { cod_projeto: number; nome: string }[]
   geracoes: string[]
   niveis_grade: number[]
+}
+
+export type ResultadoGeracao = {
+  resultados: { id_lote_etapa: number; folha_revisao: string; etapa: string; atividade: string; grade_nivel: number; celulas: number; gravadas: number }[]
+  erros: { id_lote_etapa: number; erro: string }[]
 }

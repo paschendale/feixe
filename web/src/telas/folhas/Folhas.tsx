@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Crosshair, Plus, X } from 'lucide-react'
+import { Crosshair, Grid3x3, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Select } from '@/components/ui/select'
@@ -12,6 +12,7 @@ import { useSessao } from '@/lib/sessao'
 import { SITUACAO, STATUS, Status } from '@/lib/status'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
+import { GerarCargas } from './GerarCargas'
 import { NovaFolha } from './NovaFolha'
 import { NovoLoteLivre } from './NovoLoteLivre'
 
@@ -102,10 +103,20 @@ export default function Folhas() {
   const [status, setStatus] = useState<StatusNacional | ''>('')
   const [tema, setTema] = useState('')
   const [dialogo, setDialogo] = useState<'folha' | 'livre' | null>(null)
+  const [marcados, setMarcados] = useState<Set<number>>(new Set())
+  const [gerar, setGerar] = useState<Lote[]>([])
   const { dados, erro } = useApi<{ itens: Lote[] }>(`/api/lotes${status ? `?status=${status}` : ''}`, ['lote', 'carga'])
   const selecionado = rota.partes[0] ? Number(rota.partes[0]) : null
   const temas = useMemo(() => [...new Set((dados?.itens ?? []).map((l) => l.tema))].sort(), [dados])
   const itens = (dados?.itens ?? []).filter((l) => !tema || l.tema === tema)
+  const supervisor = tem('supervisor')
+  const marcar = (id: number) =>
+    setMarcados((m) => {
+      const n = new Set(m)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
 
   return (
     <>
@@ -125,8 +136,13 @@ export default function Folhas() {
           ))}
         </Select>
         <span className="text-sm text-muted-foreground">{dados ? `${num(itens.length)} ${itens.length === 1 ? 'lote' : 'lotes'}` : ''}</span>
-        {tem('supervisor') && (
+        {supervisor && (
           <div className="ml-auto flex gap-2">
+            {marcados.size > 0 && (
+              <Button variant="outline" onClick={() => setGerar(itens.filter((l) => marcados.has(l.id)))}>
+                <Grid3x3 /> Gerar cargas ({marcados.size})
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setDialogo('livre')}>
               <Plus /> Lote livre
             </Button>
@@ -145,7 +161,8 @@ export default function Folhas() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="pl-4">Folha</TableHead>
+                  {supervisor && <TableHead className="w-8 pl-4" />}
+                  <TableHead className={supervisor ? '' : 'pl-4'}>Folha</TableHead>
                   <TableHead>Tema</TableHead>
                   <TableHead>Etapa</TableHead>
                   <TableHead>Status</TableHead>
@@ -160,7 +177,12 @@ export default function Folhas() {
                     className={cn('cursor-pointer', selecionado === l.id && 'bg-accent')}
                     onClick={() => navegar(selecionado === l.id ? 'folhas' : `folhas/${l.id}`)}
                   >
-                    <TableCell className="tab pl-4 font-semibold">{l.folha_revisao}</TableCell>
+                    {supervisor && (
+                      <TableCell className="pl-4" onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" aria-label={`Marcar ${l.folha_revisao}`} checked={marcados.has(l.id)} onChange={() => marcar(l.id)} />
+                      </TableCell>
+                    )}
+                    <TableCell className={cn('tab font-semibold', !supervisor && 'pl-4')}>{l.folha_revisao}</TableCell>
                     <TableCell className="whitespace-normal">{l.tema}</TableCell>
                     <TableCell className="whitespace-normal">
                       {l.etapa ?? '—'}
@@ -182,6 +204,13 @@ export default function Folhas() {
         {selecionado && <Lateral key={selecionado} id={selecionado} fechar={() => navegar('folhas')} />}
       </div>
 
+      <GerarCargas
+        lotes={gerar}
+        fechar={(gravou) => {
+          setGerar([])
+          if (gravou) setMarcados(new Set())
+        }}
+      />
       <NovaFolha aberto={dialogo === 'folha'} fechar={() => setDialogo(null)} />
       <NovoLoteLivre aberto={dialogo === 'livre'} fechar={() => setDialogo(null)} />
     </>
