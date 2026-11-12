@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-MODULOS: list = []
+from . import camadas
+
+MODULOS: list = [camadas]
 
 
 def registrar(r, ctx) -> None:

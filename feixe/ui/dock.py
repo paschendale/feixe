@@ -26,6 +26,7 @@ class DockFeixe(QDockWidget):
     abrir_painel = pyqtSignal()
     sincronizar = pyqtSignal()
     conta = pyqtSignal()
+    camadas = pyqtSignal()
 
     def __init__(self, amb: Ambiente, parent=None):
         super().__init__("Feixe", parent)
@@ -53,6 +54,10 @@ class DockFeixe(QDockWidget):
         linha.addWidget(self.bt_painel)
         linha.addWidget(self.bt_sync)
         lay.addLayout(linha)
+        self.bt_camadas = QPushButton("Camadas do Feixe")
+        self.bt_camadas.setToolTip("Monta (ou remonta) o grupo Feixe com as suas cargas e as folhas")
+        self.bt_camadas.clicked.connect(self.camadas)
+        lay.addWidget(self.bt_camadas)
         self.bt_conta = QPushButton("Usuário e senha")
         self.bt_conta.clicked.connect(self.conta)
         lay.addWidget(self.bt_conta)

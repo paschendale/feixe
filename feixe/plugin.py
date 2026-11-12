@@ -11,10 +11,11 @@ from qgis.PyQt.QtGui import QDesktopServices, QIcon
 from qgis.PyQt.QtWidgets import QAction, QMessageBox
 
 from .core import ambiente as ambmod
-from .core import config, db, dispatch, log
+from .core import camadas, config, db, dispatch, log
 from .core.versao import raiz_plugin, versao_plugin
-from .server.api import Contexto, criar_roteador
+from .server.api import Contexto, ErroApi, criar_roteador
 from .server.http import ServidorLocal
+from .server.rotas import camadas as rotas_camadas
 from .server.sse import Broker
 from .ui.dock import DialogoCredenciais, DockFeixe
 
@@ -36,7 +37,11 @@ class FeixePlugin:
         self.ctx = None
         self.broker = Broker()
         # Ações que as rotas pedem ao QGIS, por nome; cada item da fase B registra as suas. Rodam na thread principal.
-        self.acoes_qgis = {}
+        self.acoes_qgis = {
+            "montar_camadas": lambda eu, responsaveis: camadas.montar(
+                self.amb, config.authcfg_id(self.amb), eu, responsaveis
+            ),
+        }
         self.dock = None
         self.acao = None
         self.sinais = _Sinais()
@@ -55,6 +60,7 @@ class FeixePlugin:
         self.dock = DockFeixe(self.amb, self.iface.mainWindow())
         self.dock.abrir_painel.connect(self.abrir_painel)
         self.dock.conta.connect(self.pedir_credenciais)
+        self.dock.camadas.connect(self.montar_camadas)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dock)
         self.acao = QAction(QIcon(os.path.join(raiz_plugin(), "icon.svg")), "Feixe", self.iface.mainWindow())
         self.acao.triggered.connect(self.abrir_painel)
@@ -178,6 +184,26 @@ class FeixePlugin:
         self._publicar_estado(novo)
 
     # --- QGIS ----------------------------------------------------------------------------------
+    def montar_camadas(self):
+        """Botão do dock: o mesmo caminho da rota POST /api/camadas/montar."""
+        if config.credenciais(self.amb) is None:
+            self.pedir_credenciais()
+            if config.credenciais(self.amb) is None:
+                return
+        if not self.servidor:
+            self.iniciar_servidor()
+        try:
+            r = rotas_camadas.montar(self.ctx)
+        except ErroApi as e:
+            self.iface.messageBar().pushMessage("Feixe", e.mensagem, Qgis.Warning, 6)
+            return
+        except Exception as e:  # noqa: BLE001
+            log.erro(f"montar camadas: {e}")
+            self.iface.messageBar().pushMessage("Feixe", f"Não foi possível montar as camadas: {e}", Qgis.Critical, 8)
+            return
+        resumo = ", ".join(f"{c['nome']} ({c['feicoes']})" for c in r["camadas"])
+        self.iface.messageBar().pushMessage("Feixe", f"Camadas montadas: {resumo}", Qgis.Success, 5)
+
     def acao_qgis(self, nome, *args):
         """Ponte das rotas para o QGIS: despacha a ação registrada para a thread principal e espera o resultado."""
         fn = self.acoes_qgis.get(nome)

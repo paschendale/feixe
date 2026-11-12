@@ -31,8 +31,12 @@ if os.path.isdir(_PROJ):
     os.environ.setdefault("PROJ_LIB", _PROJ)
     os.environ.setdefault("PROJ_DATA", _PROJ)
 
-from feixe.core import ambiente, db  # noqa: E402
+from feixe.core import ambiente, config, db  # noqa: E402
+from feixe.core.dados import novo_uuid  # noqa: E402
 from qgis.core import QgsApplication  # noqa: E402
+
+# Imagens e saídas para conferir a olho (capturas do PR): FEIXE_SAIDA ou a pasta temporária do sistema.
+SAIDA = os.environ.get("FEIXE_SAIDA") or tempfile.gettempdir()
 
 SECOES = {}
 
@@ -89,13 +93,117 @@ def b0(amb, usuario, senha):
             ex.executar(f"DROP TABLE IF EXISTS {tabela}")
 
 
+@secao("b1")
+def b1(amb, usuario, senha):
+    """Camadas do Feixe: grupo, estilos, filtros por UF e passagem atual, edição de concluido."""
+    from feixe.core import camadas
+    from feixe.core.dados import cargas
+    from qgis.core import QgsProject
+
+    # A conta de dev (postgres) não tem cargas: copia 5 cargas pendentes de uma passagem atual do DF para ela.
+    copias = []
+    with db.transacao(amb, usuario, senha) as ex:
+        origem = ex.todos(
+            "SELECT c.id_lote_etapa, c.id_atividade, c.uf, c.geom FROM mapcartacomp.carga_trabalho c "
+            "JOIN mapcartacomp.lote l ON l.id_lote_etapa_atual = c.id_lote_etapa "
+            "JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa AND le.situacao = 'em_andamento' "
+            "WHERE l.uf = 'DF' AND c.id_cq_plano IS NULL AND c.geocodigo IS NULL ORDER BY c.id LIMIT 5"
+        )
+        assert len(origem) == 5, "o dev precisa da conversão do DF (A3)"
+        for o in origem:
+            u = novo_uuid()
+            ex.executar(
+                "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_atividade, uf, responsavel, geom) "
+                "VALUES (%s, %s, %s, %s, current_user, %s)",
+                (u, o["id_lote_etapa"], o["id_atividade"], o["uf"], o["geom"]),
+            )
+            copias.append(u)
+    try:
+        eu = {"uf": "DF", "papeis": ["supervisor"]}
+        with db.transacao(amb, usuario, senha) as ex:
+            resp = cargas.responsaveis_atuais(ex, "DF")
+            esperado = ex.um(
+                "SELECT count(*) FILTER (WHERE responsavel IS NOT NULL) AS atribuidas, "
+                "count(*) FILTER (WHERE responsavel IS NULL) AS disponiveis FROM mapcartacomp.carga_trabalho "
+                "WHERE uf = 'DF' AND id_lote_etapa IN (" + cargas.SQL_PASSAGENS_ATUAIS + " AND l.uf = 'DF')"
+            )
+            n_folhas = ex.um("SELECT count(*) AS n FROM mapcartacomp.ctrl_lote WHERE uf = 'DF'")["n"]
+        authcfg = config.authcfg_id(amb)
+        camadas.montar(amb, authcfg, eu, resp)
+        r = camadas.montar(amb, authcfg, eu, resp)  # de novo: substitui, não duplica
+        raiz = QgsProject.instance().layerTreeRoot()
+        assert [g.name() for g in raiz.children()].count("Feixe") == 1
+        assert len(QgsProject.instance().mapLayers()) == 4, QgsProject.instance().mapLayers()
+        n = {c["nome"]: c["feicoes"] for c in r["camadas"]}
+        assert n == {
+            "Minhas cargas": 5,
+            "Cargas por responsável": esperado["atribuidas"],
+            "Cargas disponíveis": esperado["disponiveis"],
+            "Folhas": n_folhas,
+        }, n
+        ok(f"grupo único, contagens conferem: {n}")
+        assert len(resp) > 1, resp
+        cats = QgsProject.instance().mapLayersByName("Cargas por responsável")[0].renderer().categories()
+        assert len(cats) == len(resp) and all(c.label() for c in cats)
+        ok(f"{len(cats)} responsáveis com cor e nome, ex.: {cats[0].label()}")
+
+        minhas = QgsProject.instance().mapLayersByName("Minhas cargas")[0]
+        assert minhas.renderer().type() == "categorizedSymbol"
+        cfg = minhas.editFormConfig()
+        editaveis = [f.name() for i, f in enumerate(minhas.fields()) if not cfg.readOnly(i)]
+        assert editaveis == ["concluido"], editaveis
+        ok("Minhas cargas com o estilo do DF e só concluido editável")
+
+        alvo = next(minhas.getFeatures())
+        minhas.startEditing()
+        minhas.changeAttributeValue(alvo.id(), minhas.fields().indexOf("concluido"), True)
+        assert minhas.commitChanges(), minhas.commitErrors()
+        with db.transacao(amb, usuario, senha) as ex:
+            linha = ex.um(
+                "SELECT concluido, concluido_em FROM mapcartacomp.carga_trabalho WHERE id = %s",
+                (alvo["id_carga_trabalho"],),
+            )
+        assert linha["concluido"] and linha["concluido_em"] is not None, linha
+        ok("concluir pela tabela de atributos grava no banco e preenche concluido_em")
+
+        caminho = _renderizar(os.path.join(SAIDA, "feixe-b1-camadas.png"), "Folhas")
+        ok(f"imagem das camadas em {caminho}")
+    finally:
+        QgsProject.instance().clear()
+        with db.transacao(amb, usuario, senha) as ex:
+            ex.executar("DELETE FROM mapcartacomp.carga_trabalho WHERE uuid::text = ANY(%s)", (copias,))
+
+
+def _renderizar(caminho, camada_extensao):
+    """Renderiza as camadas do projeto num PNG, na extensão da camada indicada (para conferir os estilos)."""
+    from qgis.core import QgsMapRendererParallelJob, QgsMapSettings, QgsProject
+    from qgis.PyQt.QtCore import QSize
+
+    projeto = QgsProject.instance()
+    ordem = [n.layer() for n in projeto.layerTreeRoot().findLayers()]
+    ms = QgsMapSettings()
+    ms.setLayers(ordem)
+    ms.setDestinationCrs(ordem[0].crs())
+    ms.setExtent(projeto.mapLayersByName(camada_extensao)[0].extent())
+    ms.setOutputSize(QSize(1600, 1200))
+    job = QgsMapRendererParallelJob(ms)
+    job.start()
+    job.waitForFinished()
+    job.renderedImage().save(caminho, "PNG")
+    return caminho
+
+
 def main():
     pedidas = sys.argv[1:] or list(SECOES)
+    QgsApplication.setPrefixPath(_MACOS, True)
     app = QgsApplication([], False)
     app.initQgis()
     try:
+        if not QgsApplication.authManager().setMasterPassword("feixe-verificacao", True):
+            raise SystemExit("não foi possível iniciar o Authentication Manager temporário")
         amb = ambiente_dev()
         usuario, senha = credencial_dev()
+        config.salvar_credenciais(amb, usuario, senha)
         for nome in pedidas:
             print(f"{nome}: {SECOES[nome].__doc__.strip()}")
             SECOES[nome](amb, usuario, senha)

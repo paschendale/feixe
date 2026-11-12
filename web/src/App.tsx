@@ -1,11 +1,38 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { Layers } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { AvisosProvider } from '@/lib/avisos'
+import { AvisosProvider, useAvisar } from '@/lib/avisos'
 import { navegar, useRota } from '@/lib/rotas'
 import { SessaoProvider, useSessao } from '@/lib/sessao'
+import { enviar } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 import { telasDe } from '@/telas'
+
+// Monta (ou remonta) o grupo Feixe no projeto aberto do QGIS (B1).
+function BotaoCamadas() {
+  const avisar = useAvisar()
+  const { conectado, eu } = useSessao()
+  const [ocupado, setOcupado] = useState(false)
+  if (!eu?.papeis.length) return null
+  async function montar() {
+    setOcupado(true)
+    try {
+      const r = await enviar<{ camadas: { nome: string; feicoes: number }[] }>('/api/camadas/montar')
+      avisar('Camadas no QGIS: ' + r.camadas.map((c) => `${c.nome} (${c.feicoes})`).join(', '))
+    } catch (e) {
+      avisar((e as Error).message, 'erro')
+    } finally {
+      setOcupado(false)
+    }
+  }
+  return (
+    <Button size="sm" variant="outline" onClick={montar} disabled={!conectado || ocupado}>
+      <Layers /> {ocupado ? 'Montando…' : 'Camadas no QGIS'}
+    </Button>
+  )
+}
 
 function Casca() {
   const { status, eu, conectado } = useSessao()
@@ -43,6 +70,7 @@ function Casca() {
         <header className="flex items-center justify-between border-b px-6 py-3">
           <h1 className="text-lg font-semibold">{atual?.rotulo}</h1>
           <div className="flex items-center gap-2">
+            <BotaoCamadas />
             {eu && (
               <span className="text-right text-sm leading-tight" title={eu.conta}>
                 <span className="font-medium">{eu.nome}</span>
