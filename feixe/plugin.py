@@ -44,6 +44,8 @@ class FeixePlugin:
                 self.amb, config.authcfg_id(self.amb), eu, responsaveis, temas
             ),
             "focar_carga": self.focar_carga,
+            "ferramenta_folhas": self.ligar_ferramenta_folhas,
+            "selecao_wkt": self.selecao_wkt,
             "cargas_mudaram": self.cargas_mudaram,
         }
         self.barra = None

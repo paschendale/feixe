@@ -244,6 +244,99 @@ def b2(amb, usuario, senha):
             ex.executar("DELETE FROM mapcartacomp.carga_trabalho WHERE uuid::text = ANY(%s)", (copias,))
 
 
+@secao("b3")
+def b3(amb, usuario, senha):
+    """Folhas e lotes livres: rota de criar, folha pelo clique no mapa e lote livre pela seleção de uma camada."""
+    from feixe.core.dados import lotes as dl
+    from feixe.server.api import Contexto, criar_roteador
+    from feixe.ui.ferramentas import FerramentaFolha, selecao_wkt
+    from qgis.core import QgsCoordinateReferenceSystem, QgsFeature, QgsGeometry, QgsPointXY, QgsVectorLayer
+    from qgis.gui import QgsMapCanvas
+
+    with db.transacao(amb, usuario, senha) as ex:
+        fluxo = ex.um("SELECT id FROM mapcartacomp.fluxo WHERE uf = 'DF' AND nome = 'DF Hidrografia'")["id"]
+        livre = ex.um(  # uma folha sem lote de hidrografia, para criar e apagar
+            "SELECT a.id_articulacao_scn AS id, a.cd_mi FROM mapcartctrl.v_articulacao_scn_100000 a "
+            "WHERE NOT EXISTS (SELECT 1 FROM mapcartacomp.lote l JOIN mapcartacomp.fluxo f ON f.id = l.id_fluxo "
+            "WHERE l.id_articulacao_scn = a.id_articulacao_scn AND f.id = %s) AND a.cd_mi LIKE '25__' "
+            "ORDER BY a.cd_mi LIMIT 1",
+            (fluxo,),
+        )
+        centro = ex.um(
+            "SELECT ST_X(ST_PointOnSurface(geom)) AS x, ST_Y(ST_PointOnSurface(geom)) AS y "
+            "FROM mapcartctrl.v_articulacao_scn_100000 WHERE id_articulacao_scn = %s",
+            (livre["id"],),
+        )
+    criados = []
+    ctx = Contexto(transacao=lambda: db.transacao(amb, usuario, senha), publicar=lambda e, d: None)
+    ctx._eu = {"papeis": ["supervisor"], "uf": "DF", "perfis": [{"cod_projeto": 5, "papel": "supervisor"}]}
+    r = criar_roteador(ctx)
+    try:
+        status, obj = r.despachar(
+            "POST", "/api/lotes", {}, {"tipo": "folha", "id_fluxo": fluxo, "folhas": [livre["id"]]}
+        )
+        assert status == 200 and obj["criados"][0]["cd_mi"] == livre["cd_mi"], obj
+        criados.append(obj["criados"][0]["id_lote"])
+        status, lote = r.despachar("GET", f"/api/lotes/{criados[0]}", {}, None)
+        assert status == 200 and lote["passagens"][0]["situacao"] == "pendente", lote
+        ok(f"folha {livre['cd_mi']} criada na primeira etapa ({lote['passagens'][0]['etapa']}), pendente")
+        status, obj = r.despachar(
+            "POST", "/api/lotes", {}, {"tipo": "folha", "id_fluxo": fluxo, "folhas": [livre["id"]]}
+        )
+        assert status == 200 and not obj["criados"] and obj["existentes"][0]["cd_mi"] == livre["cd_mi"], obj
+        ok("criar de novo a mesma folha no mesmo projeto e tema não duplica: volta como existente")
+
+        # Clique no mapa num canvas em Web Mercator: a ferramenta devolve SIRGAS e o banco acha a folha.
+        canvas = QgsMapCanvas()
+        canvas.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:3857"))
+        recebidos = []
+        ferramenta = FerramentaFolha(canvas, lambda x, y: recebidos.append((x, y)))
+        from qgis.core import QgsCoordinateTransform, QgsProject
+        from qgis.PyQt.QtCore import Qt
+
+        para_3857 = QgsCoordinateTransform(
+            QgsCoordinateReferenceSystem("EPSG:4674"), QgsCoordinateReferenceSystem("EPSG:3857"), QgsProject.instance()
+        )
+        ferramenta._clicou(para_3857.transform(QgsPointXY(centro["x"], centro["y"])), Qt.LeftButton)
+        with db.transacao(amb, usuario, senha) as ex:
+            achada = dl.folha_no_ponto(ex, *recebidos[0])
+        assert achada["cd_mi"] == livre["cd_mi"], achada
+        ok(f"clique no mapa em EPSG:3857 acha a folha {achada['cd_mi']}")
+
+        # Lote livre a partir de duas feições selecionadas numa camada em EPSG:3857.
+        camada = QgsVectorLayer("Polygon?crs=EPSG:3857", "bacias", "memory")
+        feicoes = []
+        for dx in (0, 0.05):
+            f = QgsFeature()
+            g = QgsGeometry.fromWkt(
+                f"POLYGON(({-47.9 + dx} -15.9, {-47.85 + dx} -15.9, {-47.85 + dx} -15.85, {-47.9 + dx} -15.85, "
+                f"{-47.9 + dx} -15.9))"
+            )
+            g.transform(
+                QgsCoordinateTransform(QgsCoordinateReferenceSystem("EPSG:4674"), camada.crs(), QgsProject.instance())
+            )
+            f.setGeometry(g)
+            feicoes.append(f)
+        camada.dataProvider().addFeatures(feicoes)
+        camada.selectAll()
+        sel = selecao_wkt(camada)
+        assert sel["feicoes"] == 2 and sel["wkt"].startswith("Polygon"), sel["wkt"][:40]
+        status, obj = r.despachar(
+            "POST", "/api/lotes", {}, {"tipo": "livre", "id_fluxo": fluxo, "nome": "teste_b3 bacia", "wkt": sel["wkt"]}
+        )
+        assert status == 200, obj
+        criados.append(obj["criados"][0]["id_lote"])
+        with db.transacao(amb, usuario, senha) as ex:
+            area = ex.um(
+                "SELECT round(ST_Area(geom)::numeric, 4) AS a FROM mapcartacomp.lote WHERE id = %s", (criados[-1],)
+            )
+        assert float(area["a"]) == 0.005, area  # 0,1 x 0,05 grau: as duas feições unidas, de volta em SIRGAS
+        ok("lote livre da seleção de duas feições em EPSG:3857, unidas e em SIRGAS 2000")
+    finally:
+        with db.transacao(amb, usuario, senha) as ex:
+            ex.executar("DELETE FROM mapcartacomp.lote WHERE id = ANY(%s)", (criados,))
+
+
 def _renderizar(caminho, camada_extensao):
     """Renderiza as camadas do projeto num PNG, na extensão da camada indicada (para conferir os estilos)."""
     from qgis.core import QgsMapRendererParallelJob, QgsMapSettings, QgsProject

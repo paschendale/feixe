@@ -33,7 +33,7 @@ def test_folhas_consulta_e_zoom():
     r = criar_roteador(ctx)
     status, obj = r.despachar("GET", "/api/folhas", {"q": "25", "limite": "5"}, None)
     assert status == 200 and obj["itens"][0]["cd_mi"] == "2534"
-    assert chamadas[-1][1] == ("%25%", "%25%", "%25%", 5)
+    assert chamadas[-1][1] == ("%25%", "%25%", "%25%", "25", "25%", "25%", 5)
     status, obj = r.despachar("POST", "/api/folhas/1/zoom", {}, None)
     assert status == 200 and zooms == [(-48.0, -16.0, -47.5, -15.5, 4674)]
 

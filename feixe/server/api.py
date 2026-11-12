@@ -211,9 +211,14 @@ def criar_roteador(ctx: Contexto) -> Roteador:
         )
         params: tuple = ()
         if filtro:
-            sql += "WHERE cd_mi ILIKE %s OR nm_carta ILIKE %s OR nm_nomenclatura_scn ILIKE %s "
-            params = (f"%{filtro}%", f"%{filtro}%", f"%{filtro}%")
-        sql += "ORDER BY cd_mi LIMIT %s"
+            # MI exato primeiro, depois os que começam pelo texto (2534 antes de 1253 e 0253), depois o resto.
+            sql += (
+                "WHERE cd_mi ILIKE %s OR nm_carta ILIKE %s OR nm_nomenclatura_scn ILIKE %s "
+                "ORDER BY cd_mi = %s DESC, cd_mi ILIKE %s DESC, nm_nomenclatura_scn ILIKE %s DESC, cd_mi LIMIT %s"
+            )
+            params = (f"%{filtro}%", f"%{filtro}%", f"%{filtro}%", filtro, f"{filtro}%", f"{filtro}%")
+        else:
+            sql += "ORDER BY cd_mi LIMIT %s"
         return 200, {"itens": ctx.consultar(sql, params + (limite,))}
 
     @r.rota("POST", "/api/folhas/{id}/zoom")
