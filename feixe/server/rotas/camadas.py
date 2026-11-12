@@ -8,7 +8,7 @@ TODOS = ("gerente", "supervisor", "avaliador", "apm", "consulta")
 
 
 def montar(ctx) -> dict:
-    """Usada pela rota e pelo botão do dock. As consultas rodam aqui; o QGIS só recebe o resultado."""
+    """Usada pela rota e pelo botão da barra. As consultas rodam aqui; o QGIS só recebe o resultado."""
     eu = ctx.eu()
     responsaveis = []
     if "supervisor" in eu["papeis"]:

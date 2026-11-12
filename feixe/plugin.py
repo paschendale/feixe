@@ -1,4 +1,4 @@
-"""Ponto de entrada do plugin: dock, servidor local, estado online/offline e ponte com o QGIS."""
+"""Ponto de entrada do plugin: barra do Feixe, servidor local, estado online/offline e ponte com o QGIS."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import os
 import threading
 
 from qgis.core import Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsProject, QgsRectangle
-from qgis.PyQt.QtCore import QObject, Qt, QTimer, QUrl, pyqtSignal
-from qgis.PyQt.QtGui import QDesktopServices, QIcon
-from qgis.PyQt.QtWidgets import QAction, QMessageBox
+from qgis.PyQt.QtCore import QObject, QTimer, QUrl, pyqtSignal
+from qgis.PyQt.QtGui import QDesktopServices
+from qgis.PyQt.QtWidgets import QLabel, QMessageBox
 
 from .core import ambiente as ambmod
 from .core import camadas, config, db, dispatch, log
@@ -17,7 +17,7 @@ from .server.api import Contexto, ErroApi, criar_roteador
 from .server.http import ServidorLocal
 from .server.rotas import camadas as rotas_camadas
 from .server.sse import Broker
-from .ui.dock import DialogoCredenciais, DockFeixe
+from .ui.barra import BarraFeixe, DialogoCredenciais
 
 
 class _Sinais(QObject):
@@ -42,8 +42,8 @@ class FeixePlugin:
                 self.amb, config.authcfg_id(self.amb), eu, responsaveis
             ),
         }
-        self.dock = None
-        self.acao = None
+        self.barra = None
+        self.rotulo_status = None
         self.sinais = _Sinais()
         self.estado = {"online": False, "usuario": None, "detalhe": "não verificado"}
         self._timer = QTimer()
@@ -57,15 +57,18 @@ class FeixePlugin:
             self.iface.messageBar().pushMessage("Feixe", self.erro_ambiente, Qgis.Critical, 0)
             return
         dispatch.iniciar()
-        self.dock = DockFeixe(self.amb, self.iface.mainWindow())
-        self.dock.abrir_painel.connect(self.abrir_painel)
-        self.dock.conta.connect(self.pedir_credenciais)
-        self.dock.camadas.connect(self.montar_camadas)
-        self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dock)
-        self.acao = QAction(QIcon(os.path.join(raiz_plugin(), "icon.svg")), "Feixe", self.iface.mainWindow())
-        self.acao.triggered.connect(self.abrir_painel)
-        self.iface.addToolBarIcon(self.acao)
-        self.iface.addPluginToMenu("&Feixe", self.acao)
+        self.barra = BarraFeixe(self.amb, self.iface.mainWindow())
+        self.barra.abrir_painel.connect(self.abrir_painel)
+        self.barra.conta.connect(self.pedir_credenciais)
+        self.barra.camadas.connect(self.montar_camadas)
+        self.barra.sincronizar.connect(self.verificar_rede)
+        self.iface.addToolBar(self.barra)
+        self.barra.show()  # se a pessoa escondeu a barra, abrir o QGIS de novo a traz de volta
+        for acao in (self.barra.acao_painel, self.barra.acao_camadas, self.barra.acao_conta):
+            self.iface.addPluginToMenu("&Feixe", acao)
+        # Texto do Feixe na barra de status do QGIS (no protótipo: "Feixe · 2534-1 · 35/93" com a carga atual).
+        self.rotulo_status = QLabel("Feixe")
+        self.iface.statusBarIface().addPermanentWidget(self.rotulo_status, 0)
         self.sinais.estado_mudou.connect(self._aplicar_estado)
         self.iniciar_servidor()
         self.verificar_rede()
@@ -78,13 +81,16 @@ class FeixePlugin:
         if self.servidor:
             self.servidor.parar()
             self.servidor = None
-        if self.acao:
-            self.iface.removePluginMenu("&Feixe", self.acao)
-            self.iface.removeToolBarIcon(self.acao)
-        if self.dock:
-            self.iface.removeDockWidget(self.dock)
-            self.dock.deleteLater()
-            self.dock = None
+        if self.barra:
+            for acao in (self.barra.acao_painel, self.barra.acao_camadas, self.barra.acao_conta):
+                self.iface.removePluginMenu("&Feixe", acao)
+            self.iface.mainWindow().removeToolBar(self.barra)
+            self.barra.deleteLater()
+            self.barra = None
+        if self.rotulo_status:
+            self.iface.statusBarIface().removeWidget(self.rotulo_status)
+            self.rotulo_status.deleteLater()
+            self.rotulo_status = None
         dispatch.encerrar()
 
     # --- servidor local ------------------------------------------------------------------------
@@ -173,11 +179,8 @@ class FeixePlugin:
 
     def _publicar_estado(self, novo: dict):
         self.estado.update(novo)
-        if self.dock:
-            icone = "●" if self.estado["online"] else "○"
-            situacao = "online" if self.estado["online"] else "offline"
-            self.dock.mostrar_estado(f"{icone} {situacao} · {self.estado['detalhe']}")
-            self.dock.bt_sync.setEnabled(bool(self.estado["online"]))
+        if self.barra:
+            self.barra.mostrar_estado(bool(self.estado["online"]), self.estado["detalhe"])
         self.broker.publicar("estado", self.estado)
 
     def _aplicar_estado(self, novo: dict):
@@ -185,7 +188,7 @@ class FeixePlugin:
 
     # --- QGIS ----------------------------------------------------------------------------------
     def montar_camadas(self):
-        """Botão do dock: o mesmo caminho da rota POST /api/camadas/montar."""
+        """Botão da barra: o mesmo caminho da rota POST /api/camadas/montar."""
         if config.credenciais(self.amb) is None:
             self.pedir_credenciais()
             if config.credenciais(self.amb) is None:
