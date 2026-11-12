@@ -109,3 +109,59 @@ export type ResumoCargas = {
   folhas_pendentes: number
   passagens: Passagem[]
 }
+
+export type StatusNacional = 'PLANEJADA' | 'EM_PRODUCAO' | 'EM_CQ' | 'ENTREGUE_GCQ' | 'CONCLUIDA' | 'DEVOLVIDA'
+
+export type Lote = {
+  id: number
+  tipo: 'folha' | 'livre'
+  nome: string
+  folha_revisao: string
+  cod_projeto: number
+  projeto: string
+  id_tema: number
+  tema: string
+  uf: string
+  status_nacional: StatusNacional
+  etapa: string | null
+  fase: string | null
+  situacao: string | null
+  revisao_atual: number
+  cargas_total: number | null
+  cargas_concluidas: number | null
+  perc_concluidas: number | null
+  responsavel_principal: string | null
+  responsavel_nome: string | null
+  ultimo_cq_resultado: string | null
+}
+
+export type PassagemLote = {
+  id: number
+  etapa: string
+  fase: string
+  ordem: number
+  instancia: number
+  revisao: number | null
+  situacao: string
+  resultado: string | null
+  iniciada_em: string | null
+  concluida_em: string | null
+  cargas_total: number
+  cargas_concluidas: number
+}
+
+export type Fluxo = {
+  id: number
+  nome: string
+  cod_projeto: number
+  projeto: string
+  id_tema: number
+  tema: string
+  primeira_etapa: string | null
+}
+
+export type ResultadoCriacao = {
+  tema: string
+  criados: { cd_mi?: string; nome?: string; id_lote: number }[]
+  existentes: { cd_mi: string; id_lote: number; uf: string }[]
+}

@@ -2,6 +2,7 @@ import type { ComponentType } from 'react'
 import { ClipboardList, Info, ListOrdered, Map, Network, Settings2, Users } from 'lucide-react'
 import type { Papel } from '@/lib/api'
 import EmConstrucao from './EmConstrucao'
+import Folhas from './folhas/Folhas'
 import MinhasCargas from './MinhasCargas'
 import Sobre from './Sobre'
 
@@ -19,7 +20,7 @@ const emBreve = (item: string) => () => <EmConstrucao item={item} />
 // Navegação por papel (D-72). Cada item da fase B troca o seu `emBreve` pela tela de verdade.
 export const TELAS: Tela[] = [
   { id: 'minhas-cargas', rotulo: 'Minhas cargas', icone: ClipboardList, papeis: ['apm', 'avaliador', 'supervisor'], componente: MinhasCargas },
-  { id: 'folhas', rotulo: 'Folhas', icone: Map, papeis: ['supervisor', 'gerente'], componente: emBreve('B3') },
+  { id: 'folhas', rotulo: 'Folhas', icone: Map, papeis: ['supervisor', 'gerente'], componente: Folhas },
   { id: 'equipe', rotulo: 'Equipe', icone: Users, papeis: ['supervisor'], componente: emBreve('B5') },
   { id: 'filas', rotulo: 'Filas', icone: ListOrdered, papeis: ['supervisor'], componente: emBreve('B8') },
   { id: 'fluxos', rotulo: 'Fluxos', icone: Network, papeis: ['supervisor', 'gerente'], componente: emBreve('B6') },
