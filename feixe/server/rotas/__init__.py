@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from . import camadas, cargas, lotes, referencias
+from . import camadas, cargas, fluxos, lotes, referencias
 
-MODULOS: list = [camadas, cargas, lotes, referencias]
+MODULOS: list = [camadas, cargas, lotes, fluxos, referencias]
 
 
 def registrar(r, ctx) -> None:

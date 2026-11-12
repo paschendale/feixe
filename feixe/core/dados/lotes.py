@@ -144,6 +144,7 @@ _CAMPOS_LOTE = (
     "c.uf, c.status_nacional, c.etapa, c.fase, c.situacao, c.revisao_atual, c.cargas_total, c.cargas_concluidas, "
     "c.perc_concluidas, c.responsavel_principal, c.responsavel_nome, c.ultimo_cq_resultado, c.inicio, c.lead_time, "
     "(SELECT x.id_lote_etapa_atual FROM mapcartacomp.lote x WHERE x.id = c.id_lote) AS id_lote_etapa_atual, "
+    "(SELECT x.id_fluxo FROM mapcartacomp.lote x WHERE x.id = c.id_lote) AS id_fluxo, "
     "ST_XMin(c.geom) AS xmin, ST_YMin(c.geom) AS ymin, ST_XMax(c.geom) AS xmax, ST_YMax(c.geom) AS ymax"
 )
 
@@ -169,9 +170,11 @@ def um(ex: Executor, id_lote: int) -> Optional[Dict]:
     )
     if lote:
         lote["passagens"] = ex.todos(
-            "SELECT id_lote_etapa AS id, etapa, fase, ordem, instancia, revisao, situacao, resultado, iniciada_em, "
-            "concluida_em, cargas_total, cargas_concluidas FROM mapcartacomp.ctrl_lote_etapa WHERE id_lote = %s "
-            "ORDER BY coalesce(iniciada_em, concluida_em, 'infinity'::timestamptz), ordem, instancia",
+            "SELECT c.id_lote_etapa AS id, le.id_fluxo_etapa, c.etapa, c.fase, c.ordem, c.instancia, c.revisao, "
+            "c.situacao, c.resultado, c.iniciada_em, c.concluida_em, c.cargas_total, c.cargas_concluidas, "
+            "le.expor_ocorrencias FROM mapcartacomp.ctrl_lote_etapa c "
+            "JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa WHERE c.id_lote = %s "
+            "ORDER BY coalesce(c.iniciada_em, c.concluida_em, 'infinity'::timestamptz), c.id_lote_etapa",
             (id_lote,),
         )
     return lote

@@ -61,3 +61,23 @@ def test_gerente_ve_todas_as_ufs_e_supervisor_so_a_sua(montar):
     r, _ = montar(SUP)
     r.despachar("GET", "/api/lotes", {"tema": "3"}, None)
     assert ch["chamadas"] == [("listar", None, None), ("listar", "DF", 3)]
+
+
+def test_rotas_do_fluxo(montar, monkeypatch):
+    from feixe.core.dados import fluxos as df
+
+    chamadas = []
+    monkeypatch.setattr(
+        df, "acao", lambda ex, uf, le, qual, obs, res: chamadas.append((uf, le, qual, obs, res)) or {"id": 3}
+    )
+    monkeypatch.setattr(df, "do_modelo", lambda ex, uf, p, t, nome: {"id": 9, "cod_projeto": p})
+    r, ch = montar(SUP)
+    corpo = {"observacao": "ok", "resultado": "aprovada"}
+    assert r.despachar("POST", "/api/lote_etapas/7/gcq", {}, corpo) == (200, {"id": 3})
+    assert chamadas == [("DF", 7, "gcq", "ok", "aprovada")] and ch["eventos"] == ["lote"]
+    assert r.despachar("POST", "/api/lote_etapas/7/apagar", {}, corpo)[0] == 404
+    novo = {"modo": "modelo", "nome": "DF LML", "cod_projeto": 5, "id_tema": 3}
+    assert r.despachar("POST", "/api/fluxos", {}, novo)[0] == 200
+    assert r.despachar("POST", "/api/fluxos", {}, {**novo, "cod_projeto": 2})[0] == 403  # perfil C no projeto 2
+    r, _ = montar({**SUP, "papeis": ["apm"]})
+    assert r.despachar("POST", "/api/lote_etapas/7/iniciar", {}, corpo)[0] == 403
