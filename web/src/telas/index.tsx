@@ -1,0 +1,31 @@
+import type { ComponentType } from 'react'
+import { ClipboardList, Info, ListOrdered, Map, Network, Settings2, Users } from 'lucide-react'
+import type { Papel } from '@/lib/api'
+import EmConstrucao from './EmConstrucao'
+import Sobre from './Sobre'
+
+export type Tela = {
+  id: string
+  rotulo: string
+  icone: ComponentType<{ className?: string }>
+  // Quem vê a tela no menu. Vazio = todos. A API barra de novo: o menu só esconde.
+  papeis: Papel[]
+  componente: ComponentType
+}
+
+const emBreve = (item: string) => () => <EmConstrucao item={item} />
+
+// Navegação por papel (D-72). Cada item da fase B troca o seu `emBreve` pela tela de verdade.
+export const TELAS: Tela[] = [
+  { id: 'minhas-cargas', rotulo: 'Minhas cargas', icone: ClipboardList, papeis: ['apm', 'avaliador', 'supervisor'], componente: emBreve('B2') },
+  { id: 'folhas', rotulo: 'Folhas', icone: Map, papeis: ['supervisor', 'gerente'], componente: emBreve('B3') },
+  { id: 'equipe', rotulo: 'Equipe', icone: Users, papeis: ['supervisor'], componente: emBreve('B5') },
+  { id: 'filas', rotulo: 'Filas', icone: ListOrdered, papeis: ['supervisor'], componente: emBreve('B8') },
+  { id: 'fluxos', rotulo: 'Fluxos', icone: Network, papeis: ['supervisor', 'gerente'], componente: emBreve('B6') },
+  { id: 'atividades', rotulo: 'Atividades', icone: Settings2, papeis: [], componente: emBreve('B7') },
+  { id: 'sobre', rotulo: 'Sobre', icone: Info, papeis: [], componente: Sobre },
+]
+
+export function telasDe(papeis: Papel[]): Tela[] {
+  return TELAS.filter((t) => t.papeis.length === 0 || t.papeis.some((p) => papeis.includes(p)))
+}

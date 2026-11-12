@@ -1,141 +1,83 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useEffect } from 'react'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { api, type Eu, type Folha, type Status } from '@/lib/api'
-import { useEventos } from '@/lib/sse'
+import { Card, CardContent } from '@/components/ui/card'
+import { AvisosProvider } from '@/lib/avisos'
+import { navegar, useRota } from '@/lib/rotas'
+import { SessaoProvider, useSessao } from '@/lib/sessao'
+import { cn } from '@/lib/utils'
+import { telasDe } from '@/telas'
+
+function Casca() {
+  const { status, eu, conectado } = useSessao()
+  const rota = useRota()
+  const telas = telasDe(eu?.papeis ?? [])
+  const atual = telas.find((t) => t.id === rota.tela)
+
+  // Sem tela no endereço (ou tela que o papel não vê): vai para a primeira do menu.
+  useEffect(() => {
+    if (!atual && telas.length) navegar(telas[0].id)
+  }, [atual, telas])
+
+  const Componente = atual?.componente
+  return (
+    <div className="flex min-h-screen">
+      <aside className="w-56 shrink-0 border-r bg-muted/30 p-3">
+        <div className="mb-4 px-2 text-xl font-semibold">Feixe</div>
+        <nav className="flex flex-col gap-1">
+          {telas.map((t) => (
+            <a
+              key={t.id}
+              href={`#/${t.id}`}
+              className={cn(
+                'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent',
+                t.id === atual?.id && 'bg-accent font-medium',
+              )}
+            >
+              <t.icone className="size-4" />
+              {t.rotulo}
+            </a>
+          ))}
+        </nav>
+      </aside>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center justify-between border-b px-6 py-3">
+          <h1 className="text-lg font-semibold">{atual?.rotulo}</h1>
+          <div className="flex items-center gap-2">
+            {eu && (
+              <span className="text-right text-sm leading-tight" title={eu.conta}>
+                <span className="font-medium">{eu.nome}</span>
+                <span className="block text-muted-foreground">
+                  {eu.papel_rotulo}
+                  {eu.uf ? ` · ${eu.uf}` : ''}
+                  {eu.equipe ? ` · ${eu.equipe}` : ''}
+                </span>
+              </span>
+            )}
+            {status && (
+              <Badge style={{ background: status.cor_ambiente, color: 'white' }}>{status.rotulo_ambiente}</Badge>
+            )}
+            <Badge variant={conectado ? 'default' : 'destructive'}>{conectado ? 'QGIS conectado' : 'QGIS desconectado'}</Badge>
+          </div>
+        </header>
+        <main className="space-y-4 p-6">
+          {!conectado && (
+            <Card className="border-destructive">
+              <CardContent className="pt-6 text-sm">O QGIS fechou ou o plugin foi descarregado. Reabra o Feixe pelo QGIS.</CardContent>
+            </Card>
+          )}
+          {Componente && <Componente />}
+        </main>
+      </div>
+    </div>
+  )
+}
 
 export default function App() {
-  const [status, setStatus] = useState<Status | null>(null)
-  const [eu, setEu] = useState<Eu | null>(null)
-  const [erro, setErro] = useState<string | null>(null)
-  const [folhas, setFolhas] = useState<Folha[]>([])
-  const [busca, setBusca] = useState('')
-  const [carregando, setCarregando] = useState(false)
-
-  const carregarStatus = useCallback(() => {
-    api<Status>('/api/status').then(setStatus).catch((e) => setErro(String(e.message)))
-    // Sem banco ou sem credencial, o cabeçalho fica só com o ambiente; não é erro da tela.
-    api<Eu>('/api/eu').then(setEu).catch(() => setEu(null))
-  }, [])
-
-  const { conectado } = useEventos(['estado', 'configuracao'], () => carregarStatus())
-
-  useEffect(() => {
-    carregarStatus()
-  }, [carregarStatus])
-
-  async function buscarFolhas() {
-    setCarregando(true)
-    setErro(null)
-    try {
-      const r = await api<{ itens: Folha[] }>(`/api/folhas?limite=50&q=${encodeURIComponent(busca)}`)
-      setFolhas(r.itens)
-    } catch (e) {
-      setErro((e as Error).message)
-    } finally {
-      setCarregando(false)
-    }
-  }
-
-  async function zoom(f: Folha) {
-    try {
-      await api(`/api/folhas/${f.id}/zoom`, { method: 'POST' })
-    } catch (e) {
-      setErro((e as Error).message)
-    }
-  }
-
   return (
-    <main className="mx-auto max-w-5xl p-6 space-y-6">
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Feixe</h1>
-        <div className="flex items-center gap-2">
-          {eu && (
-            <span className="text-sm text-right leading-tight" title={eu.conta}>
-              <span className="font-medium">{eu.nome}</span>
-              <span className="block text-muted-foreground">
-                {eu.papel_rotulo}
-                {eu.uf ? ` · ${eu.uf}` : ''}
-                {eu.equipe ? ` · ${eu.equipe}` : ''}
-              </span>
-            </span>
-          )}
-          {status && (
-            <Badge style={{ background: status.cor_ambiente, color: 'white' }}>{status.rotulo_ambiente}</Badge>
-          )}
-          <Badge variant={conectado ? 'default' : 'destructive'}>{conectado ? 'QGIS conectado' : 'QGIS desconectado'}</Badge>
-        </div>
-      </header>
-
-      {!conectado && (
-        <Card className="border-destructive">
-          <CardContent className="pt-6 text-sm">
-            O QGIS fechou ou o plugin foi descarregado. Reabra o Feixe pelo QGIS.
-          </CardContent>
-        </Card>
-      )}
-
-      <section className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader><CardTitle className="text-sm">Banco</CardTitle></CardHeader>
-          <CardContent className="text-sm space-y-1">
-            <div>{status?.online ? '● online' : '○ offline'}</div>
-            <div className="text-muted-foreground">{status?.banco}</div>
-            {status && !status.credencial && <div className="text-destructive">usuário e senha não configurados (dock do QGIS)</div>}
-            <div className="text-muted-foreground">{status?.detalhe}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-sm">Usuário</CardTitle></CardHeader>
-          <CardContent className="text-sm space-y-1">
-            <div>{eu?.nome ?? status?.usuario ?? 'desconhecido (informe usuário e senha no dock do QGIS)'}</div>
-            {eu && (
-              <div className="text-muted-foreground">
-                {eu.conta} · {eu.uf ?? 'sem lotação'} · {eu.papeis.length ? eu.papeis.join(', ') : 'sem papel'}
-              </div>
-            )}
-            {eu && !eu.elegivel && (
-              <div className="text-destructive">conta inativa, de sistema ou super no SGBC: sem papel no Feixe</div>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-sm">Versões</CardTitle></CardHeader>
-          <CardContent className="text-sm space-y-1">
-            <div>plugin {status?.versao_plugin}</div>
-            <div className="text-muted-foreground">QGIS {status?.qgis}</div>
-          </CardContent>
-        </Card>
-      </section>
-
-      <Card>
-        <CardHeader><CardTitle>Folhas 1:100.000</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              buscarFolhas()
-            }}
-          >
-            <Input placeholder="MI, nome ou nomenclatura (ex.: 2534)" value={busca} onChange={(e) => setBusca(e.target.value)} />
-            <Button type="submit" disabled={carregando}>{carregando ? 'Buscando…' : 'Buscar'}</Button>
-          </form>
-          {erro && <p className="text-sm text-destructive">{erro}</p>}
-          <ul className="divide-y">
-            {folhas.map((f) => (
-              <li key={f.id} className="flex items-center justify-between py-2 text-sm">
-                <span>
-                  <span className="font-mono">{f.cd_mi}</span> · {f.nm_carta ?? '—'} · <span className="text-muted-foreground">{f.nomenclatura}</span>
-                </span>
-                <Button size="sm" variant="outline" onClick={() => zoom(f)} disabled={!conectado}>Zoom no QGIS</Button>
-              </li>
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
-    </main>
+    <SessaoProvider>
+      <AvisosProvider>
+        <Casca />
+      </AvisosProvider>
+    </SessaoProvider>
   )
 }
