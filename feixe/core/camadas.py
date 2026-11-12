@@ -6,7 +6,9 @@ C passam a ler do workspace local. Roda na thread principal (mexe no projeto e n
 - Minhas cargas: `vw_carga_trabalho` (cargas da conta conectada, current_user), com o estilo do projeto "Aquisição de
   ADE" do DF (concluída há menos de 3 dias, há mais de 3 dias, pendente). Só `concluido` é editável: concluir pela
   tabela de atributos grava no banco, e as regras preenchem `concluido_em`.
-- Folhas: `ctrl_lote` da UF, rotulada "MI-revisão · responsável · etapa", com o estilo da articulação do DF.
+- Folhas: subgrupo com uma camada por tema ("Folhas · Hidrografia"...), de `ctrl_lote` da UF, rotulada
+  "MI-revisão · responsável · etapa", com o estilo da articulação do DF. A mesma folha tem um lote por tema; numa
+  camada só, os rótulos dos temas se sobrepunham. Só o tema com mais folhas fica ligado.
 - Só para supervisor: Cargas por responsável (uma cor por pessoa) e Cargas disponíveis (responsável nulo), das
   passagens atuais dos lotes da UF.
 """
@@ -100,11 +102,11 @@ def _por_responsavel(camada: QgsVectorLayer, responsaveis: List[Dict]) -> None:
     camada.setRenderer(QgsCategorizedSymbolRenderer("responsavel", categorias))
 
 
-def montar(amb: Ambiente, authcfg: str, eu: Dict, responsaveis: List[Dict]) -> Dict:
+def montar(amb: Ambiente, authcfg: str, eu: Dict, responsaveis: List[Dict], temas: List[Dict]) -> Dict:
     """(Re)monta o grupo Feixe no topo do projeto. Montar de novo substitui o grupo, não duplica.
 
     `eu` é o objeto de GET /api/eu; `responsaveis` vem de `dados.cargas.responsaveis_atuais` (só usado para
-    supervisor). Devolve o nome e a contagem de feições de cada camada.
+    supervisor); `temas` de `dados.lotes.temas_com_lotes`. Devolve o nome e a contagem de feições de cada camada.
     """
     if not authcfg:
         raise RuntimeError("usuário e senha ainda não configurados")
@@ -137,10 +139,16 @@ def montar(amb: Ambiente, authcfg: str, eu: Dict, responsaveis: List[Dict]) -> D
             )
         )
         camadas += [por_resp, disponiveis]
-    folhas = _camada(amb, authcfg, "Folhas", "ctrl_lote", "id_lote", _filtro_uf(uf), "folhas.qml")
-    camadas.append(folhas)
-
     for c in camadas:
         projeto.addMapLayer(c, False)
         grupo.addLayer(c)
+
+    sub = grupo.addGroup("Folhas")
+    ligado = max(temas, key=lambda t: t.get("lotes") or 0)["id"] if temas else None
+    for t in temas:
+        filtro = " AND ".join(p for p in (_filtro_uf(uf), f"id_tema = {int(t['id'])}") if p)
+        folhas = _camada(amb, authcfg, f"Folhas · {t['nome']}", "ctrl_lote", "id_lote", filtro, "folhas.qml")
+        projeto.addMapLayer(folhas, False)
+        sub.addLayer(folhas).setItemVisibilityChecked(t["id"] == ligado)
+        camadas.append(folhas)
     return {"camadas": [{"nome": c.name(), "feicoes": c.featureCount()} for c in camadas]}

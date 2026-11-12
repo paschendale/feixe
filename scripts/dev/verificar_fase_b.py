@@ -97,7 +97,7 @@ def b0(amb, usuario, senha):
 def b1(amb, usuario, senha):
     """Camadas do Feixe: grupo, estilos, filtros por UF e passagem atual, edição de concluido."""
     from feixe.core import camadas
-    from feixe.core.dados import cargas
+    from feixe.core.dados import cargas, lotes
     from qgis.core import QgsProject
 
     # A conta de dev (postgres) não tem cargas: copia 5 cargas pendentes de uma passagem atual do DF para ela.
@@ -122,29 +122,40 @@ def b1(amb, usuario, senha):
         eu = {"uf": "DF", "papeis": ["supervisor"]}
         with db.transacao(amb, usuario, senha) as ex:
             resp = cargas.responsaveis_atuais(ex, "DF")
+            temas = lotes.temas_com_lotes(ex, "DF")
+            por_tema = {
+                f"Folhas · {r['nome']}": r["n"]
+                for r in ex.todos(
+                    "SELECT t.nome, count(*) AS n FROM mapcartacomp.ctrl_lote c JOIN mapcartacomp.tema t "
+                    "ON t.id = c.id_tema WHERE c.uf = 'DF' GROUP BY t.nome"
+                )
+            }
             esperado = ex.um(
                 "SELECT count(*) FILTER (WHERE responsavel IS NOT NULL) AS atribuidas, "
                 "count(*) FILTER (WHERE responsavel IS NULL) AS disponiveis FROM mapcartacomp.carga_trabalho "
                 "WHERE uf = 'DF' AND id_lote_etapa IN (" + cargas.SQL_PASSAGENS_ATUAIS + " AND l.uf = 'DF')"
             )
-            n_folhas = ex.um("SELECT count(*) AS n FROM mapcartacomp.ctrl_lote WHERE uf = 'DF'")["n"]
         authcfg = config.authcfg_id(amb)
-        camadas.montar(amb, authcfg, eu, resp)
-        r = camadas.montar(amb, authcfg, eu, resp)  # de novo: substitui, não duplica
+        camadas.montar(amb, authcfg, eu, resp, temas)
+        r = camadas.montar(amb, authcfg, eu, resp, temas)  # de novo: substitui, não duplica
         raiz = QgsProject.instance().layerTreeRoot()
         assert [g.name() for g in raiz.children()].count("Feixe") == 1
-        assert len(QgsProject.instance().mapLayers()) == 4, QgsProject.instance().mapLayers()
+        assert len(QgsProject.instance().mapLayers()) == 3 + len(temas), QgsProject.instance().mapLayers()
+        assert len(temas) > 1, temas
         n = {c["nome"]: c["feicoes"] for c in r["camadas"]}
         assert n == {
             "Minhas cargas": 5,
             "Cargas por responsável": esperado["atribuidas"],
             "Cargas disponíveis": esperado["disponiveis"],
-            "Folhas": n_folhas,
+            **por_tema,
         }, n
         ok(f"grupo único, contagens conferem: {n}")
         assert len(resp) > 1, resp
         cats = QgsProject.instance().mapLayersByName("Cargas por responsável")[0].renderer().categories()
         assert len(cats) == len(resp) and all(c.label() for c in cats)
+        ligadas = [n.name() for n in raiz.findGroup("Feixe").findGroup("Folhas").findLayers() if n.isVisible()]
+        assert ligadas == ["Folhas · Hidrografia"], ligadas
+        ok("subgrupo Folhas com um tema ligado: o de mais folhas")
         ok(f"{len(cats)} responsáveis com cor e nome, ex.: {cats[0].label()}")
 
         minhas = QgsProject.instance().mapLayersByName("Minhas cargas")[0]
@@ -166,7 +177,7 @@ def b1(amb, usuario, senha):
         assert linha["concluido"] and linha["concluido_em"] is not None, linha
         ok("concluir pela tabela de atributos grava no banco e preenche concluido_em")
 
-        caminho = _renderizar(os.path.join(SAIDA, "feixe-b1-camadas.png"), "Folhas")
+        caminho = _renderizar(os.path.join(SAIDA, "feixe-b1-camadas.png"), "Folhas · Hidrografia")
         ok(f"imagem das camadas em {caminho}")
     finally:
         QgsProject.instance().clear()
@@ -180,7 +191,7 @@ def _renderizar(caminho, camada_extensao):
     from qgis.PyQt.QtCore import QSize
 
     projeto = QgsProject.instance()
-    ordem = [n.layer() for n in projeto.layerTreeRoot().findLayers()]
+    ordem = [n.layer() for n in projeto.layerTreeRoot().findLayers() if n.isVisible()]
     ms = QgsMapSettings()
     ms.setLayers(ordem)
     ms.setDestinationCrs(ordem[0].crs())

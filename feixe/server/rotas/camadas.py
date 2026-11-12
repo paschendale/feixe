@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ...core.dados import cargas
+from ...core.dados import cargas, lotes
 
 TODOS = ("gerente", "supervisor", "avaliador", "apm", "consulta")
 
@@ -11,10 +11,11 @@ def montar(ctx) -> dict:
     """Usada pela rota e pelo botão da barra. As consultas rodam aqui; o QGIS só recebe o resultado."""
     eu = ctx.eu()
     responsaveis = []
-    if "supervisor" in eu["papeis"]:
-        with ctx.tx() as ex:
+    with ctx.tx() as ex:
+        temas = lotes.temas_com_lotes(ex, eu.get("uf"))
+        if "supervisor" in eu["papeis"]:
             responsaveis = cargas.responsaveis_atuais(ex, eu.get("uf"))
-    resultado = ctx.qgis("montar_camadas", eu, responsaveis)
+    resultado = ctx.qgis("montar_camadas", eu, responsaveis, temas)
     ctx.publicar("qgis", {"acao": "camadas", **resultado})
     return resultado
 

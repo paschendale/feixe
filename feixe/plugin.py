@@ -38,8 +38,8 @@ class FeixePlugin:
         self.broker = Broker()
         # Ações que as rotas pedem ao QGIS, por nome; cada item da fase B registra as suas. Rodam na thread principal.
         self.acoes_qgis = {
-            "montar_camadas": lambda eu, responsaveis: camadas.montar(
-                self.amb, config.authcfg_id(self.amb), eu, responsaveis
+            "montar_camadas": lambda eu, responsaveis, temas: camadas.montar(
+                self.amb, config.authcfg_id(self.amb), eu, responsaveis, temas
             ),
         }
         self.barra = None
