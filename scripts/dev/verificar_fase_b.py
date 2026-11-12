@@ -185,6 +185,65 @@ def b1(amb, usuario, senha):
             ex.executar("DELETE FROM mapcartacomp.carga_trabalho WHERE uuid::text = ANY(%s)", (copias,))
 
 
+@secao("b2")
+def b2(amb, usuario, senha):
+    """Minhas cargas: próxima e concluir pelo caminho da barra, com seleção e recarga da camada no QGIS."""
+    from feixe.core import camadas
+    from feixe.core.dados import cargas as dc
+    from feixe.server.api import Contexto
+    from feixe.server.rotas import cargas as rc
+    from qgis.core import QgsProject
+
+    copias = []
+    with db.transacao(amb, usuario, senha) as ex:
+        origem = ex.todos(
+            "SELECT c.id_lote_etapa, c.id_atividade, c.uf, c.geom FROM mapcartacomp.carga_trabalho c "
+            "JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa AND le.situacao = 'em_andamento' "
+            "WHERE c.uf = 'DF' AND c.id_cq_plano IS NULL AND c.geocodigo IS NULL "
+            "AND c.id_lote_etapa = (SELECT min(id_lote_etapa) FROM mapcartacomp.carga_trabalho c2 "
+            "JOIN mapcartacomp.lote_etapa le2 ON le2.id = c2.id_lote_etapa AND le2.situacao = 'em_andamento' "
+            "WHERE c2.uf = 'DF' AND c2.id_cq_plano IS NULL) ORDER BY c.id LIMIT 4"
+        )
+        for o in origem:
+            u = novo_uuid()
+            ex.executar(
+                "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_atividade, uf, responsavel, geom) "
+                "VALUES (%s, %s, %s, %s, current_user, %s)",
+                (u, o["id_lote_etapa"], o["id_atividade"], o["uf"], o["geom"]),
+            )
+            copias.append(u)
+    try:
+        camadas.montar(amb, config.authcfg_id(amb), {"uf": "DF", "papeis": ["apm"]}, [], [])
+        focadas = []
+        ctx = Contexto(
+            transacao=lambda: db.transacao(amb, usuario, senha),
+            qgis=lambda nome, *a: {
+                "focar_carga": lambda c, p: (camadas.selecionar_carga(c["id"]), focadas.append(c["id"])),
+                "cargas_mudaram": lambda p: camadas.recarregar_cargas(),
+            }[nome](*a),
+        )
+        r = rc.proxima(ctx)
+        assert r["carga"] is not None and camadas.carga_selecionada() == r["carga"]["id"] == focadas[-1]
+        ok(f"próxima carga selecionada na camada: {r['carga']['folha_revisao']} #{r['carga']['id']}")
+        alvo = camadas.carga_selecionada()
+        r = rc.concluir(ctx, alvo)
+        assert r["progresso"]["concluidas"] == 1 and r["progresso"]["total"] == 4, r["progresso"]
+        minhas = camadas.camada_minhas()
+        feicao = next(minhas.getFeatures(f'"id_carga_trabalho" = {alvo}'))
+        assert feicao["concluido"] is True or feicao["concluido"] == 1, feicao["concluido"]
+        ok("concluir grava, recarrega a camada e devolve o progresso 1/4")
+        seguinte = rc.proxima(ctx, alvo)["carga"]
+        assert seguinte["id"] != alvo and not seguinte["concluido"]
+        ok("a seguinte é outra carga pendente")
+        with db.transacao(amb, usuario, senha) as ex:
+            assert not dc.desfazer(ex, alvo)["carga"]["concluido"]
+        ok("desfazer dentro de 24 horas")
+    finally:
+        QgsProject.instance().clear()
+        with db.transacao(amb, usuario, senha) as ex:
+            ex.executar("DELETE FROM mapcartacomp.carga_trabalho WHERE uuid::text = ANY(%s)", (copias,))
+
+
 def _renderizar(caminho, camada_extensao):
     """Renderiza as camadas do projeto num PNG, na extensão da camada indicada (para conferir os estilos)."""
     from qgis.core import QgsMapRendererParallelJob, QgsMapSettings, QgsProject

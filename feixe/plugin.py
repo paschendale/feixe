@@ -12,10 +12,12 @@ from qgis.PyQt.QtWidgets import QLabel, QMessageBox
 
 from .core import ambiente as ambmod
 from .core import camadas, config, db, dispatch, log
+from .core.dados import ErroDados
 from .core.versao import raiz_plugin, versao_plugin
 from .server.api import Contexto, ErroApi, criar_roteador
 from .server.http import ServidorLocal
 from .server.rotas import camadas as rotas_camadas
+from .server.rotas import cargas as rotas_cargas
 from .server.sse import Broker
 from .ui.barra import BarraFeixe, DialogoCredenciais
 
@@ -41,6 +43,8 @@ class FeixePlugin:
             "montar_camadas": lambda eu, responsaveis, temas: camadas.montar(
                 self.amb, config.authcfg_id(self.amb), eu, responsaveis, temas
             ),
+            "focar_carga": self.focar_carga,
+            "cargas_mudaram": self.cargas_mudaram,
         }
         self.barra = None
         self.rotulo_status = None
@@ -62,6 +66,8 @@ class FeixePlugin:
         self.barra.conta.connect(self.pedir_credenciais)
         self.barra.camadas.connect(self.montar_camadas)
         self.barra.sincronizar.connect(self.verificar_rede)
+        self.barra.proxima.connect(self.proxima_carga)
+        self.barra.concluir.connect(self.concluir_carga)
         self.iface.addToolBar(self.barra)
         self.barra.show()  # se a pessoa escondeu a barra, abrir o QGIS de novo a traz de volta
         for acao in (self.barra.acao_painel, self.barra.acao_camadas, self.barra.acao_conta):
@@ -185,6 +191,75 @@ class FeixePlugin:
 
     def _aplicar_estado(self, novo: dict):
         self._publicar_estado(novo)
+
+    # --- barra: próxima carga e concluir carga (B2) ---------------------------------------------
+    def _pronto(self) -> bool:
+        if config.credenciais(self.amb) is None:
+            self.pedir_credenciais()
+            if config.credenciais(self.amb) is None:
+                return False
+        if not self.servidor:
+            self.iniciar_servidor()
+        return True
+
+    def _executar(self, fn, *args):
+        """Roda uma ação da barra pelo mesmo caminho da API; recusa vira aviso na barra de mensagens."""
+        try:
+            return fn(self.ctx, *args)
+        except (ErroApi, ErroDados) as e:
+            self.iface.messageBar().pushMessage("Feixe", e.mensagem, Qgis.Warning, 6)
+        except Exception as e:  # noqa: BLE001
+            log.erro(f"{getattr(fn, '__name__', fn)}: {e}")
+            self.iface.messageBar().pushMessage("Feixe", f"Não deu certo: {e}", Qgis.Critical, 8)
+        return None
+
+    def proxima_carga(self):
+        if not self._pronto():
+            return
+        if camadas.camada_minhas() is None:
+            self.montar_camadas()
+        r = self._executar(rotas_cargas.proxima, camadas.carga_selecionada())
+        if r is not None and r["carga"] is None:
+            self.iface.messageBar().pushMessage("Feixe", "Você não tem carga pendente.", Qgis.Info, 5)
+
+    def concluir_carga(self):
+        """Conclui a carga selecionada em Minhas cargas e passa para a próxima, como no protótipo."""
+        if not self._pronto():
+            return
+        id_carga = camadas.carga_selecionada()
+        if id_carga is None:
+            self.iface.messageBar().pushMessage(
+                "Feixe", "Selecione uma carga na camada Minhas cargas (ou use Próxima carga).", Qgis.Info, 6
+            )
+            return
+        r = self._executar(rotas_cargas.concluir, id_carga)
+        if r is None:
+            return
+        p = r["progresso"]
+        self.iface.messageBar().pushMessage(
+            "Feixe", f"Carga concluída · {p['folha_revisao']} · {p['concluidas']}/{p['total']}", Qgis.Success, 3
+        )
+        self._executar(rotas_cargas.proxima, id_carga)
+
+    def focar_carga(self, carga, progresso):
+        """Seleciona a carga em Minhas cargas e enquadra com folga de duas células para cada lado."""
+        camadas.selecionar_carga(carga["id"])
+        largura = carga["xmax"] - carga["xmin"]
+        altura = carga["ymax"] - carga["ymin"]
+        self.zoom_para(
+            carga["xmin"] - 2 * largura, carga["ymin"] - 2 * altura, carga["xmax"] + 2 * largura,
+            carga["ymax"] + 2 * altura, 4674,
+        )  # fmt: skip
+        self.mostrar_progresso(progresso)
+
+    def cargas_mudaram(self, progresso):
+        camadas.recarregar_cargas()
+        self.mostrar_progresso(progresso)
+
+    def mostrar_progresso(self, progresso):
+        if self.rotulo_status and progresso:
+            p = progresso
+            self.rotulo_status.setText(f"Feixe · {p['folha_revisao']} · {p['concluidas']}/{p['total']}")
 
     # --- QGIS ----------------------------------------------------------------------------------
     def montar_camadas(self):

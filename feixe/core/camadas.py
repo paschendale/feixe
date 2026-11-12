@@ -152,3 +152,44 @@ def montar(amb: Ambiente, authcfg: str, eu: Dict, responsaveis: List[Dict], tema
         sub.addLayer(folhas).setItemVisibilityChecked(t["id"] == ligado)
         camadas.append(folhas)
     return {"camadas": [{"nome": c.name(), "feicoes": c.featureCount()} for c in camadas]}
+
+
+# --- Minhas cargas: seleção e recarga (B2) ---------------------------------------------------------------------------
+
+
+def camada_minhas() -> Optional[QgsVectorLayer]:
+    grupo = QgsProject.instance().layerTreeRoot().findGroup(GRUPO)
+    if grupo is None:
+        return None
+    for no in grupo.findLayers():
+        if no.layer() is not None and no.layer().name() == "Minhas cargas":
+            return no.layer()
+    return None
+
+
+def carga_selecionada() -> Optional[int]:
+    """Id da primeira carga selecionada na camada Minhas cargas, ou None."""
+    camada = camada_minhas()
+    if camada is None:
+        return None
+    for f in camada.getSelectedFeatures():
+        return int(f["id_carga_trabalho"])
+    return None
+
+
+def selecionar_carga(id_carga: int) -> None:
+    camada = camada_minhas()
+    if camada is not None:
+        camada.selectByExpression(f'"id_carga_trabalho" = {int(id_carga)}')
+
+
+def recarregar_cargas() -> None:
+    """As camadas do grupo Feixe releem o banco (depois de concluir ou desfazer por fora da tabela de atributos)."""
+    grupo = QgsProject.instance().layerTreeRoot().findGroup(GRUPO)
+    if grupo is None:
+        return
+    for no in grupo.findLayers():
+        camada = no.layer()
+        if camada is not None and not camada.isEditable():
+            camada.dataProvider().reloadData()
+            camada.triggerRepaint()

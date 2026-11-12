@@ -36,6 +36,8 @@ class BarraFeixe(QToolBar):
     camadas = pyqtSignal()
     conta = pyqtSignal()
     sincronizar = pyqtSignal()
+    proxima = pyqtSignal()
+    concluir = pyqtSignal()
 
     def __init__(self, amb: Ambiente, parent=None):
         super().__init__("Feixe", parent)
@@ -67,7 +69,15 @@ class BarraFeixe(QToolBar):
         camadas.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self.addWidget(camadas)
 
-        # Ações de alta frequência entram aqui conforme o papel (B2: próxima carga e concluir carga).
+        # Ações de alta frequência (B2): próxima carga e concluir a selecionada. As de CQ entram na fase D.
+        self.acao_proxima = QAction(icone("proxima"), "Próxima carga", self)
+        self.acao_proxima.setToolTip("Seleciona e enquadra a sua carga pendente mais próxima")
+        self.acao_proxima.triggered.connect(self.proxima)
+        self.acao_concluir = QAction(icone("concluir"), "Concluir carga", self)
+        self.acao_concluir.setToolTip("Conclui a carga selecionada em Minhas cargas e passa para a próxima")
+        self.acao_concluir.triggered.connect(self.concluir)
+        self.addAction(self.acao_proxima)
+        self.addAction(self.acao_concluir)
         self._ancora_acoes = self.addSeparator()
 
         # Selo do ambiente só fora da produção, para ninguém confundir dev ou homologação com o banco de verdade.
