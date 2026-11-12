@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from . import ErroDados, Executor
+from . import ErroDados, Executor, novo_uuid
 
 # Passagens atuais e abertas dos lotes (pendentes ou em andamento): é o que o supervisor está distribuindo agora. A
 # passagem atual já concluída (folha esperando o supervisor andar) fica de fora.
@@ -163,3 +163,70 @@ def proxima(ex: Executor, referencia: Optional[int] = None) -> Optional[Dict]:
         "NULLS LAST, folha_revisao, c.id LIMIT 1",
         (referencia, referencia),
     )
+
+
+# --- Gerar cargas pela grade estatística (B4) ------------------------------------------------------------------------
+
+
+def _passagem_para_gerar(ex: Executor, id_lote_etapa: int, uf: Optional[str]) -> Dict:
+    p = ex.um(
+        "SELECT le.id, le.situacao, le.uf, le.id_fluxo_etapa, l.tipo, "
+        "mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, fe.nome AS etapa, "
+        "coalesce(l.geom, ST_Multi(a.geom)) AS geom FROM mapcartacomp.lote_etapa le "
+        "JOIN mapcartacomp.lote l ON l.id = le.id_lote JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+        "LEFT JOIN mapcartctrl.t_articulacao_scn a ON a.id_articulacao_scn = l.id_articulacao_scn WHERE le.id = %s",
+        (id_lote_etapa,),
+    )
+    if not p or (uf and p["uf"] != uf):
+        raise ErroDados("passagem não encontrada", 404)
+    if p["situacao"] not in ABERTAS:
+        raise ErroDados(f"{p['folha_revisao']}: a etapa {p['etapa']} já foi encerrada")
+    grade = ex.todos(
+        "SELECT a.id, a.nome, a.grade_nivel FROM mapcartacomp.fluxo_etapa_atividade fea "
+        "JOIN mapcartacomp.atividade a ON a.id = fea.id_atividade "
+        "WHERE fea.id_fluxo_etapa = %s AND a.geracao = 'grade' AND a.ativo",
+        (p["id_fluxo_etapa"],),
+    )
+    if len(grade) != 1 or not grade[0]["grade_nivel"]:
+        raise ErroDados(
+            f"{p['folha_revisao']}: a etapa {p['etapa']} precisa de exatamente uma atividade com cargas pela grade "
+            f"estatística e nível definido (tem {len(grade)})"
+        )
+    p["atividade"] = grade[0]
+    if ex.um(
+        "SELECT 1 FROM mapcartacomp.carga_trabalho WHERE id_lote_etapa = %s AND id_atividade = %s LIMIT 1",
+        (id_lote_etapa, grade[0]["id"]),
+    ):
+        raise ErroDados(f"{p['folha_revisao']}: esta etapa já tem cargas de {grade[0]['nome']}")
+    return p
+
+
+def gerar_pela_grade(ex: Executor, id_lote_etapa: int, previa: bool, uf: Optional[str] = None) -> Dict:
+    """Cargas da passagem: células da grade estatística no nível da atividade, com centroide no lote, inteiras e com
+    geocódigo (D-73). Prévia devolve as células (geocódigo e WKT) sem gravar; gravar cria as cargas disponíveis."""
+    p = _passagem_para_gerar(ex, id_lote_etapa, uf)
+    a = p["atividade"]
+    celulas = ex.todos(
+        "SELECT geocodigo, ST_AsText(geom) AS wkt FROM mapcartacomp.f_grade_celulas(%s, %s)",
+        (p["geom"], a["grade_nivel"]),
+    )
+    if not celulas:
+        raise ErroDados(f"{p['folha_revisao']}: nenhuma célula da grade tem o centroide dentro do lote")
+    resumo = {
+        "id_lote_etapa": id_lote_etapa,
+        "folha_revisao": p["folha_revisao"],
+        "etapa": p["etapa"],
+        "atividade": a["nome"],
+        "grade_nivel": a["grade_nivel"],
+        "celulas": len(celulas),
+    }
+    if previa:
+        return {**resumo, "gravadas": 0, "previa": celulas}
+    geocodigos = [c["geocodigo"] for c in celulas]
+    gravadas = ex.executar(
+        "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_atividade, geocodigo, geom) "
+        "SELECT u.id, %s, %s, c.geocodigo, c.geom FROM mapcartacomp.f_grade_celulas(%s, %s) c "
+        "JOIN unnest(%s::text[], %s::uuid[]) AS u (geocodigo, id) ON u.geocodigo = c.geocodigo",
+        (id_lote_etapa, a["id"], p["geom"], a["grade_nivel"], geocodigos, [novo_uuid() for _ in geocodigos]),
+    )
+    return {**resumo, "gravadas": gravadas}
