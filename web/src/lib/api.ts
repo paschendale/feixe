@@ -72,3 +72,40 @@ export type Eu = {
   gerente: boolean
   equipe: string | null
 }
+
+export type Carga = {
+  id: number
+  uuid: string
+  id_lote_etapa: number
+  id_lote: number
+  folha_revisao: string
+  tema: string
+  etapa: string
+  atividade: string
+  geocodigo: string | null
+  concluido: boolean
+  concluido_em: string | null
+  situacao_etapa: string
+}
+
+export type Progresso = { id_lote_etapa: number; folha_revisao: string; concluidas: number; total: number }
+
+export type Passagem = {
+  id_lote_etapa: number
+  id_lote: number
+  folha_revisao: string
+  tema: string
+  etapa: string
+  situacao: 'pendente' | 'em_andamento' | 'concluida' | 'pulada'
+  total: number
+  concluidas: number
+  ultima_conclusao: string | null
+}
+
+export type ResumoCargas = {
+  concluidas: number
+  desde: string | null
+  pendentes: number
+  folhas_pendentes: number
+  passagens: Passagem[]
+}
