@@ -38,18 +38,30 @@ def mundo(banco):
             "VALUES (5, %s, 'aquisicao', 'teste grants') RETURNING id",
             (tema,),
         )
-        dados = {"tema": tema}
+        ativ_cq = _um(
+            cur,
+            "INSERT INTO mapcartacomp.atividade (cod_projeto, id_tema, fase, nome, id_medidadequalidade) "
+            "SELECT 5, %s, 'cq', 'teste grants CQ', id FROM mapcartctrl.t_qua_medidadequalidade "
+            "WHERE nome = 'Nome Geográfico' RETURNING id",
+            (tema,),
+        )
+        dados = {"tema": tema, "ativ": ativ, "ativ_cq": ativ_cq}
         for uf, mi in (("DF", "2534"), ("GO", "2604")):
             fluxo = _um(
                 cur,
                 "INSERT INTO mapcartacomp.fluxo (cod_projeto, id_tema, uf, nome) VALUES (5, %s, %s, 'f') RETURNING id",
                 (tema, uf),
             )
-            etapa = _um(
-                cur,
-                "INSERT INTO mapcartacomp.fluxo_etapa (id_fluxo, ordem, id_atividade, nome) "
-                "VALUES (%s, 1, %s, 'Aquisição') RETURNING id",
-                (fluxo, ativ),
+            etapa, etapa_cq = (
+                _um(
+                    cur,
+                    "WITH e AS (INSERT INTO mapcartacomp.fluxo_etapa (id_fluxo, ordem, fase, nome) "
+                    "VALUES (%s, %s, %s, %s) RETURNING id) "
+                    "INSERT INTO mapcartacomp.fluxo_etapa_atividade (id_fluxo_etapa, id_atividade) "
+                    "SELECT id, %s FROM e RETURNING id_fluxo_etapa",
+                    (fluxo, ordem, fase, nome, a),
+                )
+                for ordem, fase, nome, a in ((1, "aquisicao", "Aquisição", ativ), (2, "cq", "CQ", ativ_cq))
             )
             folha = _um(cur, "SELECT id_articulacao_scn FROM mapcartctrl.v_articulacao_scn_100000 WHERE cd_mi = %s",
                         (mi,))  # fmt: skip
@@ -68,14 +80,14 @@ def mundo(banco):
             # Uma célula de 0,05° no canto da folha do lote.
             carga = _um(
                 cur,
-                "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, responsavel, geom) "
-                "SELECT %s, %s, %s, ST_Multi(ST_MakeEnvelope(ST_XMin(a.geom), ST_YMin(a.geom), "
+                "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_atividade, responsavel, geom) "
+                "SELECT %s, %s, %s, %s, ST_Multi(ST_MakeEnvelope(ST_XMin(a.geom), ST_YMin(a.geom), "
                 "ST_XMin(a.geom) + 0.05, ST_YMin(a.geom) + 0.05, 4674)) "
                 "FROM mapcartacomp.lote l JOIN mapcartctrl.t_articulacao_scn a USING (id_articulacao_scn) "
                 "WHERE l.id = %s RETURNING id",
-                (str(uuid.uuid4()), le, f"feixe_teste_{uf.lower()}", lote),
+                (str(uuid.uuid4()), le, ativ, f"feixe_teste_{uf.lower()}", lote),
             )
-            dados[uf] = {"fluxo": fluxo, "lote": lote, "le": le, "carga": carga}
+            dados[uf] = {"fluxo": fluxo, "lote": lote, "le": le, "carga": carga, "etapa_cq": etapa_cq}
         yield cur, dados
 
 
@@ -133,17 +145,27 @@ def test_quem_nao_tem_grant_nao_le(mundo, psycopg2):
 def test_avaliacao_recalcula_plano(mundo):
     """As derivações rodam como dono do schema: a avaliação feita por um usuário fecha a carga e o plano."""
     cur, d = mundo
-    carga = d["DF"]["carga"]
+    le = _um(
+        cur,
+        "INSERT INTO mapcartacomp.lote_etapa (uuid, id_lote, id_fluxo_etapa, situacao) "
+        "VALUES (%s, %s, %s, 'em_andamento') RETURNING id",
+        (str(uuid.uuid4()), d["DF"]["lote"], d["DF"]["etapa_cq"]),
+    )
     plano = _um(
         cur,
-        "INSERT INTO mapcartacomp.cq_plano (uuid, id_lote_etapa, elementos, numero_aceitacao_ac) "
-        "VALUES (%s, %s, ARRAY['Nome'], 0) RETURNING id",
-        (str(uuid.uuid4()), d["DF"]["le"]),
+        "INSERT INTO mapcartacomp.cq_plano (uuid, id_lote_etapa, id_atividade, numero_aceitacao_ac) "
+        "VALUES (%s, %s, %s, 0) RETURNING id",
+        (str(uuid.uuid4()), le, d["ativ_cq"]),
+    )
+    carga = _um(
+        cur,
+        "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_atividade, id_cq_plano, responsavel, geom) "
+        "SELECT %s, %s, %s, %s, 'feixe_teste_df', geom FROM mapcartacomp.carga_trabalho WHERE id = %s RETURNING id",
+        (str(uuid.uuid4()), le, d["ativ_cq"], plano, d["DF"]["carga"]),
     )
     amostra = _um(
         cur,
-        "INSERT INTO mapcartacomp.cq_amostra (uuid, id_cq_plano, id_carga_trabalho, elemento) "
-        "VALUES (%s, %s, %s, 'Nome') RETURNING id",
+        "INSERT INTO mapcartacomp.cq_amostra (uuid, id_cq_plano, id_carga_trabalho) VALUES (%s, %s, %s) RETURNING id",
         (str(uuid.uuid4()), plano, carga),
     )
     _como(cur, "feixe_teste_df")

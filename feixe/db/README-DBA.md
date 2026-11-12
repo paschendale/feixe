@@ -18,15 +18,16 @@ flowchart LR
 | `ccar/003_lotes.sql` | Lotes (folhas e lotes livres), passagens por etapa e histórico |
 | `ccar/004_cargas_cq.sql` | Planos de amostragem, cargas de trabalho, amostras e ocorrências de inspeção |
 | `ccar/005_sync_log.sql` | Registro da sincronização |
-| `ccar/006_regras.sql` | Triggers: datas de conclusão e avaliação, auditoria, derivação do status nacional, recusa de carga fora da folha |
+| `ccar/006_regras.sql` | Triggers: datas de conclusão e avaliação, auditoria, derivação do status nacional, recusa de carga fora da folha ou de atividade fora da etapa |
 | `ccar/007_views.sql` | Views de compatibilidade (`vw_*`, filtradas pelo usuário) e de acompanhamento (`ctrl_*`) |
 
 Scripts auxiliares (na raiz do repositório): `scripts/db/aplicar.sh` (aplica as migrações que faltam) e `scripts/db/gerar_grants.py` (gera os GRANTs para as roles reais).
 
 ## Pré-requisitos
 
-- Banco da CCAR com PostGIS e o schema `mapcartctrl` (o Feixe referencia `t_projeto`, `t_articulacao_scn` e `t_usuario`, sem copiá-los).
-- Definir a role dona do schema `mapcartacomp` (a mesma role administrativa dos schemas `*_apoio`). Ela precisa de `REFERENCES` em `mapcartctrl.t_projeto`, `mapcartctrl.t_articulacao_scn` e `mapcartctrl.t_usuario` e é quem aplica as migrações.
+- Banco da CCAR com PostGIS 2.3 ou mais novo (as funções da grade estatística usam `ST_Transform` com a projeção em texto, sem SRID cadastrado) e o schema `mapcartctrl` (o Feixe referencia `t_projeto`, `t_articulacao_scn`, `t_usuario` e `t_qua_medidadequalidade`, sem copiá-los).
+- Definir a role dona do schema `mapcartacomp` (a mesma role administrativa dos schemas `*_apoio`). Ela precisa de `REFERENCES` em `mapcartctrl.t_projeto`, `mapcartctrl.t_articulacao_scn`, `mapcartctrl.t_usuario` e `mapcartctrl.t_qua_medidadequalidade` e é quem aplica as migrações.
+- O `002` semeia o catálogo de CQ com os elementos núcleo da GCQ procurando pelo nome em `mapcartctrl.t_qua_medidadequalidade` (Comissão, Omissão, Nome Geográfico, Correção da Classificação, Consistência Topológica); se algum faltar, a aplicação para com a lista dos ausentes.
 - Escolher, entre as roles que já existem na CCAR, as que vão receber acesso ao Feixe (as que reúnem as pessoas da produção cartográfica das GGCs e da CCAR). Nenhuma role nova é criada pelo Feixe.
 - Cliente `psql` (qualquer versão a partir da 9.6) e `bash`; o gerador de GRANTs usa só Python 3 sem pacotes extras.
 

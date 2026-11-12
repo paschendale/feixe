@@ -15,7 +15,7 @@ $$;
 CREATE OR REPLACE VIEW mapcartacomp.vw_carga_trabalho AS
 SELECT c.id AS id_carga_trabalho,
        c.uuid,
-       fe.id_atividade,
+       c.id_atividade,
        at.nome AS atividade,
        fe.nome AS etapa,
        mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao,
@@ -27,7 +27,7 @@ SELECT c.id AS id_carga_trabalho,
   JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa
   JOIN mapcartacomp.lote l ON l.id = le.id_lote
   JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa
-  JOIN mapcartacomp.atividade at ON at.id = fe.id_atividade
+  JOIN mapcartacomp.atividade at ON at.id = c.id_atividade
  WHERE c.responsavel = current_user;
 
 CREATE OR REPLACE RULE upd_vw_carga_trabalho AS ON UPDATE TO mapcartacomp.vw_carga_trabalho DO INSTEAD
@@ -35,14 +35,14 @@ CREATE OR REPLACE RULE upd_vw_carga_trabalho AS ON UPDATE TO mapcartacomp.vw_car
 
 -- Amostras ----------------------------------------------------------------------------------------------------------
 
--- Todas as amostras, com a carga de CQ que as carrega (o responsável vem da carga).
+-- Todas as amostras, com a carga de CQ que as carrega (o responsável vem da carga) e o nome da medida da atividade.
 CREATE OR REPLACE VIEW mapcartacomp.vw_cq_amostra_all AS
 SELECT a.id AS id_cq_amostra,
        a.uuid,
        c.id AS id_carga_trabalho,
        c.responsavel,
        c.geom,
-       a.elemento,
+       m.nome::text AS elemento,
        a.status,
        a.observacao,
        c.concluido,
@@ -53,6 +53,8 @@ SELECT a.id AS id_cq_amostra,
        le.instancia
   FROM mapcartacomp.cq_amostra a
   JOIN mapcartacomp.carga_trabalho c ON c.id = a.id_carga_trabalho
+  JOIN mapcartacomp.atividade at ON at.id = c.id_atividade
+  LEFT JOIN mapcartctrl.t_qua_medidadequalidade m ON m.id = at.id_medidadequalidade
   JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa
   JOIN mapcartacomp.lote l ON l.id = le.id_lote;
 
@@ -117,7 +119,8 @@ CREATE OR REPLACE RULE del_vw_cq_inspecao AS ON DELETE TO mapcartacomp.vw_cq_ins
     DELETE FROM mapcartacomp.cq_inspecao WHERE id = OLD.id_cq_inspecao;
 
 -- Acompanhamento por passagem de etapa ----------------------------------------------------------------------------
--- Uma linha por lote_etapa: cargas e conclusão, e para etapas de CQ o resultado e a contagem por elemento.
+-- Uma linha por lote_etapa: cargas e conclusão, e para etapas de CQ o resultado e a contagem por elemento (a medida
+-- de cada atividade de CQ, com o nome do SGBC).
 
 CREATE OR REPLACE VIEW mapcartacomp.ctrl_lote_etapa AS
 WITH cargas AS (
@@ -131,14 +134,16 @@ WITH cargas AS (
      GROUP BY c.id_lote_etapa
 ), por_elemento AS (
     SELECT p.id_lote_etapa,
-           a.elemento,
+           m.nome::text AS elemento,
            count(*) AS amostras,
            count(*) FILTER (WHERE a.status IS NULL) AS pendentes,
            count(*) FILTER (WHERE a.status = 1) AS conformes,
            count(*) FILTER (WHERE a.status = 0) AS nao_conformes
       FROM mapcartacomp.cq_amostra a
       JOIN mapcartacomp.cq_plano p ON p.id = a.id_cq_plano
-     GROUP BY p.id_lote_etapa, a.elemento
+      JOIN mapcartacomp.atividade at ON at.id = p.id_atividade
+      JOIN mapcartctrl.t_qua_medidadequalidade m ON m.id = at.id_medidadequalidade
+     GROUP BY p.id_lote_etapa, m.nome
 ), cq AS (
     SELECT e.id_lote_etapa,
            jsonb_object_agg(e.elemento, jsonb_build_object('amostras', e.amostras, 'pendentes', e.pendentes,
@@ -166,7 +171,7 @@ SELECT le.id AS id_lote_etapa,
        mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao,
        fe.nome AS etapa,
        fe.ordem,
-       at.fase,
+       fe.fase,
        le.instancia,
        le.revisao,
        le.situacao,
@@ -186,7 +191,6 @@ SELECT le.id AS id_lote_etapa,
   JOIN mapcartacomp.lote l ON l.id = le.id_lote
   JOIN mapcartacomp.tema t ON t.id = l.id_tema
   JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa
-  JOIN mapcartacomp.atividade at ON at.id = fe.id_atividade
   LEFT JOIN cargas c ON c.id_lote_etapa = le.id
   LEFT JOIN planos pl ON pl.id_lote_etapa = le.id
   LEFT JOIN cq ON cq.id_lote_etapa = le.id;

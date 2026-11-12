@@ -1,6 +1,6 @@
 # scripts/dev
 
-Ferramentas do ambiente de desenvolvimento (stack `feixe-db` no disbelief: `feixe-ggc` PostgreSQL 9.6 + PostGIS 3.2 na porta 5433 e `feixe-ccar` PostgreSQL 17 + PostGIS 3.5 na porta 5434). Senha e URLs em `.dev.env` na raiz do repo (symlink para `~/.config/feixe/dev.env`, fora do Git).
+Ferramentas do ambiente de desenvolvimento (stack `feixe-db` no disbelief: `feixe-ggc` PostgreSQL 9.6 + PostGIS 2.5 na porta 5433, o mais perto do PostGIS 2.4 do DF de produção e `feixe-ccar` PostgreSQL 17 + PostGIS 3.5 na porta 5434). Senha e URLs em `.dev.env` na raiz do repo (symlink para `~/.config/feixe/dev.env`, fora do Git).
 
 ## Restaurar os dumps de apoio
 
