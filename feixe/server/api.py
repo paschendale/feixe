@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from ..core import papeis
+
 
 class ErroApi(Exception):
     def __init__(self, status: int, mensagem: str):
@@ -85,6 +87,13 @@ def criar_roteador(ctx: Contexto) -> Roteador:
     @r.rota("GET", "/api/status")
     def _status(req):
         return 200, ctx.status()
+
+    @r.rota("GET", "/api/eu")
+    def _eu(req):
+        # Quem está conectado e com que papel: só pelo SGBC (mapcartctrl) e por usuario_feixe, nunca por roles.
+        if ctx.consultar is None:
+            raise ErroApi(503, "banco indisponível")
+        return 200, papeis.carregar(ctx.consultar)
 
     @r.rota("GET", "/api/folhas")
     def _folhas(req):
