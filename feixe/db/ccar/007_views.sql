@@ -245,11 +245,13 @@ SELECT l.id AS id_lote,
        tp.inicio,
        CASE WHEN l.status_nacional = 'CONCLUIDA' THEN tp.ultimo_movimento END AS fim,
        (CASE WHEN l.status_nacional = 'CONCLUIDA' THEN tp.ultimo_movimento ELSE now() END) - tp.inicio AS lead_time,
-       coalesce(l.geom, ST_Multi(art.geom)::geometry(MultiPolygon, 4674)) AS geom
+       coalesce(l.geom, ST_Multi(art.geom)::geometry(MultiPolygon, 4674)) AS geom,
+       ur.nom_usuario::text AS responsavel_nome
   FROM mapcartacomp.lote l
   JOIN mapcartacomp.tema t ON t.id = l.id_tema
   LEFT JOIN mapcartacomp.ctrl_lote_etapa a ON a.id_lote_etapa = l.id_lote_etapa_atual
   LEFT JOIN ultimo_cq u ON u.id_lote = l.id
   LEFT JOIN ocorrencias o ON o.id_lote = l.id
   LEFT JOIN tempos tp ON tp.id_lote = l.id
-  LEFT JOIN mapcartctrl.t_articulacao_scn art ON art.id_articulacao_scn = l.id_articulacao_scn;
+  LEFT JOIN mapcartctrl.t_articulacao_scn art ON art.id_articulacao_scn = l.id_articulacao_scn
+  LEFT JOIN mapcartctrl.t_usuario ur ON ur.nom_contausuario = a.responsavel_principal;
