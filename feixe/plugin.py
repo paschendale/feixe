@@ -42,8 +42,8 @@ class FeixePlugin:
         self.broker = Broker()
         # Ações que as rotas pedem ao QGIS, por nome; cada item da fase B registra as suas. Rodam na thread principal.
         self.acoes_qgis = {
-            "montar_camadas": lambda eu, responsaveis, temas: camadas.montar(
-                self.amb, config.authcfg_id(self.amb), eu, responsaveis, temas
+            "montar_camadas": lambda eu, responsaveis, temas, modulos=None: camadas.montar(
+                self.amb, config.authcfg_id(self.amb), eu, responsaveis, temas, modulos
             ),
             "focar_carga": self.focar_carga,
             "ferramenta_folhas": self.ligar_ferramenta_folhas,
@@ -78,7 +78,9 @@ class FeixePlugin:
         self.barra.concluir.connect(self.concluir_carga)
         self.iface.addToolBar(self.barra)
         self.barra.show()  # se a pessoa escondeu a barra, abrir o QGIS de novo a traz de volta
-        for acao in (self.barra.acao_painel, self.barra.acao_camadas, self.barra.acao_conta):
+        # Atalhos configuráveis em Configurações > Atalhos de teclado (o QGIS aplica o que a pessoa salvou).
+        for acao in self.barra.todas_acoes():
+            self.iface.registerMainWindowAction(acao, self.barra.ATALHOS.get(acao.objectName()[len("feixe_") :], ""))
             self.iface.addPluginToMenu("&Feixe", acao)
         # Texto do Feixe na barra de status do QGIS (no protótipo: "Feixe · 2534-1 · 35/93" com a carga atual).
         self.rotulo_status = QLabel("Feixe")
@@ -96,7 +98,8 @@ class FeixePlugin:
             self.servidor.parar()
             self.servidor = None
         if self.barra:
-            for acao in (self.barra.acao_painel, self.barra.acao_camadas, self.barra.acao_conta):
+            for acao in self.barra.todas_acoes():
+                self.iface.unregisterMainWindowAction(acao)
                 self.iface.removePluginMenu("&Feixe", acao)
             self.iface.mainWindow().removeToolBar(self.barra)
             self.barra.deleteLater()
@@ -194,7 +197,9 @@ class FeixePlugin:
     def _publicar_estado(self, novo: dict):
         self.estado.update(novo)
         if self.barra:
-            self.barra.mostrar_estado(bool(self.estado["online"]), self.estado["detalhe"])
+            cred = config.credenciais(self.amb)
+            estado = "sem_conta" if not cred else ("conectado" if self.estado["online"] else "fora")
+            self.barra.mostrar_estado(estado, cred[0] if cred else "")
         self.broker.publicar("estado", self.estado)
 
     def _aplicar_estado(self, novo: dict):
@@ -313,8 +318,8 @@ class FeixePlugin:
             raise ErroApi(400, str(e)) from None
 
     # --- QGIS ----------------------------------------------------------------------------------
-    def montar_camadas(self):
-        """Botão da barra: o mesmo caminho da rota POST /api/camadas/montar."""
+    def montar_camadas(self, modulos=None):
+        """Botão da barra (todas) ou a seta (um módulo): o mesmo caminho da rota POST /api/camadas/montar."""
         if config.credenciais(self.amb) is None:
             self.pedir_credenciais()
             if config.credenciais(self.amb) is None:
@@ -322,7 +327,7 @@ class FeixePlugin:
         if not self.servidor:
             self.iniciar_servidor()
         try:
-            r = rotas_camadas.montar(self.ctx)
+            r = rotas_camadas.montar(self.ctx, modulos)
         except ErroApi as e:
             self.iface.messageBar().pushMessage("Feixe", e.mensagem, Qgis.Warning, 6)
             return

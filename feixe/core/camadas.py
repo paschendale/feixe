@@ -105,28 +105,39 @@ def _por_responsavel(camada: QgsVectorLayer, responsaveis: List[Dict]) -> None:
     camada.setRenderer(QgsCategorizedSymbolRenderer("responsavel", categorias))
 
 
-def montar(amb: Ambiente, authcfg: str, eu: Dict, responsaveis: List[Dict], temas: List[Dict]) -> Dict:
-    """(Re)monta o grupo Feixe no topo do projeto. Montar de novo substitui o grupo, não duplica.
+MODULOS = ("minhas", "equipe", "folhas")  # ordem no grupo Feixe
+_PROP = "feixe/modulo"  # propriedade do nó da árvore de camadas que diz de que módulo ele é
 
-    `eu` é o objeto de GET /api/eu; `responsaveis` vem de `dados.cargas.responsaveis_atuais` (só usado para
-    supervisor); `temas` de `dados.lotes.temas_com_lotes`. Devolve o nome e a contagem de feições de cada camada.
-    """
-    if not authcfg:
-        raise RuntimeError("usuário e senha ainda não configurados")
-    uf = eu.get("uf")
-    projeto = QgsProject.instance()
+
+def _grupo_feixe(projeto) -> QgsLayerTreeGroup:
     raiz = projeto.layerTreeRoot()
-    antigo = raiz.findGroup(GRUPO)
-    if antigo is not None:
-        projeto.removeMapLayers([c.layerId() for c in antigo.findLayers()])
-        raiz.removeChildNode(antigo)
-    grupo: QgsLayerTreeGroup = raiz.insertGroup(0, GRUPO)
+    return raiz.findGroup(GRUPO) or raiz.insertGroup(0, GRUPO)
 
-    camadas = []
-    minhas = _camada(amb, authcfg, "Minhas cargas", "vw_carga_trabalho", "id_carga_trabalho", "", "minhas_cargas.qml")
-    _so_concluido_editavel(minhas)
-    camadas.append(minhas)
-    if "supervisor" in (eu.get("papeis") or []):
+
+def _tirar_modulo(projeto, grupo: QgsLayerTreeGroup, modulo: str) -> None:
+    for no in [n for n in grupo.children() if n.customProperty(_PROP) == modulo]:
+        if isinstance(no, QgsLayerTreeGroup):
+            projeto.removeMapLayers([c.layerId() for c in no.findLayers()])
+            grupo.removeChildNode(no)
+        else:
+            projeto.removeMapLayer(no.layerId())
+
+
+def _posicao(grupo: QgsLayerTreeGroup, modulo: str) -> int:
+    """Índice onde entra o módulo: depois dos nós dos módulos que vêm antes dele."""
+    antes = MODULOS[: MODULOS.index(modulo)]
+    return sum(1 for n in grupo.children() if n.customProperty(_PROP) in antes)
+
+
+def _camadas_do_modulo(amb, authcfg, eu, responsaveis, temas, modulo) -> List[QgsVectorLayer]:
+    uf = eu.get("uf")
+    if modulo == "minhas":
+        minhas = _camada(
+            amb, authcfg, "Minhas cargas", "vw_carga_trabalho", "id_carga_trabalho", "", "minhas_cargas.qml"
+        )
+        _so_concluido_editavel(minhas)
+        return [minhas]
+    if modulo == "equipe":
         por_resp = _camada(
             amb, authcfg, "Cargas por responsável", "carga_trabalho", "id",
             _filtro_passagens(uf) + " AND responsavel IS NOT NULL",
@@ -141,20 +152,53 @@ def montar(amb: Ambiente, authcfg: str, eu: Dict, responsaveis: List[Dict], tema
                 )
             )
         )
-        camadas += [por_resp, disponiveis]
-    for c in camadas:
-        projeto.addMapLayer(c, False)
-        grupo.addLayer(c)
-
-    sub = grupo.addGroup("Folhas")
-    ligado = max(temas, key=lambda t: t.get("lotes") or 0)["id"] if temas else None
+        return [por_resp, disponiveis]
+    camadas = []
     for t in temas:
         filtro = " AND ".join(p for p in (_filtro_uf(uf), f"id_tema = {int(t['id'])}") if p)
-        folhas = _camada(amb, authcfg, f"Folhas · {t['nome']}", "ctrl_lote", "id_lote", filtro, "folhas.qml")
-        projeto.addMapLayer(folhas, False)
-        sub.addLayer(folhas).setItemVisibilityChecked(t["id"] == ligado)
-        camadas.append(folhas)
-    return {"camadas": [{"nome": c.name(), "feicoes": c.featureCount()} for c in camadas]}
+        camadas.append(_camada(amb, authcfg, f"Folhas · {t['nome']}", "ctrl_lote", "id_lote", filtro, "folhas.qml"))
+    return camadas
+
+
+def montar(
+    amb: Ambiente,
+    authcfg: str,
+    eu: Dict,
+    responsaveis: List[Dict],
+    temas: List[Dict],
+    modulos: Optional[List[str]] = None,
+) -> Dict:
+    """(Re)monta o grupo Feixe no topo do projeto, todo ou só os módulos pedidos (minhas, equipe, folhas).
+
+    Cada módulo carregado de novo substitui só os seus nós; os outros ficam como estão. "equipe" é só do supervisor:
+    em "todas" ele some para quem não é. `eu` é o objeto de GET /api/eu; `responsaveis` vem de
+    `dados.cargas.responsaveis_atuais`; `temas` de `dados.lotes.temas_com_lotes`. Devolve o nome e a contagem de
+    feições de cada camada carregada.
+    """
+    if not authcfg:
+        raise RuntimeError("usuário e senha ainda não configurados")
+    supervisor = "supervisor" in (eu.get("papeis") or [])
+    pedidos = [m for m in MODULOS if m in (modulos or MODULOS) and (m != "equipe" or supervisor)]
+    projeto = QgsProject.instance()
+    grupo = _grupo_feixe(projeto)
+    carregadas = []
+    for m in pedidos:
+        _tirar_modulo(projeto, grupo, m)
+        camadas = _camadas_do_modulo(amb, authcfg, eu, responsaveis, temas, m)
+        pos = _posicao(grupo, m)
+        if m == "folhas":
+            sub = grupo.insertGroup(pos, "Folhas")
+            sub.setCustomProperty(_PROP, m)
+            ligado = max(temas, key=lambda t: t.get("lotes") or 0)["id"] if temas else None
+            for t, c in zip(temas, camadas):
+                projeto.addMapLayer(c, False)
+                sub.addLayer(c).setItemVisibilityChecked(t["id"] == ligado)
+        else:
+            for k, c in enumerate(camadas):
+                projeto.addMapLayer(c, False)
+                grupo.insertLayer(pos + k, c).setCustomProperty(_PROP, m)
+        carregadas += camadas
+    return {"modulos": pedidos, "camadas": [{"nome": c.name(), "feicoes": c.featureCount()} for c in carregadas]}
 
 
 # --- Minhas cargas: seleção e recarga (B2) ---------------------------------------------------------------------------

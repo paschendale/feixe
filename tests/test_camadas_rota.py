@@ -37,8 +37,8 @@ def test_supervisor_recebe_responsaveis_da_uf():
     ctx, ex, chamadas, eventos = _ctx(["supervisor"])
     status, obj = criar_roteador(ctx).despachar("POST", "/api/camadas/montar", {}, None)
     assert status == 200 and obj["camadas"][0]["nome"] == "Minhas cargas"
-    nome, (eu, responsaveis, temas) = chamadas[0]
-    assert nome == "montar_camadas" and responsaveis[0]["conta"] == "u_1"
+    nome, (eu, responsaveis, temas, modulos) = chamadas[0]
+    assert nome == "montar_camadas" and responsaveis[0]["conta"] == "u_1" and modulos is None
     assert ex.sqls[0][1] == ("DF",) and ex.sqls[1][1] == ("DF", "DF")
     assert eventos == ["qgis"]
 
@@ -49,3 +49,21 @@ def test_apm_nao_consulta_responsaveis_e_sem_papel_recebe_403():
     assert len(ex.sqls) == 1 and chamadas[0][1][1] == []  # só os temas
     ctx, _, _, _ = _ctx([])
     assert criar_roteador(ctx).despachar("POST", "/api/camadas/montar", {}, None)[0] == 403
+
+
+def test_um_modulo_so_consulta_o_que_precisa():
+    ctx, ex, chamadas, _ = _ctx(["supervisor"])
+    r = criar_roteador(ctx)
+    assert r.despachar("POST", "/api/camadas/montar", {}, {"modulos": ["minhas"]})[0] == 200
+    assert ex.sqls == [] and chamadas[0][1][3] == ["minhas"]
+    assert r.despachar("POST", "/api/camadas/montar", {}, {"modulos": ["folhas"]})[0] == 200
+    assert len(ex.sqls) == 1 and chamadas[1][1][1] == []  # só os temas, sem responsáveis
+
+
+def test_modulo_equipe_so_para_supervisor_e_modulo_desconhecido():
+    ctx, _, chamadas, _ = _ctx(["apm"])
+    r = criar_roteador(ctx)
+    assert r.despachar("POST", "/api/camadas/montar", {}, {"modulos": ["equipe"]})[0] == 403
+    assert r.despachar("POST", "/api/camadas/montar", {}, {"modulos": ["xyz"]})[0] == 400
+    assert r.despachar("POST", "/api/camadas/montar", {}, {"modulos": []})[0] == 400
+    assert chamadas == []

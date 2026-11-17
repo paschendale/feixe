@@ -152,10 +152,34 @@ def b1(amb, usuario, senha):
         ok(f"grupo único, contagens conferem: {n}")
         assert len(resp) > 1, resp
         cats = QgsProject.instance().mapLayersByName("Cargas por responsável")[0].renderer().categories()
-        assert len(cats) == len(resp) and all(c.label() for c in cats)
+        assert len(cats) == len(resp) + 1 and all(c.label() for c in cats)  # + "Outros"
         ligadas = [n.name() for n in raiz.findGroup("Feixe").findGroup("Folhas").findLayers() if n.isVisible()]
         assert ligadas == ["Folhas · Hidrografia"], ligadas
         ok("subgrupo Folhas com um tema ligado: o de mais folhas")
+
+        # Por módulo (seta do botão de camadas): substitui só o módulo, os outros ficam, a ordem se mantém.
+        def arvore():
+            return [n.name() for n in raiz.findGroup("Feixe").children()]
+
+        ordem = ["Minhas cargas", "Cargas por responsável", "Cargas disponíveis", "Folhas"]
+        assert arvore() == ordem, arvore()
+        ids_antes = set(QgsProject.instance().mapLayers())
+        for modulo, nomes in (("minhas", ["Minhas cargas"]), ("folhas", [f"Folhas · {t['nome']}" for t in temas]),
+                              ("equipe", ["Cargas por responsável", "Cargas disponíveis"])):  # fmt: skip
+            r2 = camadas.montar(amb, authcfg, eu, resp, temas, [modulo])
+            assert [c["nome"] for c in r2["camadas"]] == nomes, r2
+            assert arvore() == ordem, (modulo, arvore())
+            assert len(QgsProject.instance().mapLayers()) == 3 + len(temas)
+        assert not ids_antes & set(QgsProject.instance().mapLayers())  # todas trocadas, nenhuma duplicada
+        QgsProject.instance().removeMapLayers(
+            [n.layerId() for n in raiz.findGroup("Feixe").findLayers() if n.name() != "Minhas cargas"]
+        )
+        raiz.findGroup("Feixe").removeChildNode(raiz.findGroup("Feixe").findGroup("Folhas"))
+        camadas.montar(amb, authcfg, eu, resp, temas, ["folhas"])
+        camadas.montar(amb, authcfg, eu, resp, temas, ["equipe"])
+        assert arvore() == ordem, arvore()
+        r = camadas.montar(amb, authcfg, eu, resp, temas)
+        ok("por módulo: substitui só o módulo, sem duplicar, e cada um volta ao seu lugar no grupo")
         ok(f"{len(cats)} responsáveis com cor e nome, ex.: {cats[0].label()}")
 
         minhas = QgsProject.instance().mapLayersByName("Minhas cargas")[0]
