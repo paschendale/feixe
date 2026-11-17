@@ -13,7 +13,7 @@ export default function Supervisao() {
   const { tem } = useSessao()
   const rota = useRota()
   const supervisor = tem('supervisor')
-  const { dados: esperando } = useApi<{ grupos: GrupoEsperando[] }>(supervisor ? '/api/painel/esperando' : null, ['lote'])
+  const { dados: esperando, recarregar: recarregarEsperando } = useApi<{ grupos: GrupoEsperando[] }>(supervisor ? '/api/painel/esperando' : null, ['lote'])
   const nEsperando = (esperando?.grupos ?? []).filter((g) => g.id_proxima !== null).reduce((s, g) => s + g.folhas.length, 0)
   const nFim = (esperando?.grupos ?? []).filter((g) => g.id_proxima === null).reduce((s, g) => s + g.folhas.length, 0)
   const abas: Aba[] = [
@@ -27,7 +27,7 @@ export default function Supervisao() {
     <>
       <CabecalhoModulo titulo="Supervisão" abas={abas} ativa={ativa} />
       {ativa === 'folhas' && <Folhas />}
-      {ativa === 'esperando' && <Esperando grupos={esperando?.grupos ?? null} />}
+      {ativa === 'esperando' && <Esperando grupos={esperando?.grupos ?? null} recarregar={recarregarEsperando} />}
       {ativa === 'equipe' && <Equipe />}
       {ativa === 'fluxos' && <Fluxos />}
     </>

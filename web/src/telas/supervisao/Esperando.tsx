@@ -16,7 +16,19 @@ function periodo(g: GrupoEsperando) {
   return diaMes(g.desde) === diaMes(g.ate) ? `desde ${diaMes(g.desde)}` : `de ${diaMes(g.desde)} a ${diaMes(g.ate)}`
 }
 
-function Grupo({ g }: { g: GrupoEsperando }) {
+// Recusas agrupadas pelo motivo, para não virar um aviso com uma linha por folha.
+function resumirRecusas(erros: { id_lote: number; erro: string }[], nome: (id: number) => string) {
+  const porMotivo = new Map<string, string[]>()
+  for (const e of erros) {
+    const motivo = e.erro.replace(/^a folha /, '')
+    porMotivo.set(motivo, [...(porMotivo.get(motivo) ?? []), nome(e.id_lote)])
+  }
+  return [...porMotivo]
+    .map(([motivo, folhas]) => `${plural(folhas.length, 'folha', 'folhas')} não ${folhas.length === 1 ? 'abriu' : 'abriram'}: ${motivo} (${folhas.slice(0, 4).join(', ')}${folhas.length > 4 ? ', …' : ''})`)
+    .join(' · ')
+}
+
+function Grupo({ g, recarregar }: { g: GrupoEsperando; recarregar: () => void }) {
   const avisar = useAvisar()
   const [marcadas, setMarcadas] = useState<Set<number>>(new Set())
   const [todas, setTodas] = useState(false)
@@ -35,13 +47,15 @@ function Grupo({ g }: { g: GrupoEsperando }) {
       })
       const nome = (id: number) => g.folhas.find((f) => f.id_lote === id)?.folha_revisao ?? `#${id}`
       if (r.abertas.length) avisar(`${g.proxima} aberta em ${plural(r.abertas.length, 'folha', 'folhas')}.`)
-      if (r.erros.length) avisar(r.erros.map((e) => `${nome(e.id_lote)}: ${e.erro}`).join(' · '), 'erro')
+      if (r.erros.length) avisar(resumirRecusas(r.erros, nome), 'erro')
       setMarcadas(new Set())
       setObs('')
     } catch (e) {
       avisar((e as Error).message, 'erro')
     } finally {
       setOcupado(false)
+      // Sempre relê a lista: mesmo com recusa, ou se a resposta não chegou, o banco pode ter mudado.
+      recarregar()
     }
   }
 
@@ -120,7 +134,7 @@ function Grupo({ g }: { g: GrupoEsperando }) {
 
 // Supervisão › Esperando você: folhas que terminaram a etapa atual e só andam quando o supervisor abrir a próxima.
 // Agrupadas pela decisão; marque as que vão juntas e decida de uma vez, com uma observação só.
-export default function Esperando({ grupos }: { grupos: GrupoEsperando[] | null }) {
+export default function Esperando({ grupos, recarregar }: { grupos: GrupoEsperando[] | null; recarregar: () => void }) {
   if (!grupos)
     return (
       <Conteudo largura={1240}>
@@ -138,7 +152,7 @@ export default function Esperando({ grupos }: { grupos: GrupoEsperando[] | null 
         </p>
       )}
       {grupos.map((g) => (
-        <Grupo key={`${g.tema}-${g.etapa}-${g.id_proxima}`} g={g} />
+        <Grupo key={`${g.tema}-${g.etapa}-${g.id_proxima}`} g={g} recarregar={recarregar} />
       ))}
     </Conteudo>
   )
