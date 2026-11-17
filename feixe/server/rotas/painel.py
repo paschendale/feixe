@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from ...core.dados import ErroDados
 from ...core.dados import fluxos as df
 from ...core.dados import painel as dp
 from ..api import ErroApi, campo
@@ -13,23 +12,13 @@ from .lotes import uf_de
 
 
 def abrir_proximas(ctx, uf: str, ids: List[int], observacao: str) -> Dict:
-    """Abre a etapa sugerida em cada folha, cada uma na sua transação: a recusa de uma não impede as outras.
-    É o mesmo gesto da gaveta (nova passagem com observação), repetido; nada anda sem o supervisor pedir."""
-    abertas, erros = [], []
-    for id_lote in ids:
-        try:
-            with ctx.tx() as ex:
-                existe = ex.um("SELECT 1 AS ok FROM mapcartacomp.lote WHERE id = %s", (id_lote,))
-                estado = df.estado(ex, id_lote) if existe else None
-                if not estado or not estado.get("sugestao"):
-                    raise ErroDados("sem próxima etapa no fluxo")
-                novo = df.nova_passagem(ex, uf, id_lote, estado["sugestao"]["id"], observacao)
-            abertas.append({"id_lote": id_lote, "etapa": novo.get("etapa")})
-        except ErroDados as e:
-            erros.append({"id_lote": id_lote, "erro": e.mensagem})
-    if abertas:
-        ctx.publicar("lote", {"acao": "passagem", "ids": [a["id_lote"] for a in abertas]})
-    return {"abertas": abertas, "erros": erros}
+    """Abre a etapa sugerida em várias folhas numa transação (o mesmo gesto da gaveta, repetido; nada anda sem o
+    supervisor pedir). As recusadas voltam em `erros` e não impedem as outras."""
+    with ctx.tx() as ex:
+        r = df.abrir_proximas(ex, uf, ids, observacao)
+    if r["abertas"]:
+        ctx.publicar("lote", {"acao": "passagem", "ids": [a["id_lote"] for a in r["abertas"]]})
+    return r
 
 
 def registrar(r, ctx) -> None:

@@ -345,6 +345,67 @@ def nova_passagem(
     return estado(ex, id_lote)
 
 
+def abrir_proximas(ex: Executor, uf: str, ids: List[int], observacao: str) -> Dict:
+    """Abre a etapa sugerida (a seguinte na ordem do fluxo) em várias folhas: as mesmas regras de `nova_passagem`,
+    em quatro idas e voltas ao banco, qualquer que seja o número de folhas (D-104). As recusadas voltam em `erros`
+    com o motivo; as outras abrem."""
+    obs = _obs(observacao)
+    linhas = ex.todos(
+        "SELECT l.id, l.uf, le.situacao, n.id AS id_etapa, n.nome AS etapa, n.repetivel, "
+        "(SELECT fe2.nome FROM mapcartacomp.lote_etapa x "
+        " JOIN mapcartacomp.fluxo_etapa fe2 ON fe2.id = x.id_fluxo_etapa "
+        " WHERE x.id_lote = l.id AND x.situacao IN ('pendente', 'em_andamento') LIMIT 1) AS aberta, "
+        "(SELECT count(*) FROM mapcartacomp.lote_etapa x WHERE x.id_lote = l.id "
+        " AND x.id_fluxo_etapa = n.id) AS feitas, "
+        "(SELECT count(*) FROM mapcartacomp.lote_etapa x WHERE x.id_lote = l.id AND x.id_fluxo_etapa = n.id "
+        " AND x.situacao <> 'pulada') AS nao_puladas, "
+        "(SELECT coalesce(max(x.instancia), 0) FROM mapcartacomp.lote_etapa x WHERE x.id_lote = l.id "
+        " AND x.id_fluxo_etapa = n.id) AS ultima "
+        "FROM mapcartacomp.lote l "
+        "LEFT JOIN mapcartacomp.lote_etapa le ON le.id = l.id_lote_etapa_atual "
+        "LEFT JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+        "LEFT JOIN LATERAL (SELECT x.id, x.nome, x.repetivel FROM mapcartacomp.fluxo_etapa x "
+        " WHERE x.id_fluxo = l.id_fluxo AND x.ordem > coalesce(fe.ordem, 0) ORDER BY x.ordem LIMIT 1) n ON true "
+        "WHERE l.id = ANY(%s) FOR UPDATE OF l",
+        (list(ids),),
+    )
+    por_id = {r["id"]: r for r in linhas}
+    erros, validas = [], []
+    for i in ids:
+        r = por_id.get(i)
+        if not r or r["uf"] != uf:
+            erros.append({"id_lote": i, "erro": "lote não encontrado na sua unidade"})
+        elif r["aberta"]:
+            erros.append({"id_lote": i, "erro": f"a folha já tem a etapa {r['aberta']} aberta"})
+        elif r["id_etapa"] is None:
+            erros.append({"id_lote": i, "erro": "sem próxima etapa no fluxo"})
+        elif r["nao_puladas"] and not r["repetivel"]:
+            erros.append({"id_lote": i, "erro": f"a etapa {r['etapa']} não se repete neste fluxo"})
+        else:
+            validas.append(r)
+    if not validas:
+        return {"abertas": [], "erros": erros}
+    novas = ex.todos(
+        "INSERT INTO mapcartacomp.lote_etapa (uuid, id_lote, id_fluxo_etapa, instancia, expor_ocorrencias) "
+        "SELECT u::uuid, l, e, i, false FROM unnest(%s::text[], %s::int[], %s::int[], %s::int[]) AS t(u, l, e, i) "
+        "RETURNING id, id_lote",
+        (
+            [novo_uuid() for _ in validas],
+            [r["id"] for r in validas],
+            [r["id_etapa"] for r in validas],
+            [r["ultima"] + 1 for r in validas],
+        ),
+    )
+    acao = {r["id"]: "repetir" if r["feitas"] else "abrir" for r in validas}
+    ex.executar(
+        "INSERT INTO mapcartacomp.lote_etapa_hist (uuid, id_lote_etapa, acao, observacao) "
+        "SELECT u::uuid, le, a, %s FROM unnest(%s::text[], %s::int[], %s::text[]) AS t(u, le, a)",
+        (obs, [novo_uuid() for _ in novas], [n["id"] for n in novas], [acao[n["id_lote"]] for n in novas]),
+    )
+    etapa = {r["id"]: r["etapa"] for r in validas}
+    return {"abertas": [{"id_lote": n["id_lote"], "etapa": etapa[n["id_lote"]]} for n in novas], "erros": erros}
+
+
 def estado(ex: Executor, id_lote: int) -> Dict:
     """Situação do lote depois de uma ação: status nacional, etapa atual e a sugestão de próxima etapa."""
     lote = ex.um(

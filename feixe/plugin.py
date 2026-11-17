@@ -104,6 +104,7 @@ class FeixePlugin:
         if self.servidor:
             self.servidor.parar()
             self.servidor = None
+        db.esquecer()  # fecha as conexões guardadas no pool
         if self.barra:
             for acao in self.barra.todas_acoes():
                 self.iface.unregisterMainWindowAction(acao)
@@ -157,6 +158,7 @@ class FeixePlugin:
         usuario, senha = dlg.valores()
         try:
             config.salvar_credenciais(self.amb, usuario, senha)
+            db.esquecer()
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self.iface.mainWindow(), "Feixe", f"Não foi possível guardar a credencial:\n{e}")
             return
