@@ -105,7 +105,9 @@ export function Atribuir({ lotes, fechar, aAtribuir = {} }: { lotes: Lote[]; fec
   for (const l of lotes) if (por[l.id] && por[l.id] !== '-') depois.set(por[l.id], (depois.get(por[l.id]) ?? 0) + (aAtribuir[l.id] ?? 0))
   const totalAtribuir = lotes.reduce((s, l) => s + (por[l.id] && por[l.id] !== '-' ? aAtribuir[l.id] ?? 0 : 0), 0)
   const maxDepois = Math.max(1, ...depois.values())
-  const pessoasOrdem = [...equipe].sort((a, b) => (depois.get(a.conta) ?? 0) - (depois.get(b.conta) ?? 0))
+  // Primeiro quem ganha cargas nesta atribuição; depois a equipe por pendentes, de quem tem menos para quem tem mais.
+  const ganho = (p: Pessoa) => (depois.get(p.conta) ?? 0) - p.pendentes
+  const pessoasOrdem = [...equipe].sort((a, b) => Number(ganho(b) > 0) - Number(ganho(a) > 0) || (depois.get(a.conta) ?? 0) - (depois.get(b.conta) ?? 0))
   const rotuloPessoa = (p: Pessoa) => `${p.nome}${p.conta === eu?.conta ? ' (você)' : ''}`
 
   const porFolha = () =>
@@ -166,7 +168,7 @@ export function Atribuir({ lotes, fechar, aAtribuir = {} }: { lotes: Lote[]; fec
                   <tbody>
                     {lotes.map((l) => (
                       <tr key={l.id} className="border-b last:border-0">
-                        <td className="tab px-3 py-1.5 font-semibold">{l.folha_revisao}</td>
+                        <td className="tab px-3 py-1.5 font-semibold whitespace-nowrap">{l.folha_revisao}</td>
                         {Object.keys(aAtribuir).length > 0 && <td className="tab px-2 py-1.5 text-right">{num(aAtribuir[l.id] ?? 0)}</td>}
                         <td className="px-3 py-1.5">
                           <Select className="h-8" value={por[l.id] ?? ''} onChange={(e) => setPor({ ...por, [l.id]: e.target.value })} aria-label={`Para quem, ${l.folha_revisao}`}>

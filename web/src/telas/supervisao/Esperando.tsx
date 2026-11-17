@@ -123,13 +123,13 @@ function Grupo({ g }: { g: GrupoEsperando }) {
 export default function Esperando({ grupos }: { grupos: GrupoEsperando[] | null }) {
   if (!grupos)
     return (
-      <Conteudo largura={1040}>
+      <Conteudo largura={1240}>
         <Carregando />
       </Conteudo>
     )
   const n = grupos.reduce((s, g) => s + g.folhas.length, 0)
   return (
-    <Conteudo largura={1040}>
+    <Conteudo largura={1240}>
       {n === 0 ? (
         <Bloco className="text-muted-foreground">Nenhuma folha esperando você: todas as folhas da unidade estão com uma etapa aberta ou encerradas.</Bloco>
       ) : (

@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Barra, Bloco, COR, Carregando, Conteudo, Fichas } from '@/components/painel'
-import type { FluxoCompleto, Lote, LotePainel } from '@/lib/api'
+import type { FluxoCompleto, GrupoAtividade, Lote, LotePainel } from '@/lib/api'
 import { diasAtras, lista, num, parado, pc, plural, quando } from '@/lib/formato'
 import { href, navegar, useRota } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'
@@ -18,6 +18,9 @@ import { usePainel } from '../inicio/ResumoSupervisao'
 import { Gaveta } from './Gaveta'
 
 const ABERTAS = ['pendente', 'em_andamento']
+
+// Ficha que abre sem escolha: a atividade de produção com mais folhas (o CQ é avaliado no QGIS na fase D).
+const padrao = (gs: GrupoAtividade[]) => [...gs].sort((a, b) => Number(a.fase === 'cq') - Number(b.fase === 'cq') || b.lotes.length - a.lotes.length)[0] ?? null
 type Filtro = '' | 'pendente' | 'em_andamento' | 'parado' | 'esperando'
 
 function Passos({ n, ativo, children, onClick }: { n?: number; ativo?: boolean; children: React.ReactNode; onClick: () => void }) {
@@ -46,7 +49,7 @@ export default function Folhas() {
   const p = painel.dados
   const todos = useMemo(() => lotes.dados?.itens ?? [], [lotes.dados])
   const grupoQ = rota.query.get('grupo')
-  const grupo = grupoQ === 'todas' ? null : (p?.grupos.find((g) => g.chave === grupoQ) ?? (grupoQ ? null : p?.grupos[0] ?? null))
+  const grupo = grupoQ === 'todas' ? null : (p?.grupos.find((g) => g.chave === grupoQ) ?? (grupoQ ? null : padrao(p?.grupos ?? [])))
   const chaveAtiva = grupo?.chave ?? 'todas'
   const selecionado = rota.partes[1] ? Number(rota.partes[1]) : null
 
@@ -126,7 +129,7 @@ export default function Folhas() {
           <div className="flex min-w-[260px] flex-[1_1_280px] flex-col gap-1.5">
             <span className="text-[13px]">
               <b>{num(grupo.concluidas)}</b> de {num(grupo.total)} {grupo.fase === 'cq' ? 'amostras avaliadas' : 'cargas concluídas'} · {pc(grupo.concluidas, grupo.total)}% ·{' '}
-              <span style={{ color: grupo.a_atribuir ? COR.alerta : undefined }}>{num(grupo.a_atribuir)} a atribuir</span> · {plural(grupo.pessoas, 'pessoa', 'pessoas')}
+              <span style={{ color: grupo.a_atribuir ? COR.alerta : undefined }}>{num(grupo.a_atribuir)} {grupo.fase === 'cq' ? 'sem avaliador' : 'a atribuir'}</span> · {plural(grupo.pessoas, 'pessoa', 'pessoas')}
             </span>
             <Barra
               total={grupo.total}
@@ -234,7 +237,7 @@ export default function Folhas() {
             {itens.map((l) => {
               const x = extra.get(l.id)
               const aberta = ABERTAS.includes(l.situacao ?? '')
-              const alerta = aberta && (l.cargas_total ?? 0) > 0 && l.situacao === 'em_andamento' && parado(x?.ultima ?? x?.iniciada_em ?? null)
+              const alerta = grupo?.fase !== 'cq' && aberta && (l.cargas_total ?? 0) > 0 && l.situacao === 'em_andamento' && parado(x?.ultima ?? x?.iniciada_em ?? null)
               const dias = diasAtras(x?.iniciada_em ?? null)
               return (
                 <tr key={l.id} className={cn('border-b border-[#EEF1F4] last:border-0 hover:bg-[#F7F9FB]', (marcados.has(l.id) || selecionado === l.id) && 'bg-[#F4F8FD]')}>
@@ -260,7 +263,7 @@ export default function Folhas() {
                         <span className="tab">
                           {num(l.cargas_concluidas ?? 0)}/{num(l.cargas_total)}
                         </span>
-                        {!!x?.a_atribuir && <span style={{ color: COR.alerta }}>· {num(x.a_atribuir)} a atribuir</span>}
+                        {!!x?.a_atribuir && <span style={{ color: COR.alerta }}>· {num(x.a_atribuir)} {grupo?.fase === 'cq' ? 'sem avaliador' : 'a atribuir'}</span>}
                       </div>
                     ) : (
                       <span className="text-muted-foreground">sem cargas</span>

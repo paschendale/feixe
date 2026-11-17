@@ -54,7 +54,7 @@ export default function Equipe() {
   const linhas = equipe.itens
     .map((x) => ({ ...x, painel: doPainel.get(x.conta) }))
     .filter((x) => ativa === 'todas' || x.painel?.grupos.includes(ativa))
-    .sort((a, b) => Number(a.pendentes > 0) - Number(b.pendentes > 0) || (a.ultima ?? '').localeCompare(b.ultima ?? '') || a.nome.localeCompare(b.nome))
+    .sort((a, b) => Number(a.pendentes > 0) - Number(b.pendentes > 0) || Number(!a.ultima) - Number(!b.ultima) || (a.ultima ?? '').localeCompare(b.ultima ?? '') || a.nome.localeCompare(b.nome))
   const semCarga = linhas.filter((x) => !x.pendentes)
   const paradas = linhas.filter((x) => x.pendentes && parado(x.ultima))
   const destinoDarCargas = p.grupos.find((g) => g.fase !== 'cq' && g.a_atribuir > 0) ?? p.grupos.find((g) => g.a_atribuir > 0)
@@ -175,7 +175,7 @@ export default function Equipe() {
         </table>
       </div>
       <p className="text-[13px] text-muted-foreground">
-        Quem pode receber cargas: conta ativa, lotação da UF e perfil de execução (O, V ou S) no SGBC; acertos de perfil se fazem lá. "Passar pendentes" muda só as pendentes; as concluídas ficam com quem fez.
+        Ordem: quem está sem carga, depois quem está há mais tempo sem concluir e, por último, quem ainda não concluiu nenhuma. Quem pode receber cargas: conta ativa, lotação da UF e perfil de execução (O, V ou S) no SGBC; acertos de perfil se fazem lá. "Passar pendentes" muda só as pendentes; as concluídas ficam com quem fez.
       </p>
     </Conteudo>
   )

@@ -196,7 +196,7 @@ function StatusNacionalCartao({ p, nEsperando }: { p: PainelSupervisao; nEsperan
 function EquipeCartao({ p }: { p: PainelSupervisao }) {
   const { eu } = useSessao()
   const grupo = (c: string) => p.grupos.find((g) => g.chave === c)
-  const ordenadas = [...p.pessoas].filter((x) => x.pendentes > 0).sort((a, b) => (a.ultima ?? '').localeCompare(b.ultima ?? ''))
+  const ordenadas = [...p.pessoas].filter((x) => x.pendentes > 0).sort((a, b) => Number(!a.ultima) - Number(!b.ultima) || (a.ultima ?? '').localeCompare(b.ultima ?? ''))
   const mostrar = ordenadas.slice(0, 5)
   return (
     <Bloco className="flex-[1_1_520px]">
@@ -235,7 +235,7 @@ function EquipeCartao({ p }: { p: PainelSupervisao }) {
         </table>
       </div>
       <span className="text-xs text-muted-foreground">
-        Por quem está há mais tempo sem concluir
+        Por quem está há mais tempo sem concluir (quem ainda não concluiu nenhuma vem depois)
         {ordenadas.length > mostrar.length ? `; mais ${plural(ordenadas.length - mostrar.length, 'pessoa', 'pessoas')} no módulo` : ''}.
       </span>
     </Bloco>

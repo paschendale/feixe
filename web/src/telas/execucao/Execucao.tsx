@@ -53,6 +53,7 @@ function Cargas({ p }: { p: Passagem }) {
   const pendentes = dados.itens.filter((c) => !c.concluido)
   const concluidas = dados.itens.filter((c) => c.concluido).sort((a, b) => (b.concluido_em ?? '').localeCompare(a.concluido_em ?? ''))
   const hoje = concluidas.filter((c) => diasAtras(c.concluido_em) === 0)
+  const variasAtividades = new Set(dados.itens.map((c) => c.atividade)).size > 1
   const lista = aba === 'pendentes' ? pendentes : aba === 'hoje' ? hoje : concluidas
   const abas: [Aba, string, number][] = [
     ['pendentes', 'Pendentes', pendentes.length],
@@ -79,7 +80,7 @@ function Cargas({ p }: { p: Passagem }) {
           <thead>
             <tr className="text-left text-xs text-muted-foreground">
               <th className="border-b py-3 pr-2 pl-4 font-medium">Carga</th>
-              <th className="border-b px-2 py-3 font-medium">Atividade</th>
+              {variasAtividades && <th className="border-b px-2 py-3 font-medium">Atividade</th>}
               <th className="border-b px-2 py-3 font-medium">Situação</th>
               <th className="border-b py-3 pr-4 pl-2" />
             </tr>
@@ -87,7 +88,7 @@ function Cargas({ p }: { p: Passagem }) {
           <tbody>
             {lista.length === 0 && (
               <tr>
-                <td colSpan={4} className="p-4 text-muted-foreground">
+                <td colSpan={variasAtividades ? 4 : 3} className="p-4 text-muted-foreground">
                   {aba === 'pendentes' ? 'Nenhuma pendente: sua parte nesta folha terminou.' : aba === 'hoje' ? 'Nenhuma concluída hoje.' : 'Nenhuma concluída ainda.'}
                 </td>
               </tr>
@@ -95,7 +96,7 @@ function Cargas({ p }: { p: Passagem }) {
             {lista.slice(0, 300).map((c) => (
               <tr key={c.id} className="border-b border-[#EEF1F4] last:border-0">
                 <td className="tab py-2.5 pr-2 pl-4 font-mono text-[13px]">{c.geocodigo ?? `nº ${c.id}`}</td>
-                <td className="px-2 py-2.5 text-muted-foreground">{c.atividade}</td>
+                {variasAtividades && <td className="px-2 py-2.5 text-muted-foreground">{c.atividade}</td>}
                 <td className="px-2 py-2.5">{c.concluido ? <span className="text-muted-foreground">concluída {diaMes(c.concluido_em)} {hora(c.concluido_em)}</span> : 'pendente'}</td>
                 <td className="py-2.5 pr-4 pl-2 text-right whitespace-nowrap">
                   {!c.concluido && aberta && (
@@ -157,7 +158,7 @@ export default function Execucao() {
     return (
       <>
         <CabecalhoModulo titulo="Execução" abas={abasModulo} ativa="cargas" />
-        <Conteudo largura={1040}>
+        <Conteudo largura={1240}>
           <Carregando erro={erro} />
         </Conteudo>
       </>
@@ -176,7 +177,7 @@ export default function Execucao() {
   return (
     <>
       <CabecalhoModulo titulo="Execução" abas={abasModulo} ativa="cargas" />
-      <Conteudo largura={1040}>
+      <Conteudo largura={1240}>
         {chaves.length === 0 ? (
           <Bloco className="text-muted-foreground">Nenhuma carga atribuída a você em folhas abertas. O supervisor atribui as cargas.</Bloco>
         ) : (
