@@ -151,7 +151,9 @@ def registrar(r, ctx) -> None:
 
     @r.rota("POST", "/api/cargas/proxima", exige=EXECUTORES)
     def _proxima(req):
-        return 200, proxima(ctx, campo(req, "referencia", int, padrao=None))
+        return 200, proxima(
+            ctx, campo(req, "referencia", int, padrao=None), id_lote=campo(req, "id_lote", int, padrao=None)
+        )
 
     @r.rota("POST", "/api/cargas/{id}/concluir", exige=EXECUTORES)
     def _concluir(req):

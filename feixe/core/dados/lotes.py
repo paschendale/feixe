@@ -177,6 +177,15 @@ def um(ex: Executor, id_lote: int) -> Optional[Dict]:
             "ORDER BY coalesce(c.iniciada_em, c.concluida_em, 'infinity'::timestamptz), c.id_lote_etapa",
             (id_lote,),
         )
+        # Quem tem carga na etapa atual, com o andamento de cada um (gaveta da folha, D-103).
+        lote["pessoas"] = ex.todos(
+            "SELECT c.responsavel AS conta, coalesce(u.nom_usuario::text, c.responsavel) AS nome, count(*) AS total, "
+            "count(*) FILTER (WHERE c.concluido) AS concluidas, max(c.concluido_em) AS ultima "
+            "FROM mapcartacomp.carga_trabalho c JOIN mapcartacomp.lote l ON l.id_lote_etapa_atual = c.id_lote_etapa "
+            "LEFT JOIN mapcartctrl.t_usuario u ON u.nom_contausuario = c.responsavel WHERE l.id = %s "
+            "GROUP BY 1, 2 ORDER BY c.responsavel IS NULL, 2",
+            (id_lote,),
+        )
     return lote
 
 
