@@ -29,7 +29,7 @@ export function GerarCargas({ lotes, fechar }: { lotes: Lote[]; fechar: (gravou:
     try {
       const r = await enviar<ResultadoGeracao>('/api/cargas/gerar', { lote_etapas: previa!.resultados.map((x) => x.id_lote_etapa), previa: false })
       const total = r.resultados.reduce((s, x) => s + x.gravadas, 0)
-      avisar(`${num(total)} cargas gravadas em ${r.resultados.length} ${r.resultados.length === 1 ? 'folha' : 'folhas'}, disponíveis para atribuir.`)
+      avisar(`${num(total)} cargas gravadas em ${r.resultados.length} ${r.resultados.length === 1 ? 'folha' : 'folhas'}, a atribuir.`)
       r.erros.forEach((e) => avisar(e.erro, 'erro'))
       fechar(true)
     } catch (e) {

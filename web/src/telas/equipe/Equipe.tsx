@@ -65,7 +65,7 @@ export default function Equipe() {
                     <span className="inline-flex items-center gap-2">
                       <Select className="h-8 w-52" value={passar.para} onChange={(e) => setPassar({ ...passar, para: e.target.value })} aria-label="Para quem">
                         <option value="">Para quem?</option>
-                        <option value="-">Disponível</option>
+                        <option value="-">Ninguém (a atribuir)</option>
                         {dados.itens
                           .filter((x) => x.conta !== p.conta)
                           .map((x) => (

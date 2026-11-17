@@ -141,7 +141,7 @@ export function Atribuir({ lotes, fechar }: { lotes: Lote[]; fechar: (feito: boo
                   </span>
                   <Select className="h-8 w-60" value={por[l.id] ?? ''} onChange={(e) => setPor({ ...por, [l.id]: e.target.value })} aria-label={`Responsável por ${l.folha_revisao}`}>
                     <option value="">Não mudar</option>
-                    <option value="-">Disponível (tirar de quem está)</option>
+                    <option value="-">Ninguém: volta a atribuir (tirar de quem está)</option>
                     {equipe.map((p) => (
                       <option key={p.conta} value={p.conta}>
                         {p.nome}
@@ -152,7 +152,7 @@ export function Atribuir({ lotes, fechar }: { lotes: Lote[]; fechar: (feito: boo
               ))}
             </div>
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={soDisp} onChange={(e) => setSoDisp(e.target.checked)} /> Só as cargas disponíveis (não tirar de quem já tem)
+              <input type="checkbox" checked={soDisp} onChange={(e) => setSoDisp(e.target.checked)} /> Só as cargas a atribuir (não tirar de quem já tem)
             </label>
             <DialogFooter>
               <Button variant="outline" onClick={() => fechar(false)}>
@@ -176,7 +176,7 @@ export function Atribuir({ lotes, fechar }: { lotes: Lote[]; fechar: (feito: boo
             {dividir.plano && (
               <p className="text-sm">
                 {dividir.plano.map((p) => `${nome(p.conta).split(' ')[0]}: ${p.cargas}`).join(' · ')}{' '}
-                <span className="text-muted-foreground">(cargas disponíveis em faixas de norte a sul)</span>
+                <span className="text-muted-foreground">(cargas a atribuir em faixas de norte a sul)</span>
               </p>
             )}
             <DialogFooter>
@@ -216,7 +216,7 @@ export function Atribuir({ lotes, fechar }: { lotes: Lote[]; fechar: (feito: boo
             </div>
             <Select value={destino} onChange={(e) => setDestino(e.target.value)} aria-label="Para quem">
               <option value="">Para quem?</option>
-              <option value="-">Disponível (tirar de quem está)</option>
+              <option value="-">Ninguém: volta a atribuir (tirar de quem está)</option>
               {equipe.map((p) => (
                 <option key={p.conta} value={p.conta}>
                   {p.nome}
