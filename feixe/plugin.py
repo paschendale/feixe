@@ -42,8 +42,8 @@ class FeixePlugin:
         self.broker = Broker()
         # Ações que as rotas pedem ao QGIS, por nome; cada item da fase B registra as suas. Rodam na thread principal.
         self.acoes_qgis = {
-            "montar_camadas": lambda eu, responsaveis, temas, modulos=None: camadas.montar(
-                self.amb, config.authcfg_id(self.amb), eu, responsaveis, temas, modulos
+            "montar_camadas": lambda eu, responsaveis, temas: camadas.montar(
+                self.amb, config.authcfg_id(self.amb), eu, responsaveis, temas
             ),
             "focar_carga": self.focar_carga,
             "ferramenta_folhas": self.ligar_ferramenta_folhas,
@@ -73,6 +73,7 @@ class FeixePlugin:
         self.barra.abrir_painel.connect(self.abrir_painel)
         self.barra.conta.connect(self.pedir_credenciais)
         self.barra.camadas.connect(self.montar_camadas)
+        self.barra.modo.connect(self.trocar_modo)
         self.barra.sincronizar.connect(self.verificar_rede)
         self.barra.proxima.connect(self.proxima_carga)
         self.barra.concluir.connect(self.concluir_carga)
@@ -229,20 +230,23 @@ class FeixePlugin:
     def proxima_carga(self):
         if not self._pronto():
             return
-        if camadas.camada_minhas() is None:
-            self.montar_camadas()
-        r = self._executar(rotas_cargas.proxima, camadas.carga_selecionada())
+        if camadas.camada_minhas() is None and self.montar_camadas() is None:
+            return
+        if camadas.modo_atual() != "execucao":
+            self.trocar_modo("execucao")  # quem pede a próxima carga está executando
+        r = self._executar(rotas_cargas.proxima, camadas.carga_selecionada() or camadas.carga_atual())
         if r is not None and r["carga"] is None:
             self.iface.messageBar().pushMessage("Feixe", "Você não tem carga pendente.", Qgis.Info, 5)
 
     def concluir_carga(self):
-        """Conclui a carga selecionada em Minhas cargas e passa para a próxima, como no protótipo."""
+        """Conclui a carga selecionada em Minhas cargas (escolha à mão) ou, sem seleção, a carga atual, e passa para a
+        próxima, como no protótipo."""
         if not self._pronto():
             return
-        id_carga = camadas.carga_selecionada()
+        id_carga = camadas.carga_selecionada() or camadas.carga_atual()
         if id_carga is None:
             self.iface.messageBar().pushMessage(
-                "Feixe", "Selecione uma carga na camada Minhas cargas (ou use Próxima carga).", Qgis.Info, 6
+                "Feixe", "Nenhuma carga atual: use Próxima carga ou selecione uma em Minhas cargas.", Qgis.Info, 6
             )
             return
         r = self._executar(rotas_cargas.concluir, id_carga)
@@ -255,8 +259,8 @@ class FeixePlugin:
         self._executar(rotas_cargas.proxima, id_carga)
 
     def focar_carga(self, carga, progresso):
-        """Seleciona a carga em Minhas cargas e enquadra com folga de duas células para cada lado."""
-        camadas.selecionar_carga(carga["id"])
+        """Faz dela a carga atual (contorno magenta em Minhas cargas) e enquadra com folga de duas células."""
+        camadas.definir_atual(carga["id"])
         largura = carga["xmax"] - carga["xmin"]
         altura = carga["ymax"] - carga["ymin"]
         self.zoom_para(
@@ -318,8 +322,8 @@ class FeixePlugin:
             raise ErroApi(400, str(e)) from None
 
     # --- QGIS ----------------------------------------------------------------------------------
-    def montar_camadas(self, modulos=None):
-        """Botão da barra (todas) ou a seta (um módulo): o mesmo caminho da rota POST /api/camadas/montar."""
+    def montar_camadas(self):
+        """Botão da barra: o mesmo caminho da rota POST /api/camadas/montar."""
         if config.credenciais(self.amb) is None:
             self.pedir_credenciais()
             if config.credenciais(self.amb) is None:
@@ -327,7 +331,7 @@ class FeixePlugin:
         if not self.servidor:
             self.iniciar_servidor()
         try:
-            r = rotas_camadas.montar(self.ctx, modulos)
+            r = rotas_camadas.montar(self.ctx)
         except ErroApi as e:
             self.iface.messageBar().pushMessage("Feixe", e.mensagem, Qgis.Warning, 6)
             return
@@ -335,8 +339,21 @@ class FeixePlugin:
             log.erro(f"montar camadas: {e}")
             self.iface.messageBar().pushMessage("Feixe", f"Não foi possível montar as camadas: {e}", Qgis.Critical, 8)
             return
+        self.barra.mostrar_modo(r.get("modo"))
         resumo = ", ".join(f"{c['nome']} ({c['feicoes']})" for c in r["camadas"])
         self.iface.messageBar().pushMessage("Feixe", f"Camadas montadas: {resumo}", Qgis.Success, 5)
+        return r
+
+    def trocar_modo(self, chave):
+        """Seta do botão de camadas: liga o subgrupo do modo (Execução ou Supervisão). Carrega antes se precisar."""
+        if camadas.modo_atual() is None and self.montar_camadas() is None:
+            self.barra.mostrar_modo(camadas.modo_atual())
+            return
+        try:
+            camadas.modo(chave)
+        except RuntimeError as e:
+            self.iface.messageBar().pushMessage("Feixe", str(e).capitalize() + ".", Qgis.Info, 5)
+        self.barra.mostrar_modo(camadas.modo_atual())
 
     def acao_qgis(self, nome, *args):
         """Ponte das rotas para o QGIS: despacha a ação registrada para a thread principal e espera o resultado."""

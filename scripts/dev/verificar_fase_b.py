@@ -132,7 +132,8 @@ def b1(amb, usuario, senha):
             }
             esperado = ex.um(
                 "SELECT count(*) FILTER (WHERE responsavel IS NOT NULL) AS atribuidas, "
-                "count(*) FILTER (WHERE responsavel IS NULL) AS disponiveis FROM mapcartacomp.carga_trabalho "
+                "count(*) FILTER (WHERE responsavel IS NULL AND id_cq_plano IS NULL) AS a_atribuir "
+                "FROM mapcartacomp.carga_trabalho "
                 "WHERE uf = 'DF' AND id_lote_etapa IN (" + cargas.SQL_PASSAGENS_ATUAIS + " AND l.uf = 'DF')"
             )
         authcfg = config.authcfg_id(amb)
@@ -140,54 +141,63 @@ def b1(amb, usuario, senha):
         r = camadas.montar(amb, authcfg, eu, resp, temas)  # de novo: substitui, não duplica
         raiz = QgsProject.instance().layerTreeRoot()
         assert [g.name() for g in raiz.children()].count("Feixe") == 1
-        assert len(QgsProject.instance().mapLayers()) == 3 + len(temas), QgsProject.instance().mapLayers()
+        assert len(QgsProject.instance().mapLayers()) == 4 + len(temas), QgsProject.instance().mapLayers()
         assert len(temas) > 1, temas
         n = {c["nome"]: c["feicoes"] for c in r["camadas"]}
         assert n == {
             "Minhas cargas": 5,
+            "Minhas folhas": 1,
             "Cargas por responsável": esperado["atribuidas"],
-            "Cargas disponíveis": esperado["disponiveis"],
+            "Cargas a atribuir": esperado["a_atribuir"],
             **por_tema,
         }, n
         ok(f"grupo único, contagens conferem: {n}")
+
+        def arvore(no):
+            return [(f.name(), arvore(f)) if f.children() else f.name() for f in no.children()]
+
+        feixe = raiz.findGroup("Feixe")
+        assert arvore(feixe) == [
+            ("Execução", ["Minhas cargas", "Minhas folhas"]),
+            (
+                "Supervisão",
+                ["Cargas por responsável", "Cargas a atribuir", ("Folhas", [f"Folhas · {t['nome']}" for t in temas])],
+            ),
+        ], arvore(feixe)
+        assert r["modo"] == "supervisao" == camadas.modo_atual()
+        assert not feixe.findGroup("Execução").itemVisibilityChecked() and feixe.findGroup("Supervisão").isVisible()
+        ok("organizado por tarefa: Execução e Supervisão; supervisor começa em supervisão")
+        assert camadas.modo("execucao") == "execucao" == camadas.modo_atual()
+        assert feixe.findGroup("Execução").isVisible() and not feixe.findGroup("Supervisão").itemVisibilityChecked()
+        ok("trocar de modo só troca a visibilidade dos subgrupos")
         assert len(resp) > 1, resp
         cats = QgsProject.instance().mapLayersByName("Cargas por responsável")[0].renderer().categories()
         assert len(cats) == len(resp) + 1 and all(c.label() for c in cats)  # + "Outros"
-        ligadas = [n.name() for n in raiz.findGroup("Feixe").findGroup("Folhas").findLayers() if n.isVisible()]
+        cores = {c.symbol().color().name() for c in cats[:-1]}
+        assert len(cores) == len(resp), cores
+        camadas.modo("supervisao")
+        ligadas = [n.name() for n in feixe.findGroup("Folhas").findLayers() if n.isVisible()]
         assert ligadas == ["Folhas · Hidrografia"], ligadas
         ok("subgrupo Folhas com um tema ligado: o de mais folhas")
-
-        # Por módulo (seta do botão de camadas): substitui só o módulo, os outros ficam, a ordem se mantém.
-        def arvore():
-            return [n.name() for n in raiz.findGroup("Feixe").children()]
-
-        ordem = ["Minhas cargas", "Cargas por responsável", "Cargas disponíveis", "Folhas"]
-        assert arvore() == ordem, arvore()
-        ids_antes = set(QgsProject.instance().mapLayers())
-        for modulo, nomes in (("minhas", ["Minhas cargas"]), ("folhas", [f"Folhas · {t['nome']}" for t in temas]),
-                              ("equipe", ["Cargas por responsável", "Cargas disponíveis"])):  # fmt: skip
-            r2 = camadas.montar(amb, authcfg, eu, resp, temas, [modulo])
-            assert [c["nome"] for c in r2["camadas"]] == nomes, r2
-            assert arvore() == ordem, (modulo, arvore())
-            assert len(QgsProject.instance().mapLayers()) == 3 + len(temas)
-        assert not ids_antes & set(QgsProject.instance().mapLayers())  # todas trocadas, nenhuma duplicada
-        QgsProject.instance().removeMapLayers(
-            [n.layerId() for n in raiz.findGroup("Feixe").findLayers() if n.name() != "Minhas cargas"]
-        )
-        raiz.findGroup("Feixe").removeChildNode(raiz.findGroup("Feixe").findGroup("Folhas"))
-        camadas.montar(amb, authcfg, eu, resp, temas, ["folhas"])
-        camadas.montar(amb, authcfg, eu, resp, temas, ["equipe"])
-        assert arvore() == ordem, arvore()
+        apm = camadas.montar(amb, authcfg, {"uf": "DF", "papeis": ["apm"]}, [], temas)
+        assert apm["modo"] == "execucao" and [c["nome"] for c in apm["camadas"]] == ["Minhas cargas", "Minhas folhas"]
+        try:
+            camadas.modo("supervisao")
+            raise AssertionError("APM entrou no modo supervisão")
+        except RuntimeError:
+            pass
         r = camadas.montar(amb, authcfg, eu, resp, temas)
-        ok("por módulo: substitui só o módulo, sem duplicar, e cada um volta ao seu lugar no grupo")
-        ok(f"{len(cats)} responsáveis com cor e nome, ex.: {cats[0].label()}")
+        ok("APM só tem Execução; o modo supervisão é recusado")
+        ok(f"{len(cats) - 1} responsáveis, cada um com uma cor diferente, ex.: {cats[0].label()}")
 
         minhas = QgsProject.instance().mapLayersByName("Minhas cargas")[0]
-        assert minhas.renderer().type() == "categorizedSymbol"
+        assert minhas.renderer().type() == "RuleRenderer"
+        rotulos = [x.label() for x in minhas.renderer().rootRule().children()]
+        assert rotulos == ["Carga atual", "Pendente", "Concluída nos últimos 3 dias", "Concluída há mais de 3 dias"]
         cfg = minhas.editFormConfig()
         editaveis = [f.name() for i, f in enumerate(minhas.fields()) if not cfg.readOnly(i)]
         assert editaveis == ["concluido"], editaveis
-        ok("Minhas cargas com o estilo do DF e só concluido editável")
+        ok("Minhas cargas com o estilo do executor (carga atual, pendente, concluídas) e só concluido editável")
 
         alvo = next(minhas.getFeatures())
         minhas.startEditing()
@@ -211,12 +221,12 @@ def b1(amb, usuario, senha):
 
 @secao("b2")
 def b2(amb, usuario, senha):
-    """Minhas cargas: próxima e concluir pelo caminho da barra, com seleção e recarga da camada no QGIS."""
+    """Minhas cargas: próxima e concluir pelo caminho da barra, com a carga atual, o estilo e a recarga da camada."""
     from feixe.core import camadas
     from feixe.core.dados import cargas as dc
     from feixe.server.api import Contexto
     from feixe.server.rotas import cargas as rc
-    from qgis.core import QgsProject
+    from qgis.core import QgsExpressionContextUtils, QgsProject, QgsRenderContext
 
     copias = []
     with db.transacao(amb, usuario, senha) as ex:
@@ -242,23 +252,43 @@ def b2(amb, usuario, senha):
         ctx = Contexto(
             transacao=lambda: db.transacao(amb, usuario, senha),
             qgis=lambda nome, *a: {
-                "focar_carga": lambda c, p: (camadas.selecionar_carga(c["id"]), focadas.append(c["id"])),
+                "focar_carga": lambda c, p: (camadas.definir_atual(c["id"]), focadas.append(c["id"])),
                 "cargas_mudaram": lambda p: camadas.recarregar_cargas(),
             }[nome](*a),
         )
         r = rc.proxima(ctx)
-        assert r["carga"] is not None and camadas.carga_selecionada() == r["carga"]["id"] == focadas[-1]
-        ok(f"próxima carga selecionada na camada: {r['carga']['folha_revisao']} #{r['carga']['id']}")
-        alvo = camadas.carga_selecionada()
+        assert r["carga"] is not None and camadas.carga_atual() == r["carga"]["id"] == focadas[-1]
+        assert camadas.carga_selecionada() is None  # a atual não usa a seleção (amarela por cima do contorno)
+        minhas = camadas.camada_minhas()
+        rctx = QgsRenderContext()
+        rctx.expressionContext().appendScopes(
+            [
+                QgsExpressionContextUtils.projectScope(QgsProject.instance()),
+                QgsExpressionContextUtils.layerScope(minhas),
+            ]
+        )
+        rend = minhas.renderer().clone()
+        rend.startRender(rctx, minhas.fields())
+
+        def regra(f):  # rótulos das regras de estilo em que a feição cai
+            rctx.expressionContext().setFeature(f)
+            chaves = rend.legendKeysForFeature(f, rctx)
+            return [x.label() for x in rend.rootRule().children() if x.ruleKey() in chaves]
+
+        regras = {f["id_carga_trabalho"]: regra(f) for f in minhas.getFeatures()}
+        rend.stopRender(rctx)
+        assert regras[r["carga"]["id"]] == ["Carga atual"], regras
+        assert all(v == ["Pendente"] for k, v in regras.items() if k != r["carga"]["id"]), regras
+        ok(f"próxima carga vira a carga atual (só contorno), as outras pendentes: #{r['carga']['id']}")
+        alvo = camadas.carga_atual()
         r = rc.concluir(ctx, alvo)
         assert r["progresso"]["concluidas"] == 1 and r["progresso"]["total"] == 4, r["progresso"]
-        minhas = camadas.camada_minhas()
         feicao = next(minhas.getFeatures(f'"id_carga_trabalho" = {alvo}'))
         assert feicao["concluido"] is True or feicao["concluido"] == 1, feicao["concluido"]
         ok("concluir grava, recarrega a camada e devolve o progresso 1/4")
         seguinte = rc.proxima(ctx, alvo)["carga"]
-        assert seguinte["id"] != alvo and not seguinte["concluido"]
-        ok("a seguinte é outra carga pendente")
+        assert seguinte["id"] != alvo and not seguinte["concluido"] and camadas.carga_atual() == seguinte["id"]
+        ok("a seguinte é outra carga pendente e vira a atual")
         with db.transacao(amb, usuario, senha) as ex:
             assert not dc.desfazer(ex, alvo)["carga"]["concluido"]
         ok("desfazer dentro de 24 horas")

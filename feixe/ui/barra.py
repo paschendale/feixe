@@ -1,9 +1,9 @@
 """Barra do Feixe dentro do QGIS: guia o usuário na ordem do trabalho, só com ícones.
 
 Da esquerda para a direita: 1. conectar (o ponto diz o estado da conexão; a dica diz conta e modo), 2. carregar
-camadas (todas no clique; por módulo na seta, como as ferramentas do QGIS), 3. abrir o Feixe no navegador (o ícone
-tem a seta de link externo), 4. próxima carga, 5. concluir carga. Tudo o mais vive no painel web; a barra é Qt
-puro e deve continuar pequena.
+camadas (o clique carrega; a seta troca o modo de trabalho, Executar ou Supervisionar), 3. abrir o Feixe no
+navegador (o ícone tem a seta de link externo), 4. próxima carga, 5. concluir carga. Tudo o mais vive no painel web;
+a barra é Qt puro e deve continuar pequena.
 
 Toda ação tem nome próprio (objectName) e é registrada no QGIS pelo plugin, com atalho padrão que a pessoa troca em
 Configurações > Atalhos de teclado. A dica de cada botão mostra o atalho em uso.
@@ -18,6 +18,7 @@ from qgis.PyQt.QtCore import QSize, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QIcon, QPainter, QPixmap
 from qgis.PyQt.QtWidgets import (
     QAction,
+    QActionGroup,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -32,16 +33,20 @@ from ..core.ambiente import Ambiente
 
 PASTA_ICONES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icones")
 
-# Módulos de camadas que dá para carregar sozinhos (a ordem é a do grupo Feixe no projeto).
-MODULOS: List[Tuple[str, str, str, str]] = [
-    ("minhas", "Minhas cargas", "modulo_minhas", "As suas cargas, pendentes e concluídas, com o estilo do DF."),
+# Modos de trabalho (D-101): cada um liga o seu subgrupo no grupo Feixe e desliga o outro, sem recarregar.
+MODOS: List[Tuple[str, str, str, str]] = [
     (
-        "equipe",
-        "Cargas da equipe",
-        "modulo_equipe",
-        "Só supervisor: cargas por responsável (uma cor por pessoa) e cargas disponíveis, das etapas abertas.",
+        "execucao",
+        "Executar",
+        "modo_execucao",
+        "Mostra só o subgrupo Execução: Minhas cargas e Minhas folhas, para trabalhar sobre a imagem.",
     ),
-    ("folhas", "Folhas", "modulo_folhas", "Uma camada por tema com as folhas da unidade, etapa e responsável."),
+    (
+        "supervisao",
+        "Supervisionar",
+        "modo_supervisao",
+        "Só supervisor. Mostra só o subgrupo Supervisão: cargas por responsável, cargas a atribuir e folhas.",
+    ),
 ]
 
 ESTADOS = {
@@ -78,7 +83,8 @@ def _dica(titulo: str, texto: str, atalho: str = "") -> str:
 
 class BarraFeixe(QToolBar):
     abrir_painel = pyqtSignal()
-    camadas = pyqtSignal(object)  # None = todas; senão a lista de módulos
+    camadas = pyqtSignal()
+    modo = pyqtSignal(str)
     conta = pyqtSignal()
     sincronizar = pyqtSignal()
     proxima = pyqtSignal()
@@ -89,9 +95,8 @@ class BarraFeixe(QToolBar):
         "conectar": "Alt+Shift+U",
         "verificar": "Alt+Shift+V",
         "camadas": "Alt+Shift+L",
-        "camadas_minhas": "Alt+Shift+1",
-        "camadas_equipe": "Alt+Shift+2",
-        "camadas_folhas": "Alt+Shift+3",
+        "modo_execucao": "Alt+Shift+E",
+        "modo_supervisao": "Alt+Shift+S",
         "abrir": "Alt+Shift+F",
         "proxima": "Alt+Shift+N",
         "concluir": "Alt+Shift+C",
@@ -115,18 +120,22 @@ class BarraFeixe(QToolBar):
         )  # fmt: skip
         self.addAction(self.acao_conta)
 
-        # 2. Camadas: clique carrega todas; a seta carrega um módulo.
+        # 2. Camadas: o clique carrega (ou recarrega) o grupo Feixe; a seta troca o modo de trabalho.
         self.acao_camadas = self._acao(
             "camadas", "camadas", "Carregar as camadas do Feixe",
-            "Monta o grupo Feixe no projeto com todas as camadas do seu papel. Carregar de novo substitui, não "
-            "duplica. Na seta, carregue só um módulo.", lambda: self.camadas.emit(None),
+            "Monta o grupo Feixe no projeto com as camadas do seu papel, organizadas por tarefa: Execução e, para "
+            "supervisor, Supervisão. Carregar de novo relê o banco e substitui o grupo. Na seta, troque o modo.",
+            self.camadas,
         )  # fmt: skip
-        self.acoes_modulo: Dict[str, QAction] = {}
-        for chave, nome, ic, texto in MODULOS:
-            a = self._acao(f"camadas_{chave}", ic, nome, texto + " Substitui só este módulo no grupo Feixe.",
-                           lambda _=False, m=chave: self.camadas.emit([m]))  # fmt: skip
-            self.acoes_modulo[chave] = a
-        self.bt_camadas = self._botao(self.acao_camadas, [self.acao_camadas, None, *self.acoes_modulo.values()])
+        self.acoes_modo: Dict[str, QAction] = {}
+        grupo_modos = QActionGroup(self)
+        grupo_modos.setExclusive(True)
+        for chave, nome, ic, texto in MODOS:
+            a = self._acao(f"modo_{chave}", ic, nome, texto, lambda _=False, m=chave: self.modo.emit(m))
+            a.setCheckable(True)
+            grupo_modos.addAction(a)
+            self.acoes_modo[chave] = a
+        self.bt_camadas = self._botao(self.acao_camadas, [self.acao_camadas, None, *self.acoes_modo.values()])
 
         # 3. Abrir o painel no navegador (o ícone tem a seta de link externo).
         self.acao_painel = self._acao(
@@ -139,11 +148,13 @@ class BarraFeixe(QToolBar):
         # 4 e 5. Ações de alta frequência (B2). As de CQ entram na fase D, antes da âncora.
         self.acao_proxima = self._acao(
             "proxima", "proxima", "Próxima carga",
-            "Seleciona e enquadra a sua carga pendente mais próxima da última que você concluiu.", self.proxima,
+            "Vai para a sua carga pendente mais próxima da atual: ela vira a carga atual (contorno magenta em Minhas "
+            "cargas) e o mapa a enquadra.", self.proxima,
         )  # fmt: skip
         self.acao_concluir = self._acao(
             "concluir", "concluir", "Concluir carga",
-            "Conclui a carga selecionada na camada Minhas cargas e já passa para a próxima.", self.concluir,
+            "Conclui a carga atual (contorno magenta) e já passa para a próxima. Se você selecionou outra em Minhas "
+            "cargas, conclui a selecionada.", self.concluir,
         )  # fmt: skip
         self.addAction(self.acao_proxima)
         self.addAction(self.acao_concluir)
@@ -185,8 +196,13 @@ class BarraFeixe(QToolBar):
 
     def todas_acoes(self) -> List[QAction]:
         """Para o plugin registrar no QGIS (atalhos configuráveis) e no menu Complementos > Feixe."""
-        return [self.acao_conta, self.acao_verificar, self.acao_camadas, *self.acoes_modulo.values(),
+        return [self.acao_conta, self.acao_verificar, self.acao_camadas, *self.acoes_modo.values(),
                 self.acao_painel, self.acao_proxima, self.acao_concluir]  # fmt: skip
+
+    def mostrar_modo(self, chave: Optional[str]) -> None:
+        """Marca no menu o modo ligado (None: grupo Feixe ausente)."""
+        for k, a in self.acoes_modo.items():
+            a.setChecked(k == chave)
 
     def adicionar_acao(self, acao: QAction) -> None:
         """Ação de alta frequência nova (fases seguintes), depois de concluir carga."""
