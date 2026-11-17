@@ -11,14 +11,14 @@ export default function Sobre() {
         <CardContent className="space-y-1 text-sm">
           <div>{status?.online ? '● online' : '○ offline'}</div>
           <div className="text-muted-foreground">{status?.banco}</div>
-          {status && !status.credencial && <div className="text-destructive">usuário e senha não configurados (dock do QGIS)</div>}
+          {status && !status.credencial && <div className="text-destructive">usuário e senha não configurados (botão de conectar na barra do Feixe no QGIS)</div>}
           <div className="text-muted-foreground">{status?.detalhe}</div>
         </CardContent>
       </Card>
       <Card>
         <CardHeader><CardTitle className="text-sm">Usuário</CardTitle></CardHeader>
         <CardContent className="space-y-1 text-sm">
-          <div>{eu?.nome ?? status?.usuario ?? 'desconhecido (informe usuário e senha no dock do QGIS)'}</div>
+          <div>{eu?.nome ?? status?.usuario ?? 'desconhecido (conecte pelo botão da barra do Feixe no QGIS)'}</div>
           {eu && (
             <div className="text-muted-foreground">
               {eu.conta} · {eu.uf ?? 'sem lotação'} · {eu.papeis.length ? eu.papeis.join(', ') : 'sem papel'}
