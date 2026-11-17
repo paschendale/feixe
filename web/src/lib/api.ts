@@ -297,3 +297,24 @@ export type GrupoEsperando = {
 export type PessoaLote = { conta: string | null; nome: string | null; total: number; concluidas: number; ultima: string | null }
 
 export type LoteCompleto = Lote & { passagens: PassagemLote[]; pessoas: PessoaLote[] }
+
+// --- Fila de folhas por pessoa (B8, D-106) ---
+
+export type ItemFila = {
+  id: number
+  responsavel: string
+  nome: string
+  ordem: number
+  id_lote_etapa: number
+  id_lote: number
+  folha_revisao: string
+  tema: string
+  etapa: string
+  situacao: string
+  cargas: number
+  a_atribuir: number
+}
+
+export type AtribuidaFila = { id: number; responsavel: string; nome: string; atribuida_em: string; atribuidas: number; folha_revisao: string; id_lote: number }
+
+export type Filas = { itens: ItemFila[]; recentes: AtribuidaFila[] }
