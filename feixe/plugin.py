@@ -13,6 +13,7 @@ from qgis.PyQt.QtWidgets import QLabel, QMessageBox
 from .core import ambiente as ambmod
 from .core import camadas, config, db, dispatch, log
 from .core.dados import ErroDados
+from .core.dados import cargas as cargas_dados
 from .core.dados import lotes as lotes_dados
 from .core.versao import raiz_plugin, versao_plugin
 from .server.api import Contexto, ErroApi, criar_roteador
@@ -42,8 +43,8 @@ class FeixePlugin:
         self.broker = Broker()
         # Ações que as rotas pedem ao QGIS, por nome; cada item da fase B registra as suas. Rodam na thread principal.
         self.acoes_qgis = {
-            "montar_camadas": lambda eu, responsaveis, temas: camadas.montar(
-                self.amb, config.authcfg_id(self.amb), eu, responsaveis, temas
+            "montar_camadas": lambda eu, responsaveis, supervisao, execucao: camadas.montar(
+                self.amb, config.authcfg_id(self.amb), eu, responsaveis, supervisao, execucao
             ),
             "focar_carga": self.focar_carga,
             "ferramenta_folhas": self.ligar_ferramenta_folhas,
@@ -56,6 +57,10 @@ class FeixePlugin:
         self.barra = None
         self.rotulo_status = None
         self.ferramenta_folha = None
+        # Cargas puladas, por passagem (id_lote_etapa), na ordem em que foram puladas. Só na memória (D-102): voltam
+        # quando o QGIS reabre ou quando acabam as não puladas da folha.
+        self.puladas = {}
+        self._passagem_atual = (None, None)  # (id_lote_etapa, id_lote) da carga atual
         self.sinais = _Sinais()
         self.estado = {"online": False, "usuario": None, "detalhe": "não verificado"}
         self._timer = QTimer()
@@ -76,6 +81,7 @@ class FeixePlugin:
         self.barra.modo.connect(self.trocar_modo)
         self.barra.sincronizar.connect(self.verificar_rede)
         self.barra.proxima.connect(self.proxima_carga)
+        self.barra.pular.connect(self.pular_carga)
         self.barra.concluir.connect(self.concluir_carga)
         self.iface.addToolBar(self.barra)
         self.barra.show()  # se a pessoa escondeu a barra, abrir o QGIS de novo a traz de volta
@@ -227,14 +233,35 @@ class FeixePlugin:
             self.iface.messageBar().pushMessage("Feixe", f"Não deu certo: {e}", Qgis.Critical, 8)
         return None
 
-    def proxima_carga(self):
+    def _para_execucao(self) -> bool:
+        """Garante as camadas e o modo executar: quem pede uma carga está executando."""
         if not self._pronto():
-            return
+            return False
         if camadas.camada_minhas() is None and self.montar_camadas() is None:
-            return
+            return False
         if camadas.modo_atual() != "execucao":
-            self.trocar_modo("execucao")  # quem pede a próxima carga está executando
-        r = self._executar(rotas_cargas.proxima, camadas.carga_selecionada() or camadas.carga_atual())
+            self.trocar_modo("execucao")
+        return True
+
+    def _proxima(self, referencia, id_lote=None):
+        """Próxima carga, deixando de fora as puladas. Se acabaram as não puladas da folha atual, as puladas dela
+        voltam à rotação antes de passar para outra folha."""
+
+        def excluir():
+            return [i for ids in self.puladas.values() for i in ids]
+
+        le, lote = self._passagem_atual
+        if id_lote is None and self.puladas.get(le):
+            r = self._executar(rotas_cargas.proxima, referencia, excluir(), lote)
+            if r is None or r["carga"] is not None:
+                return r
+            self.puladas.pop(le)
+        return self._executar(rotas_cargas.proxima, referencia, excluir(), id_lote)
+
+    def proxima_carga(self):
+        if not self._para_execucao():
+            return
+        r = self._proxima(camadas.carga_selecionada() or camadas.carga_atual())
         if r is not None and r["carga"] is None:
             self.iface.messageBar().pushMessage("Feixe", "Você não tem carga pendente.", Qgis.Info, 5)
 
@@ -252,21 +279,86 @@ class FeixePlugin:
         r = self._executar(rotas_cargas.concluir, id_carga)
         if r is None:
             return
+        for ids in self.puladas.values():
+            if id_carga in ids:
+                ids.remove(id_carga)
         p = r["progresso"]
         self.iface.messageBar().pushMessage(
             "Feixe", f"Carga concluída · {p['folha_revisao']} · {p['concluidas']}/{p['total']}", Qgis.Success, 3
         )
-        self._executar(rotas_cargas.proxima, id_carga)
+        self._proxima(id_carga)
+
+    def pular_carga(self, id_carga=None):
+        """Deixa a carga para depois: ela volta no fim da fila da folha (ou quando o QGIS reabre). Só na memória."""
+        if not self._para_execucao():
+            return
+        id_carga = id_carga or camadas.carga_selecionada() or camadas.carga_atual()
+        if id_carga is None:
+            self.iface.messageBar().pushMessage(
+                "Feixe", "Nenhuma carga atual para pular: use Próxima carga.", Qgis.Info, 5
+            )
+            return
+        try:
+            with self.ctx.tx() as ex:
+                carga = cargas_dados.uma(ex, int(id_carga))
+        except Exception as e:  # noqa: BLE001
+            self.iface.messageBar().pushMessage("Feixe", f"Não deu certo: {e}", Qgis.Critical, 8)
+            return
+        if carga is None or carga["concluido"]:
+            self.iface.messageBar().pushMessage("Feixe", "Só dá para pular carga pendente.", Qgis.Info, 5)
+            return
+        fila = self.puladas.setdefault(carga["id_lote_etapa"], [])
+        if carga["id"] not in fila:
+            fila.append(carga["id"])
+        self._passagem_atual = (carga["id_lote_etapa"], carga["id_lote"])
+        r = self._proxima(carga["id"])
+        if r is not None and r["carga"] is None:
+            fila.remove(carga["id"])
+            self.iface.messageBar().pushMessage(
+                "Feixe", "Esta é a única carga pendente que você tem: não há para onde pular.", Qgis.Info, 5
+            )
+        elif r is not None:
+            self.iface.messageBar().pushMessage(
+                "Feixe", f"Carga pulada: volta depois das outras da {carga['folha_revisao']}.", Qgis.Info, 4
+            )
+
+    # --- ações das camadas (formulário, identificar, clique direito) ----------------------------------------------
+    def trabalhar_em(self, id_carga):
+        if self._para_execucao():
+            self._executar(rotas_cargas.focar, int(id_carga))
+
+    def proxima_na_folha(self, id_lote):
+        if not self._para_execucao():
+            return
+        r = self._proxima(camadas.carga_atual(), int(id_lote))
+        if r is not None and r["carga"] is None:
+            self.iface.messageBar().pushMessage("Feixe", "Você não tem carga pendente nesta folha.", Qgis.Info, 5)
+
+    def abrir_folha(self, id_lote):
+        """Abre o painel na gaveta da folha (ações de fluxo, histórico, atribuir)."""
+        if not self._pronto():
+            return
+        QDesktopServices.openUrl(QUrl(f"{self.servidor.url_abertura}#/folhas/{int(id_lote)}"))
 
     def focar_carga(self, carga, progresso):
-        """Faz dela a carga atual (contorno magenta em Minhas cargas) e enquadra com folga de duas células."""
+        """Faz dela a carga atual (contorno magenta) sem mudar a escala de quem trabalha: se ela já está inteira na
+        tela, o mapa não se move; senão, centraliza nela. Depois pisca a carga para chamar o olho (D-102)."""
         camadas.definir_atual(carga["id"])
-        largura = carga["xmax"] - carga["xmin"]
-        altura = carga["ymax"] - carga["ymin"]
-        self.zoom_para(
-            carga["xmin"] - 2 * largura, carga["ymin"] - 2 * altura, carga["xmax"] + 2 * largura,
-            carga["ymax"] + 2 * altura, 4674,
-        )  # fmt: skip
+        self._passagem_atual = (carga.get("id_lote_etapa"), carga.get("id_lote"))
+        canvas = self.iface.mapCanvas()
+        destino = canvas.mapSettings().destinationCrs()
+        ret = QgsRectangle(carga["xmin"], carga["ymin"], carga["xmax"], carga["ymax"])
+        origem = QgsCoordinateReferenceSystem("EPSG:4674")
+        if origem != destino:
+            ret = QgsCoordinateTransform(origem, destino, QgsProject.instance()).transformBoundingBox(ret)
+        if not canvas.extent().contains(ret):
+            canvas.setCenter(ret.center())
+            canvas.refresh()
+        camada = camadas.camada_com_carga(carga["id"])
+        if camada is not None:
+            f = next(camada.getFeatures(f'"id_carga_trabalho" = {int(carga["id"])}'), None)
+            if f is not None:
+                canvas.flashFeatureIds(camada, [f.id()])
         self.mostrar_progresso(progresso)
 
     def cargas_mudaram(self, progresso):
@@ -340,6 +432,9 @@ class FeixePlugin:
             self.iface.messageBar().pushMessage("Feixe", f"Não foi possível montar as camadas: {e}", Qgis.Critical, 8)
             return
         self.barra.mostrar_modo(r.get("modo"))
+        dicas = getattr(self.iface, "actionMapTips", lambda: None)()
+        if dicas is not None and not dicas.isChecked():
+            dicas.trigger()  # as camadas do Feixe têm dica ao passar o mouse (D-102)
         resumo = ", ".join(f"{c['nome']} ({c['feicoes']})" for c in r["camadas"])
         self.iface.messageBar().pushMessage("Feixe", f"Camadas montadas: {resumo}", Qgis.Success, 5)
         return r

@@ -15,7 +15,11 @@ CARGA = {"id": 1, "id_lote_etapa": 7, "concluido": True, "xmin": 0, "ymin": 0, "
 def montar(monkeypatch):
     chamadas = {"sql": [], "qgis": [], "eventos": []}
     monkeypatch.setattr(dc, "concluir", lambda ex, i: {"carga": {**CARGA, "id": i}, "progresso": PROG})
-    monkeypatch.setattr(dc, "proxima", lambda ex, ref: {**CARGA, "id": 2, "concluido": False} if ref != 99 else None)
+    monkeypatch.setattr(
+        dc,
+        "proxima",
+        lambda ex, ref, excluir=None, lote=None: {**CARGA, "id": 2, "concluido": False} if ref != 99 else None,
+    )
     monkeypatch.setattr(dc, "progresso", lambda ex, le: PROG)
     monkeypatch.setattr(dc, "uma", lambda ex, i: {**CARGA, "id": i, "responsavel": "u_1"})
     monkeypatch.setattr(dc, "minhas", lambda ex, le, concl: chamadas["sql"].append((le, concl)) or [])

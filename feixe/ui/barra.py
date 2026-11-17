@@ -2,8 +2,8 @@
 
 Da esquerda para a direita: 1. conectar (o ponto diz o estado da conexão; a dica diz conta e modo), 2. carregar
 camadas (o clique carrega; a seta troca o modo de trabalho, Executar ou Supervisionar), 3. abrir o Feixe no
-navegador (o ícone tem a seta de link externo), 4. próxima carga, 5. concluir carga. Tudo o mais vive no painel web;
-a barra é Qt puro e deve continuar pequena.
+navegador (o ícone tem a seta de link externo), 4. próxima carga, 5. pular carga, 6. concluir carga. Tudo o mais
+vive no painel web; a barra é Qt puro e deve continuar pequena.
 
 Toda ação tem nome próprio (objectName) e é registrada no QGIS pelo plugin, com atalho padrão que a pessoa troca em
 Configurações > Atalhos de teclado. A dica de cada botão mostra o atalho em uso.
@@ -88,6 +88,7 @@ class BarraFeixe(QToolBar):
     conta = pyqtSignal()
     sincronizar = pyqtSignal()
     proxima = pyqtSignal()
+    pular = pyqtSignal()
     concluir = pyqtSignal()
 
     # Atalhos padrão (livres no QGIS 3.40: o QGIS não usa Alt+Shift). Configuráveis no QGIS.
@@ -99,6 +100,7 @@ class BarraFeixe(QToolBar):
         "modo_supervisao": "Alt+Shift+S",
         "abrir": "Alt+Shift+F",
         "proxima": "Alt+Shift+N",
+        "pular": "Alt+Shift+P",
         "concluir": "Alt+Shift+C",
     }
 
@@ -156,7 +158,13 @@ class BarraFeixe(QToolBar):
             "Conclui a carga atual (contorno magenta) e já passa para a próxima. Se você selecionou outra em Minhas "
             "cargas, conclui a selecionada.", self.concluir,
         )  # fmt: skip
+        self.acao_pular = self._acao(
+            "pular", "pular", "Pular carga",
+            "Deixa a carga atual para depois e vai para a próxima. Ela volta quando acabarem as outras desta folha, "
+            "ou quando você reabrir o QGIS.", self.pular,
+        )  # fmt: skip
         self.addAction(self.acao_proxima)
+        self.addAction(self.acao_pular)
         self.addAction(self.acao_concluir)
         self._ancora_acoes = self.addSeparator()
         self._ancora_acoes.setVisible(False)
@@ -197,7 +205,7 @@ class BarraFeixe(QToolBar):
     def todas_acoes(self) -> List[QAction]:
         """Para o plugin registrar no QGIS (atalhos configuráveis) e no menu Complementos > Feixe."""
         return [self.acao_conta, self.acao_verificar, self.acao_camadas, *self.acoes_modo.values(),
-                self.acao_painel, self.acao_proxima, self.acao_concluir]  # fmt: skip
+                self.acao_painel, self.acao_proxima, self.acao_pular, self.acao_concluir]  # fmt: skip
 
     def mostrar_modo(self, chave: Optional[str]) -> None:
         """Marca no menu o modo ligado (None: grupo Feixe ausente)."""

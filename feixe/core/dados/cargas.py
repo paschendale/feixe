@@ -149,19 +149,25 @@ def desfazer(ex: Executor, id_carga: int) -> Dict:
     return {"carga": uma(ex, id_carga), "progresso": progresso(ex, linha["id_lote_etapa"])}
 
 
-def proxima(ex: Executor, referencia: Optional[int] = None) -> Optional[Dict]:
-    """Minha próxima carga pendente: a mais próxima da referência (a carga selecionada ou a última que concluí),
-    de preferência na mesma passagem. Só em passagens abertas. Nenhuma pendente: None."""
+def proxima(
+    ex: Executor,
+    referencia: Optional[int] = None,
+    excluir: Optional[List[int]] = None,
+    id_lote: Optional[int] = None,
+) -> Optional[Dict]:
+    """Minha próxima carga pendente: a mais próxima da referência (a carga atual ou a última que concluí), de
+    preferência na mesma passagem. Só em passagens abertas. `excluir`: cargas a deixar de fora (as puladas, que o
+    plugin guarda só na memória, D-102); `id_lote`: só nesta folha. Nenhuma pendente: None."""
     return ex.um(
         "WITH r AS (SELECT id_lote_etapa, ST_Centroid(geom) AS g FROM mapcartacomp.carga_trabalho WHERE id = "
         "coalesce(%s, (SELECT id FROM mapcartacomp.carga_trabalho WHERE responsavel = current_user AND concluido "
         "ORDER BY concluido_em DESC NULLS LAST LIMIT 1))) "
         f"SELECT {_CAMPOS} {_JUNCOES}LEFT JOIN r ON true "
         "WHERE c.responsavel = current_user AND NOT c.concluido AND le.situacao IN ('pendente', 'em_andamento') "
-        "AND c.id <> coalesce(%s, -1) "
+        "AND c.id <> coalesce(%s, -1) AND c.id <> ALL(%s::int[]) AND (%s::int IS NULL OR le.id_lote = %s) "
         "ORDER BY (c.id_lote_etapa = r.id_lote_etapa) DESC NULLS LAST, ST_Distance(ST_Centroid(c.geom), r.g) "
         "NULLS LAST, folha_revisao, c.id LIMIT 1",
-        (referencia, referencia),
+        (referencia, referencia, list(excluir or []), id_lote, id_lote),
     )
 
 

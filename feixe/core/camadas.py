@@ -30,7 +30,6 @@ import re
 from typing import Dict, List, Optional
 
 from qgis.core import (
-    QgsCategorizedSymbolRenderer,
     QgsDataSourceUri,
     QgsExpressionContextUtils,
     QgsFillSymbol,
@@ -39,7 +38,6 @@ from qgis.core import (
     QgsLineSymbol,
     QgsPalLayerSettings,
     QgsProject,
-    QgsRendererCategory,
     QgsRuleBasedRenderer,
     QgsSimpleFillSymbolLayer,
     QgsSingleSymbolRenderer,
@@ -121,22 +119,7 @@ def cores_distintas(n: int) -> List[QColor]:
     return cores
 
 
-def _por_responsavel(camada: QgsVectorLayer, responsaveis: List[Dict]) -> None:
-    categorias = []
-    ordem = sorted(responsaveis, key=lambda r: r["conta"])  # cor estável entre uma montagem e outra
-    for r, cor in zip(ordem, cores_distintas(len(ordem))):
-        simbolo = QgsFillSymbol.createSimple(
-            {"color": f"{cor.red()},{cor.green()},{cor.blue()},120", "outline_color": cor.darker(160).name(),
-             "outline_width": "0.3"}
-        )  # fmt: skip
-        categorias.append(QgsRendererCategory(r["conta"], simbolo, f"{r['nome']} ({r['cargas']})"))
-    # Valor vazio = "todos os outros": quem recebeu cargas depois de montar aparece em cinza até remontar.
-    outros = QgsFillSymbol.createSimple({"color": "150,150,150,90", "outline_color": "80,80,80,200"})
-    categorias.append(QgsRendererCategory("", outros, "Outros (remonte as camadas)"))
-    camada.setRenderer(QgsCategorizedSymbolRenderer("responsavel", categorias))
-
-
-# --- Minhas cargas: estilo e carga atual (D-101) ---------------------------------------------------------------------
+# --- Minhas cargas: estilo e carga atual (D-101) ----------------------------------------------------------------------
 VAR_ATUAL = "feixe_carga_atual"  # variável do projeto com o id da carga atual; o estilo lê dela
 _ATUAL = f'coalesce("id_carga_trabalho" = to_int(@{VAR_ATUAL}), false)'
 
@@ -207,8 +190,7 @@ def definir_atual(id_carga: Optional[int]) -> None:
     """Marca a carga atual (variável do projeto) e redesenha Minhas cargas. Tira a seleção da camada: a seleção do
     QGIS pinta de amarelo por cima do contorno e ficaria para trás na carga já concluída."""
     QgsExpressionContextUtils.setProjectVariable(QgsProject.instance(), VAR_ATUAL, "" if id_carga is None else id_carga)
-    camada = camada_minhas()
-    if camada is not None:
+    for camada in camadas_minhas():
         camada.removeSelection()
         camada.triggerRepaint()
 
@@ -222,22 +204,44 @@ def carga_atual() -> Optional[int]:
 
 
 EXECUCAO, SUPERVISAO = "Execução", "Supervisão"
+_PAPEL = "feixe/papel"  # propriedade da camada (e do subgrupo) que diz o que ela é, sem depender do nome
 MODOS = {"execucao": EXECUCAO, "supervisao": SUPERVISAO}  # modo de trabalho -> subgrupo do grupo Feixe
 
 
-def _so_minhas_abertas() -> str:
-    """Cargas minhas de passagens abertas: o que já foi encerrado sai do mapa de quem está executando."""
+def _em(ids: List[int]) -> str:
+    return ", ".join(str(int(i)) for i in ids) or "NULL"
+
+
+def _so_minhas_abertas(atividades: Optional[List[int]] = None) -> str:
+    """Cargas minhas de passagens abertas (e das atividades do subgrupo): o encerrado sai do mapa de quem executa."""
+    extra = f" AND c.id_atividade IN ({_em(atividades)})" if atividades else ""
     return (
         "id_carga_trabalho IN (SELECT c.id FROM mapcartacomp.carga_trabalho c WHERE c.responsavel = current_user "
-        f"AND c.id_lote_etapa IN ({SQL_PASSAGENS_ATUAIS}))"
+        f"AND c.id_lote_etapa IN ({SQL_PASSAGENS_ATUAIS}){extra})"
     )
 
 
-def _so_minhas_folhas() -> str:
+def _so_minhas_folhas(atividades: Optional[List[int]] = None) -> str:
+    extra = f" AND c.id_atividade IN ({_em(atividades)})" if atividades else ""
     return (
         "id_lote IN (SELECT le.id_lote FROM mapcartacomp.carga_trabalho c JOIN mapcartacomp.lote_etapa le "
-        f"ON le.id = c.id_lote_etapa WHERE c.responsavel = current_user AND le.id IN ({SQL_PASSAGENS_ATUAIS}))"
+        f"ON le.id = c.id_lote_etapa WHERE c.responsavel = current_user AND le.id IN ({SQL_PASSAGENS_ATUAIS}){extra})"
     )
+
+
+def _folhas_do_grupo(uf: Optional[str], atividades: List[int]) -> str:
+    """Lotes cuja etapa atual, aberta, é de uma atividade do subgrupo (com ou sem cargas geradas)."""
+    sub = (
+        "SELECT l.id FROM mapcartacomp.lote l JOIN mapcartacomp.lote_etapa le ON le.id = l.id_lote_etapa_atual "
+        "JOIN mapcartacomp.fluxo_etapa_atividade fa ON fa.id_fluxo_etapa = le.id_fluxo_etapa "
+        f"WHERE le.situacao IN ('pendente', 'em_andamento') AND fa.id_atividade IN ({_em(atividades)})"
+    )
+    return " AND ".join(p for p in (_filtro_uf(uf), f"id_lote IN ({sub})") if p)
+
+
+def _cargas_do_grupo(uf: Optional[str], atividades: List[int], responsavel: bool) -> str:
+    quem = "responsavel IS NOT NULL" if responsavel else "responsavel IS NULL AND NOT concluido"
+    return f"{_filtro_passagens(uf)} AND id_atividade IN ({_em(atividades)}) AND {quem}"
 
 
 def _estilo_minhas_folhas(camada: QgsVectorLayer) -> None:
@@ -267,17 +271,77 @@ def _a_atribuir(camada: QgsVectorLayer) -> None:
     )
 
 
-def montar(amb: Ambiente, authcfg: str, eu: Dict, responsaveis: List[Dict], temas: List[Dict]) -> Dict:
-    """(Re)monta o grupo Feixe no topo do projeto, organizado por tarefa (D-101). Montar de novo substitui o grupo.
+def _preenchido(cor: QColor, opacidade: int = 120) -> QgsFillSymbol:
+    return QgsFillSymbol.createSimple(
+        {"color": f"{cor.red()},{cor.green()},{cor.blue()},{opacidade}", "outline_color": cor.darker(160).name(),
+         "outline_width": "0.3"}
+    )  # fmt: skip
 
-    - Execução: Minhas cargas e Minhas folhas, só das passagens abertas.
-    - Supervisão (só supervisor): Cargas por responsável, Cargas a atribuir (sem as amostras de CQ, que são da
-      fase D) e o subgrupo Folhas, com uma camada por tema.
 
-    O modo inicial é o do papel: supervisão para supervisor, execução para os outros; `modo` troca. `eu` é o objeto
-    de GET /api/eu; `responsaveis` vem de `dados.cargas.responsaveis_atuais`; `temas` de
-    `dados.lotes.temas_com_lotes`. Devolve o modo e o nome e a contagem de feições de cada camada.
+def _regras(regras: List[tuple]) -> QgsRuleBasedRenderer:
+    """(rótulo, expressão, símbolo, ligada) -> estilo por regras; regra desligada = desmarcada na legenda."""
+    raiz = QgsRuleBasedRenderer.Rule(None)
+    for rotulo, expressao, simbolo, ligada in regras:
+        r = QgsRuleBasedRenderer.Rule(simbolo, 0, 0, expressao, rotulo)
+        r.setActive(ligada)
+        raiz.appendChild(r)
+    return QgsRuleBasedRenderer(raiz)
+
+
+CONCLUIDAS = "Concluídas"
+ESTILO_RESPONSAVEL, ESTILO_SITUACAO = "Por responsável", "Por situação"
+
+
+def estilos_cargas(camada: QgsVectorLayer, pessoas: List[Dict], cores: Dict[str, QColor]) -> None:
+    """Dois estilos na mesma camada (menu Estilos do QGIS): por responsável (padrão) e por situação. Nos dois, as
+    concluídas ficam desmarcadas na legenda: a camada mostra o que está pendente, e quem quiser liga as concluídas."""
+    concluida = QgsFillSymbol.createSimple({"color": "160,160,160,70", "outline_color": "110,110,110,160"})
+    por_resp = [
+        (f"{p['nome']} ({p['pendentes']})", f"NOT \"concluido\" AND \"responsavel\" = '{p['conta']}'",
+         _preenchido(cores[p["conta"]]), True)
+        for p in pessoas
+    ]  # fmt: skip
+    contas = ", ".join(f"'{p['conta']}'" for p in pessoas) or "''"
+    por_resp.append(
+        ("Outros (carregue as camadas de novo)", f"NOT \"concluido\" AND \"responsavel\" NOT IN ({contas})",
+         _preenchido(QColor(150, 150, 150), 90), True)
+    )  # fmt: skip
+    por_resp.append((CONCLUIDAS, '"concluido"', concluida, False))
+    pendente = _preenchido(QColor("#2E7BD6"), 110)
+    por_situacao = [
+        ("Pendentes", 'NOT "concluido"', pendente, True),
+        (CONCLUIDAS, '"concluido"', concluida.clone(), False),
+    ]
+    gerente = camada.styleManager()
+    camada.setRenderer(_regras(por_situacao))
+    gerente.renameStyle(gerente.currentStyle(), ESTILO_SITUACAO)
+    gerente.addStyleFromLayer(ESTILO_RESPONSAVEL)
+    gerente.setCurrentStyle(ESTILO_RESPONSAVEL)
+    camada.setRenderer(_regras(por_resp))
+    gerente.addStyleFromLayer(ESTILO_RESPONSAVEL)
+
+
+def montar(
+    amb: Ambiente,
+    authcfg: str,
+    eu: Dict,
+    responsaveis: List[Dict],
+    grupos_supervisao: List[Dict],
+    grupos_execucao: List[Dict],
+) -> Dict:
+    """(Re)monta o grupo Feixe no topo do projeto, por tarefa (D-101) e por atividade em produção (D-102).
+
+    - Execução: Minhas cargas e Minhas folhas, só das passagens abertas; com mais de uma atividade, um subgrupo por
+      atividade.
+    - Supervisão (só supervisor): um subgrupo por atividade em produção na UF (as de CQ de um tema juntas), cada um
+      com Folhas, Cargas por responsável (concluídas desmarcadas; estilo alternativo por situação) e Cargas a
+      atribuir. Só o subgrupo com mais folhas vem ligado.
+
+    `grupos_*` vêm de `dados.grupos`; `responsaveis` de `dados.grupos.responsaveis` (por atividade). O modo inicial é
+    o do papel. Devolve o modo, os subgrupos e o nome e a contagem de feições de cada camada.
     """
+    from . import formularios
+
     if not authcfg:
         raise RuntimeError("usuário e senha ainda não configurados")
     uf = eu.get("uf")
@@ -291,40 +355,69 @@ def montar(amb: Ambiente, authcfg: str, eu: Dict, responsaveis: List[Dict], tema
     grupo: QgsLayerTreeGroup = raiz.insertGroup(0, GRUPO)
     carregadas = []
 
-    def por(sub, camada, visivel=True):
+    def por(sub, camada, papel, visivel=True):
+        camada.setCustomProperty(_PAPEL, papel)
         projeto.addMapLayer(camada, False)
         sub.addLayer(camada).setItemVisibilityChecked(visivel)
         carregadas.append(camada)
 
     execucao = grupo.addGroup(EXECUCAO)
-    minhas = _camada(amb, authcfg, "Minhas cargas", "vw_carga_trabalho", "id_carga_trabalho", _so_minhas_abertas())
-    estilo_minhas(minhas)
-    _so_concluido_editavel(minhas)
-    por(execucao, minhas)
-    folhas_minhas = _camada(amb, authcfg, "Minhas folhas", "ctrl_lote", "id_lote", _so_minhas_folhas())
-    _estilo_minhas_folhas(folhas_minhas)
-    por(execucao, folhas_minhas)
+    for g in grupos_execucao or [None]:
+        sub = execucao if len(grupos_execucao) <= 1 else execucao.addGroup(g["rotulo"])
+        atividades = g["atividades"] if g and len(grupos_execucao) > 1 else None
+        minhas = _camada(
+            amb, authcfg, "Minhas cargas", "vw_carga_trabalho", "id_carga_trabalho", _so_minhas_abertas(atividades)
+        )
+        estilo_minhas(minhas)
+        _so_concluido_editavel(minhas)
+        formularios.minhas_cargas(minhas)
+        por(sub, minhas, "minhas_cargas")
+        folhas = _camada(amb, authcfg, "Minhas folhas", "ctrl_lote", "id_lote", _so_minhas_folhas(atividades))
+        _estilo_minhas_folhas(folhas)
+        formularios.minhas_folhas(folhas, minhas.id())
+        por(sub, folhas, "minhas_folhas")
 
     if supervisor:
         sup = grupo.addGroup(SUPERVISAO)
-        por_resp = _camada(
-            amb, authcfg, "Cargas por responsável", "carga_trabalho", "id",
-            _filtro_passagens(uf) + " AND responsavel IS NOT NULL",
-        )  # fmt: skip
-        _por_responsavel(por_resp, responsaveis)
-        por(sup, por_resp)
-        filtro = _filtro_passagens(uf) + " AND responsavel IS NULL AND id_cq_plano IS NULL"
-        a_atribuir = _camada(amb, authcfg, "Cargas a atribuir", "carga_trabalho", "id", filtro)
-        _a_atribuir(a_atribuir)
-        por(sup, a_atribuir)
-        sub = sup.addGroup("Folhas")
-        ligado = max(temas, key=lambda t: t.get("lotes") or 0)["id"] if temas else None
-        for t in temas:
-            f = " AND ".join(p for p in (_filtro_uf(uf), f"id_tema = {int(t['id'])}") if p)
-            camada = _camada(amb, authcfg, f"Folhas · {t['nome']}", "ctrl_lote", "id_lote", f, "folhas.qml")
-            por(sub, camada, t["id"] == ligado)
+        contas = sorted({r["conta"] for r in responsaveis})
+        cores = dict(zip(contas, cores_distintas(len(contas))))
+        ligado = None
+        for g in grupos_supervisao:
+            sub = sup.addGroup(g["rotulo"])
+            sub.setCustomProperty(_PAPEL, g["chave"])
+            pessoas: Dict[str, Dict] = {}
+            for r in responsaveis:
+                if r["id_atividade"] in g["atividades"]:
+                    p = pessoas.setdefault(r["conta"], {"conta": r["conta"], "nome": r["nome"], "pendentes": 0})
+                    p["pendentes"] += r["pendentes"]
+            f = _camada(amb, authcfg, "Folhas", "ctrl_lote", "id_lote", _folhas_do_grupo(uf, g["atividades"]),
+                        "folhas.qml")  # fmt: skip
+            formularios.folhas_supervisao(f)
+            por(sub, f, "folhas")
+            resp = _camada(amb, authcfg, "Cargas por responsável", "vw_carga_supervisao", "id",
+                           _cargas_do_grupo(uf, g["atividades"], True))  # fmt: skip
+            estilos_cargas(resp, sorted(pessoas.values(), key=lambda p: p["nome"]), cores)
+            formularios.cargas_supervisao(resp)
+            por(sub, resp, "cargas_responsavel")
+            livres = _camada(amb, authcfg, "Cargas a atribuir", "vw_carga_supervisao", "id",
+                             _cargas_do_grupo(uf, g["atividades"], False))  # fmt: skip
+            _a_atribuir(livres)
+            formularios.cargas_supervisao(livres)
+            por(sub, livres, "cargas_a_atribuir")
+            n = f.featureCount()
+            if ligado is None or n > ligado[1]:
+                ligado = (sub, n)
+        for sub in sup.children():
+            visivel = ligado is not None and sub is ligado[0]
+            sub.setItemVisibilityChecked(visivel)
+            sub.setExpanded(visivel)
     escolhido = modo("supervisao" if supervisor else "execucao")
-    return {"modo": escolhido, "camadas": [{"nome": c.name(), "feicoes": c.featureCount()} for c in carregadas]}
+    return {
+        "modo": escolhido,
+        "grupos": {"execucao": [g["rotulo"] for g in grupos_execucao],
+                   "supervisao": [g["rotulo"] for g in grupos_supervisao] if supervisor else []},
+        "camadas": [{"nome": c.name(), "feicoes": c.featureCount()} for c in carregadas],
+    }  # fmt: skip
 
 
 def modo_atual() -> Optional[str]:
@@ -354,26 +447,37 @@ def modo(chave: str) -> str:
     return chave
 
 
-# --- Minhas cargas: seleção e recarga (B2) ---------------------------------------------------------------------------
+# --- Minhas cargas: seleção e recarga (B2) ----------------------------------------------------------------------------
+
+
+def camadas_minhas() -> List[QgsVectorLayer]:
+    """As camadas Minhas cargas do grupo Feixe (uma por atividade, quando a pessoa tem mais de uma)."""
+    grupo = QgsProject.instance().layerTreeRoot().findGroup(GRUPO)
+    if grupo is None:
+        return []
+    return [
+        n.layer() for n in grupo.findLayers()
+        if n.layer() is not None and n.layer().customProperty(_PAPEL) == "minhas_cargas"
+    ]  # fmt: skip
 
 
 def camada_minhas() -> Optional[QgsVectorLayer]:
-    grupo = QgsProject.instance().layerTreeRoot().findGroup(GRUPO)
-    if grupo is None:
-        return None
-    for no in grupo.findLayers():
-        if no.layer() is not None and no.layer().name() == "Minhas cargas":
-            return no.layer()
+    camadas = camadas_minhas()
+    return camadas[0] if camadas else None
+
+
+def camada_com_carga(id_carga: int) -> Optional[QgsVectorLayer]:
+    for camada in camadas_minhas():
+        if next(camada.getFeatures(f'"id_carga_trabalho" = {int(id_carga)}'), None) is not None:
+            return camada
     return None
 
 
 def carga_selecionada() -> Optional[int]:
-    """Id da primeira carga selecionada na camada Minhas cargas, ou None (a escolha à mão vale mais que a atual)."""
-    camada = camada_minhas()
-    if camada is None:
-        return None
-    for f in camada.getSelectedFeatures():
-        return int(f["id_carga_trabalho"])
+    """Id da primeira carga selecionada em Minhas cargas, ou None (a escolha à mão vale mais que a atual)."""
+    for camada in camadas_minhas():
+        for f in camada.getSelectedFeatures():
+            return int(f["id_carga_trabalho"])
     return None
 
 
@@ -389,7 +493,7 @@ def recarregar_cargas() -> None:
             camada.triggerRepaint()
 
 
-# --- Prévia das cargas geradas pela grade (B4) -----------------------------------------------------------------------
+# --- Prévia das cargas geradas pela grade (B4) ------------------------------------------------------------------------
 NOME_PREVIA = "Prévia de cargas"
 
 
@@ -428,17 +532,17 @@ def mostrar_previa(celulas: List[Dict]) -> QgsVectorLayer:
 
 
 def cargas_selecionadas() -> Dict:
-    """Ids das cargas selecionadas nas camadas do grupo Feixe que têm cargas (id da carga em `id` ou
-    `id_carga_trabalho`)."""
+    """Ids das cargas selecionadas nas camadas de cargas do grupo Feixe."""
     grupo = QgsProject.instance().layerTreeRoot().findGroup(GRUPO)
     ids, camadas_ = set(), []
     for no in grupo.findLayers() if grupo else []:
         camada = no.layer()
         if not isinstance(camada, QgsVectorLayer) or not camada.selectedFeatureCount():
             continue
-        campo = "id_carga_trabalho" if camada.fields().indexOf("id_carga_trabalho") >= 0 else "id"
-        if camada.fields().indexOf("geocodigo") < 0 and campo == "id":
-            continue  # não é camada de cargas (Folhas)
+        papel = camada.customProperty(_PAPEL)
+        if papel not in ("minhas_cargas", "cargas_responsavel", "cargas_a_atribuir"):
+            continue  # não é camada de cargas (Folhas, Minhas folhas, prévia)
+        campo = "id_carga_trabalho" if papel == "minhas_cargas" else "id"
         ids.update(int(f[campo]) for f in camada.getSelectedFeatures())
         camadas_.append(camada.name())
     return {"ids": sorted(ids), "camadas": camadas_}

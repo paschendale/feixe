@@ -48,10 +48,10 @@ def focar(ctx, id_carga: int) -> Dict:
     return {"carga": carga, "progresso": progresso}
 
 
-def proxima(ctx, referencia: Optional[int] = None) -> Dict:
-    """Próxima carga pendente; no QGIS, seleciona e enquadra. Sem pendentes: carga nula."""
+def proxima(ctx, referencia: Optional[int] = None, excluir=None, id_lote: Optional[int] = None) -> Dict:
+    """Próxima carga pendente; no QGIS, vira a carga atual. Sem pendentes: carga nula."""
     with ctx.tx() as ex:
-        carga = dc.proxima(ex, referencia)
+        carga = dc.proxima(ex, referencia, excluir, id_lote)
         progresso = dc.progresso(ex, carga["id_lote_etapa"]) if carga else None
     if carga:
         _no_qgis(ctx, "focar_carga", carga, progresso)
