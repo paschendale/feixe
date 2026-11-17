@@ -22,16 +22,56 @@ SELECT c.id AS id_carga_trabalho,
        c.criado_em AS criada_em,
        c.concluido,
        c.concluido_em,
-       c.geom
+       c.geom,
+       -- Colunas novas só no fim (CREATE OR REPLACE VIEW não reordena): passagem, folha e o progresso da pessoa nela,
+       -- para o formulário e a dica de Minhas cargas no QGIS (D-102).
+       c.id_lote_etapa,
+       le.id_lote,
+       t.nome AS tema,
+       count(*) OVER (PARTITION BY c.id_lote_etapa) AS minhas_na_folha,
+       count(*) FILTER (WHERE c.concluido) OVER (PARTITION BY c.id_lote_etapa) AS minhas_concluidas_na_folha
   FROM mapcartacomp.carga_trabalho c
   JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa
   JOIN mapcartacomp.lote l ON l.id = le.id_lote
+  JOIN mapcartacomp.tema t ON t.id = l.id_tema
   JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa
   JOIN mapcartacomp.atividade at ON at.id = c.id_atividade
  WHERE c.responsavel = current_user;
 
 CREATE OR REPLACE RULE upd_vw_carga_trabalho AS ON UPDATE TO mapcartacomp.vw_carga_trabalho DO INSTEAD
     UPDATE mapcartacomp.carga_trabalho SET concluido = NEW.concluido WHERE id = OLD.id_carga_trabalho;
+
+-- Cargas da unidade para o supervisor no QGIS (camadas Cargas por responsável e Cargas a atribuir, D-102): só
+-- leitura, com o nome do responsável, a folha, a atividade e a etapa, para o formulário e a dica do mapa. A RLS por UF
+-- da CCAR vale aqui como na tabela.
+CREATE OR REPLACE VIEW mapcartacomp.vw_carga_supervisao AS
+SELECT c.id,
+       c.uuid,
+       c.uf,
+       c.id_lote_etapa,
+       le.id_lote,
+       c.id_atividade,
+       c.id_cq_plano,
+       c.responsavel,
+       u.nom_usuario::text AS responsavel_nome,
+       mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao,
+       t.nome AS tema,
+       at.nome AS atividade,
+       fe.nome AS etapa,
+       fe.fase,
+       le.situacao AS situacao_etapa,
+       c.geocodigo,
+       c.concluido,
+       c.concluido_em,
+       c.criado_em,
+       c.geom
+  FROM mapcartacomp.carga_trabalho c
+  JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa
+  JOIN mapcartacomp.lote l ON l.id = le.id_lote
+  JOIN mapcartacomp.tema t ON t.id = l.id_tema
+  JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa
+  JOIN mapcartacomp.atividade at ON at.id = c.id_atividade
+  LEFT JOIN mapcartctrl.t_usuario u ON u.nom_contausuario = c.responsavel;
 
 -- Amostras ----------------------------------------------------------------------------------------------------------
 

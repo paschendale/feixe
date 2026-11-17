@@ -28,7 +28,7 @@ TABELAS = [
 ]  # fmt: skip
 # Tabelas de configuração fixa: só leitura para os usuários (alteradas pelas migrações).
 SO_LEITURA = ["schema_version", "fase"]
-VIEWS_LEITURA = ["ctrl_lote_etapa", "ctrl_lote"]
+VIEWS_LEITURA = ["ctrl_lote_etapa", "ctrl_lote", "vw_carga_supervisao"]
 VIEWS_EDITAVEIS = {
     "vw_carga_trabalho": "SELECT, UPDATE",
     "vw_cq_amostra": "SELECT, UPDATE",
