@@ -1,6 +1,8 @@
 """Subgrupos dinâmicos das camadas do Feixe no QGIS (D-102): um por atividade em produção agora.
 
-"Em produção" = atividade de uma etapa aberta (pendente ou em andamento) que é a etapa atual de um lote. Para a
+"Em produção" = atividade da etapa aberta (pendente ou em andamento) de um lote; cada lote tem no máximo uma. Não é
+a "etapa atual" do lote (`id_lote_etapa_atual`), que fica na etapa concluída até a seguinte começar, porque é ela que
+dá o status nacional (D-105): uma etapa aberta e ainda não iniciada já está em produção para o supervisor. Para a
 supervisão, vale a etapa dos lotes da UF; para a execução, as cargas abertas da conta conectada. As atividades de CQ de
 um tema (uma por medida) ficam num subgrupo só, "CQ · tema": são as mesmas folhas e a divisão fina é da fase D.
 """
@@ -48,7 +50,7 @@ def supervisao(ex: Executor, uf: Optional[str]) -> List[Dict]:
         ex.todos(
             "SELECT DISTINCT t.id AS id_tema, t.nome AS tema, fe.fase, f.ordem AS ordem_fase, a.id AS id_atividade, "
             "a.nome AS atividade FROM mapcartacomp.lote l "
-            "JOIN mapcartacomp.lote_etapa le ON le.id = l.id_lote_etapa_atual "
+            "JOIN mapcartacomp.lote_etapa le ON le.id_lote = l.id "
             "JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
             "JOIN mapcartacomp.fase f ON f.codigo = fe.fase "
             "JOIN mapcartacomp.fluxo_etapa_atividade fa ON fa.id_fluxo_etapa = fe.id "
@@ -67,7 +69,7 @@ def execucao(ex: Executor) -> List[Dict]:
             "SELECT DISTINCT t.id AS id_tema, t.nome AS tema, fe.fase, f.ordem AS ordem_fase, a.id AS id_atividade, "
             "a.nome AS atividade FROM mapcartacomp.carga_trabalho c "
             "JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa "
-            "JOIN mapcartacomp.lote l ON l.id = le.id_lote AND l.id_lote_etapa_atual = le.id "
+            "JOIN mapcartacomp.lote l ON l.id = le.id_lote "
             "JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
             "JOIN mapcartacomp.fase f ON f.codigo = fe.fase "
             "JOIN mapcartacomp.atividade a ON a.id = c.id_atividade "
@@ -85,7 +87,7 @@ def responsaveis(ex: Executor, uf: Optional[str]) -> List[Dict]:
         "count(*) FILTER (WHERE NOT c.concluido) AS pendentes, count(*) FILTER (WHERE c.concluido) AS concluidas "
         "FROM mapcartacomp.carga_trabalho c "
         "JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa "
-        "JOIN mapcartacomp.lote l ON l.id = le.id_lote AND l.id_lote_etapa_atual = le.id "
+        "JOIN mapcartacomp.lote l ON l.id = le.id_lote "
         "LEFT JOIN mapcartctrl.t_usuario u ON u.nom_contausuario = c.responsavel "
         f"WHERE c.responsavel IS NOT NULL AND le.situacao IN {_ABERTAS} AND (%s::text IS NULL OR l.uf = %s) "
         "GROUP BY 1, 2, 3 ORDER BY 3",

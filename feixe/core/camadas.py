@@ -232,7 +232,7 @@ def _so_minhas_folhas(atividades: Optional[List[int]] = None) -> str:
 def _folhas_do_grupo(uf: Optional[str], atividades: List[int]) -> str:
     """Lotes cuja etapa atual, aberta, é de uma atividade do subgrupo (com ou sem cargas geradas)."""
     sub = (
-        "SELECT l.id FROM mapcartacomp.lote l JOIN mapcartacomp.lote_etapa le ON le.id = l.id_lote_etapa_atual "
+        "SELECT l.id FROM mapcartacomp.lote l JOIN mapcartacomp.lote_etapa le ON le.id_lote = l.id "
         "JOIN mapcartacomp.fluxo_etapa_atividade fa ON fa.id_fluxo_etapa = le.id_fluxo_etapa "
         f"WHERE le.situacao IN ('pendente', 'em_andamento') AND fa.id_atividade IN ({_em(atividades)})"
     )

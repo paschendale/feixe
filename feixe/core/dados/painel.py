@@ -1,7 +1,8 @@
 """Leituras agregadas do painel no navegador: o Início por papel e as abas da Supervisão (D-103).
 
-Atividade em produção segue o mesmo corte dos subgrupos do QGIS (D-102, `grupos`): atividade de uma etapa aberta que é
-a etapa atual de um lote; as de CQ de um tema ficam num grupo só. Assim o painel e as camadas contam a mesma história.
+Atividade em produção segue o mesmo corte dos subgrupos do QGIS (D-102, `grupos`): atividade da etapa aberta de um
+lote (pendente ou em andamento, no máximo uma por lote; D-105); as de CQ de um tema ficam num grupo só. Assim o painel
+e as camadas contam a mesma história.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ def _membros(ex: Executor, uf: Optional[str]) -> List[Dict]:
     return ex.todos(
         "SELECT l.id AS id_lote, t.id AS id_tema, t.nome AS tema, fe.fase, f.ordem AS ordem_fase, "
         "a.id AS id_atividade, a.nome AS atividade FROM mapcartacomp.lote l "
-        "JOIN mapcartacomp.lote_etapa le ON le.id = l.id_lote_etapa_atual "
+        "JOIN mapcartacomp.lote_etapa le ON le.id_lote = l.id "
         "JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
         "JOIN mapcartacomp.fase f ON f.codigo = fe.fase "
         "JOIN mapcartacomp.fluxo_etapa_atividade fa ON fa.id_fluxo_etapa = fe.id "
@@ -39,7 +40,7 @@ def _cargas(ex: Executor, uf: Optional[str]) -> List[Dict]:
         "max(c.concluido_em) AS ultima "
         "FROM mapcartacomp.carga_trabalho c "
         "JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa "
-        "JOIN mapcartacomp.lote l ON l.id = le.id_lote AND l.id_lote_etapa_atual = le.id "
+        "JOIN mapcartacomp.lote l ON l.id = le.id_lote "
         "LEFT JOIN mapcartctrl.t_usuario u ON u.nom_contausuario = c.responsavel "
         f"WHERE le.situacao IN {_ABERTAS} AND (%s::text IS NULL OR l.uf = %s) GROUP BY 1, 2, 3, 4",
         (uf, uf),
@@ -106,7 +107,7 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
         r["id_lote"]: r["iniciada_em"]
         for r in ex.todos(
             "SELECT l.id AS id_lote, coalesce(le.iniciada_em, le.criado_em) AS iniciada_em FROM mapcartacomp.lote l "
-            "JOIN mapcartacomp.lote_etapa le ON le.id = l.id_lote_etapa_atual "
+            "JOIN mapcartacomp.lote_etapa le ON le.id_lote = l.id "
             f"WHERE le.situacao IN {_ABERTAS} AND (%s::text IS NULL OR l.uf = %s)",
             (uf, uf),
         )
@@ -155,6 +156,8 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
         "LEFT JOIN LATERAL (SELECT x.id, x.nome FROM mapcartacomp.fluxo_etapa x WHERE x.id_fluxo = l.id_fluxo "
         "AND x.ordem > fe.ordem ORDER BY x.ordem LIMIT 1) n ON true "
         f"WHERE le.situacao NOT IN {_ABERTAS} AND l.status_nacional <> 'CONCLUIDA' AND l.uf = %s "
+        "AND NOT EXISTS (SELECT 1 FROM mapcartacomp.lote_etapa x WHERE x.id_lote = l.id "
+        f"AND x.situacao IN {_ABERTAS}) "
         "ORDER BY t.nome, fe.ordem, folha_revisao",
         (uf,),
     )

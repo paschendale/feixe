@@ -407,11 +407,13 @@ def abrir_proximas(ex: Executor, uf: str, ids: List[int], observacao: str) -> Di
 
 
 def estado(ex: Executor, id_lote: int) -> Dict:
-    """Situação do lote depois de uma ação: status nacional, etapa atual e a sugestão de próxima etapa."""
+    """Situação do lote depois de uma ação: status nacional, etapa em que está trabalhando (a aberta, se houver; senão a
+    atual, D-105) e a sugestão de próxima etapa (só sem etapa aberta)."""
     lote = ex.um(
         "SELECT l.id, l.status_nacional, l.revisao_atual, l.id_lote_etapa_atual, le.situacao, fe.ordem, "
         "fe.nome AS etapa, l.id_fluxo FROM mapcartacomp.lote l "
-        "LEFT JOIN mapcartacomp.lote_etapa le ON le.id = l.id_lote_etapa_atual "
+        "LEFT JOIN mapcartacomp.lote_etapa le ON le.id = coalesce((SELECT x.id FROM mapcartacomp.lote_etapa x "
+        "WHERE x.id_lote = l.id AND x.situacao IN ('pendente', 'em_andamento') LIMIT 1), l.id_lote_etapa_atual) "
         "LEFT JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa WHERE l.id = %s",
         (id_lote,),
     )

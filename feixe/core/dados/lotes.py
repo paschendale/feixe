@@ -139,19 +139,33 @@ def criar_livre(
     return {"tema": fluxo["tema"], "criados": [{"nome": nome, "id_lote": id_lote}], "existentes": []}
 
 
+# Etapa em que a folha está trabalhando (D-105): a aberta (pendente ou em andamento; no máximo uma), se houver; senão a
+# atual do lote, que é a que dá o status nacional e fica na concluída até a seguinte começar. Sem isso, uma folha com a
+# próxima etapa aberta e ainda não iniciada apareceria como "esperando" e gerar ou atribuir cargas iria para a etapa
+# concluída. O status nacional continua o da view.
 _CAMPOS_LOTE = (
     "c.id_lote AS id, c.tipo, c.nome, c.folha_revisao, c.cod_projeto, p.nom_projeto AS projeto, c.id_tema, c.tema, "
-    "c.uf, c.status_nacional, c.etapa, c.fase, c.situacao, c.revisao_atual, c.cargas_total, c.cargas_concluidas, "
+    "c.uf, c.status_nacional, coalesce(ab.etapa, c.etapa) AS etapa, coalesce(ab.fase, c.fase) AS fase, "
+    "coalesce(ab.situacao, c.situacao) AS situacao, c.revisao_atual, "
+    "CASE WHEN ab.id_lote_etapa IS NULL THEN c.cargas_total ELSE ab.cargas_total END AS cargas_total, "
+    "CASE WHEN ab.id_lote_etapa IS NULL THEN c.cargas_concluidas ELSE ab.cargas_concluidas END AS cargas_concluidas, "
     "c.perc_concluidas, c.responsavel_principal, c.responsavel_nome, c.ultimo_cq_resultado, c.inicio, c.lead_time, "
-    "(SELECT x.id_lote_etapa_atual FROM mapcartacomp.lote x WHERE x.id = c.id_lote) AS id_lote_etapa_atual, "
+    "coalesce(ab.id_lote_etapa, (SELECT x.id_lote_etapa_atual FROM mapcartacomp.lote x WHERE x.id = c.id_lote)) "
+    "AS id_lote_etapa_atual, "
     "(SELECT x.id_fluxo FROM mapcartacomp.lote x WHERE x.id = c.id_lote) AS id_fluxo, "
     "ST_XMin(c.geom) AS xmin, ST_YMin(c.geom) AS ymin, ST_XMax(c.geom) AS xmax, ST_YMax(c.geom) AS ymax"
+)
+
+_ABERTA = (
+    "LEFT JOIN LATERAL (SELECT e.id_lote_etapa, e.etapa, e.fase, e.situacao, e.cargas_total, e.cargas_concluidas "
+    "FROM mapcartacomp.ctrl_lote_etapa e WHERE e.id_lote = c.id_lote AND e.situacao IN ('pendente', 'em_andamento') "
+    "LIMIT 1) ab ON true"
 )
 
 
 def listar(ex: Executor, uf: Optional[str], id_tema: Optional[int] = None, status: Optional[str] = None) -> List[Dict]:
     sql = (
-        f"SELECT {_CAMPOS_LOTE} FROM mapcartacomp.ctrl_lote c "
+        f"SELECT {_CAMPOS_LOTE} FROM mapcartacomp.ctrl_lote c {_ABERTA} "
         "JOIN mapcartctrl.t_projeto p ON p.cod_projeto = c.cod_projeto WHERE true"
     )
     params: list = []
@@ -164,7 +178,7 @@ def listar(ex: Executor, uf: Optional[str], id_tema: Optional[int] = None, statu
 
 def um(ex: Executor, id_lote: int) -> Optional[Dict]:
     lote = ex.um(
-        f"SELECT {_CAMPOS_LOTE} FROM mapcartacomp.ctrl_lote c "
+        f"SELECT {_CAMPOS_LOTE} FROM mapcartacomp.ctrl_lote c {_ABERTA} "
         "JOIN mapcartctrl.t_projeto p ON p.cod_projeto = c.cod_projeto WHERE c.id_lote = %s",
         (id_lote,),
     )
@@ -177,14 +191,14 @@ def um(ex: Executor, id_lote: int) -> Optional[Dict]:
             "ORDER BY coalesce(c.iniciada_em, c.concluida_em, 'infinity'::timestamptz), c.id_lote_etapa",
             (id_lote,),
         )
-        # Quem tem carga na etapa atual, com o andamento de cada um (gaveta da folha, D-103).
+        # Quem tem carga na etapa em que a folha está trabalhando, com o andamento de cada um (gaveta, D-103, D-105).
         lote["pessoas"] = ex.todos(
             "SELECT c.responsavel AS conta, coalesce(u.nom_usuario::text, c.responsavel) AS nome, count(*) AS total, "
             "count(*) FILTER (WHERE c.concluido) AS concluidas, max(c.concluido_em) AS ultima "
-            "FROM mapcartacomp.carga_trabalho c JOIN mapcartacomp.lote l ON l.id_lote_etapa_atual = c.id_lote_etapa "
-            "LEFT JOIN mapcartctrl.t_usuario u ON u.nom_contausuario = c.responsavel WHERE l.id = %s "
+            "FROM mapcartacomp.carga_trabalho c "
+            "LEFT JOIN mapcartctrl.t_usuario u ON u.nom_contausuario = c.responsavel WHERE c.id_lote_etapa = %s "
             "GROUP BY 1, 2 ORDER BY c.responsavel IS NULL, 2",
-            (id_lote,),
+            (lote["id_lote_etapa_atual"],),
         )
     return lote
 

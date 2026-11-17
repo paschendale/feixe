@@ -6,10 +6,10 @@ from typing import Dict, List, Optional
 
 from . import ErroDados, Executor, novo_uuid
 
-# Passagens atuais e abertas dos lotes (pendentes ou em andamento): é o que o supervisor está distribuindo agora. A
-# passagem atual já concluída (folha esperando o supervisor andar) fica de fora.
+# Passagens abertas dos lotes (pendentes ou em andamento, no máximo uma por lote): é o que o supervisor está
+# distribuindo agora. Uma folha sem etapa aberta (esperando o supervisor andar) fica de fora (D-105).
 SQL_PASSAGENS_ATUAIS = (
-    "SELECT le.id FROM mapcartacomp.lote l JOIN mapcartacomp.lote_etapa le ON le.id = l.id_lote_etapa_atual "
+    "SELECT le.id FROM mapcartacomp.lote l JOIN mapcartacomp.lote_etapa le ON le.id_lote = l.id "
     "WHERE le.situacao IN ('pendente', 'em_andamento')"
 )
 

@@ -36,9 +36,20 @@ def test_atividade_em_producao_e_esperando(amb):  # noqa: F811
     (g,) = dp.esperando(ex, "GO")
     assert (g["id_proxima"], [f["id_lote"] for f in g["folhas"]]) == (e["revisao"], [lote])
 
-    # Na última etapa do fluxo, não há próxima: é o grupo "fim do fluxo".
+    # Aberta a próxima e ainda não iniciada (a etapa atual do lote continua na concluída, pelo status nacional), a
+    # folha já não espera ninguém (D-105): sai de Esperando, a listagem mostra a etapa aberta e é para ela que gerar e
+    # atribuir cargas apontam; a gaveta não sugere abrir outra.
     df.nova_passagem(ex, "GO", lote, e["revisao"], OBS)
-    df.acao(ex, "GO", _aberta(ex, lote), "iniciar", OBS)
+    nova = _aberta(ex, lote)
+    assert ex.um("SELECT id_lote_etapa_atual AS a FROM mapcartacomp.lote WHERE id = %s", (lote,))["a"] != nova
+    assert dp.esperando(ex, "GO") == []
+    item = next(x for x in dl.listar(ex, "GO") if x["id"] == lote)
+    assert (item["id_lote_etapa_atual"], item["situacao"], item["etapa"]) == (nova, "pendente", "E revisao")
+    assert dl.um(ex, lote)["id_lote_etapa_atual"] == nova
+    assert df.estado(ex, lote)["sugestao"] is None
+
+    # Na última etapa do fluxo, não há próxima: é o grupo "fim do fluxo".
+    df.acao(ex, "GO", nova, "iniciar", OBS)
     df.acao(ex, "GO", _aberta(ex, lote), "concluir", OBS)
     (g,) = dp.esperando(ex, "GO")
     assert g["id_proxima"] is None and g["proxima"] is None
