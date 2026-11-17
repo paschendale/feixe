@@ -19,7 +19,7 @@ export function resumoCriacao(r: ResultadoCriacao) {
 }
 
 // Criar folhas: fluxo + uma ou várias folhas 1:100.000, achadas pela busca ou pelo clique no mapa do QGIS (B3).
-export function NovaFolha({ aberto, fechar }: { aberto: boolean; fechar: () => void }) {
+export function NovaFolha({ aberto, fechar: fecharDialogo }: { aberto: boolean; fechar: () => void }) {
   const avisar = useAvisar()
   const { ultimo, conectado } = useSessao()
   const [fluxo, setFluxo] = useState<number | null>(null)
@@ -27,13 +27,29 @@ export function NovaFolha({ aberto, fechar }: { aberto: boolean; fechar: () => v
   const [achadas, setAchadas] = useState<Folha[]>([])
   const [escolhidas, setEscolhidas] = useState<Escolhida[]>([])
   const [ocupado, setOcupado] = useState(false)
+  // A malha de folhas está no mapa do QGIS e a ferramenta de escolher está ligada.
+  const [noMapa, setNoMapa] = useState(false)
 
   const adicionar = (f: Escolhida) => setEscolhidas((xs) => (xs.some((x) => x.id === f.id) ? xs : [...xs, f]))
 
-  // Folha clicada no mapa do QGIS chega pelo evento qgis {acao: "folha"}.
+  // Folhas escolhidas ou tiradas no mapa do QGIS chegam pelo evento qgis {acao: "folhas", adicionar, tirar}.
   useEffect(() => {
-    if (aberto && ultimo?.evento === 'qgis' && ultimo.dados.acao === 'folha') adicionar(ultimo.dados.folha as Escolhida)
+    if (!aberto || ultimo?.evento !== 'qgis' || ultimo.dados.acao !== 'folhas') return
+    const novas = (ultimo.dados.adicionar ?? []) as Escolhida[]
+    const tirar = new Set((ultimo.dados.tirar ?? []) as number[])
+    setEscolhidas((xs) => [...xs.filter((x) => !tirar.has(x.id)), ...novas.filter((n) => !xs.some((x) => x.id === n.id))])
   }, [ultimo, aberto])
+
+  // A malha no QGIS acompanha a lista daqui (escolhidas pela busca ou tiradas no X) e o fluxo (o que já está no Feixe).
+  useEffect(() => {
+    if (noMapa) enviar('/api/qgis/folhas_escolhidas', { id_fluxo: fluxo, escolhidas: escolhidas.map((f) => f.id) }).catch(() => {})
+  }, [noMapa, fluxo, escolhidas])
+
+  function fechar() {
+    if (noMapa) enviar('/api/qgis/folhas_fim').catch(() => {})
+    setNoMapa(false)
+    fecharDialogo()
+  }
 
   async function buscar() {
     try {
@@ -43,10 +59,11 @@ export function NovaFolha({ aberto, fechar }: { aberto: boolean; fechar: () => v
     }
   }
 
-  async function noMapa() {
+  async function ligarMapa() {
     try {
-      await enviar('/api/qgis/escolher_folhas')
-      avisar('Clique nas folhas no mapa do QGIS; elas aparecem aqui.')
+      await enviar('/api/qgis/escolher_folhas', { id_fluxo: fluxo, escolhidas: escolhidas.map((f) => f.id) })
+      setNoMapa(true)
+      avisar('A malha de folhas está no QGIS: clique numa folha, ou Ctrl/Shift e arraste um retângulo.')
     } catch (e) {
       avisar((e as Error).message, 'erro')
     }
@@ -87,7 +104,7 @@ export function NovaFolha({ aberto, fechar }: { aberto: boolean; fechar: () => v
             <Button type="submit" variant="outline">
               <Search /> Buscar
             </Button>
-            <Button type="button" variant="outline" onClick={noMapa} disabled={!conectado} title="Escolher clicando no mapa do QGIS">
+            <Button type="button" variant="outline" onClick={ligarMapa} disabled={!conectado} title="Escolher no mapa do QGIS, com a malha de folhas">
               <MousePointerClick /> No mapa
             </Button>
           </form>
@@ -107,6 +124,11 @@ export function NovaFolha({ aberto, fechar }: { aberto: boolean; fechar: () => v
             </ul>
           )}
         </div>
+        {noMapa && (
+          <p className="text-[13px] text-muted-foreground">
+            No QGIS: clique numa folha para escolher ou tirar; <b>Ctrl ou Shift e arraste</b> para escolher todas as folhas de um retângulo. Em azul, as escolhidas; hachuradas, as que já estão no Feixe{fluxo ? ' neste tema' : ' na sua unidade'}.
+          </p>
+        )}
         <div className="flex min-h-9 flex-wrap gap-2">
           {escolhidas.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma folha escolhida.</p>}
           {escolhidas.map((f) => (

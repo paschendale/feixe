@@ -14,7 +14,6 @@ from .core import ambiente as ambmod
 from .core import camadas, config, db, dispatch, log
 from .core.dados import ErroDados
 from .core.dados import cargas as cargas_dados
-from .core.dados import lotes as lotes_dados
 from .core.versao import raiz_plugin, versao_plugin
 from .server.api import Contexto, ErroApi, criar_roteador
 from .server.http import ServidorLocal
@@ -48,6 +47,8 @@ class FeixePlugin:
             ),
             "focar_carga": self.focar_carga,
             "ferramenta_folhas": self.ligar_ferramenta_folhas,
+            "marcar_folhas": self.marcar_folhas,
+            "fim_folhas": self.fim_folhas,
             "previa_cargas": self.previa_cargas,
             "selecao_cargas": camadas.cargas_selecionadas,
             "cargas_geradas": self.cargas_geradas,
@@ -57,6 +58,7 @@ class FeixePlugin:
         self.barra = None
         self.rotulo_status = None
         self.ferramenta_folha = None
+        self._malha = None  # {no_feixe, escolhidas} da malha de escolher folhas, enquanto ela está no mapa
         # Cargas puladas, por passagem (id_lote_etapa), na ordem em que foram puladas. Só na memória (D-102): voltam
         # quando o QGIS reabre ou quando acabam as não puladas da folha.
         self.puladas = {}
@@ -101,6 +103,7 @@ class FeixePlugin:
 
     def unload(self):
         self._timer.stop()
+        self.fim_folhas()
         if self.servidor:
             self.servidor.parar()
             self.servidor = None
@@ -383,32 +386,76 @@ class FeixePlugin:
             self.rotulo_status.setText(f"Feixe · {p['folha_revisao']} · {p['concluidas']}/{p['total']}")
 
     # --- ferramentas de mapa do supervisor (B3, B4) ---------------------------------------------
-    def ligar_ferramenta_folhas(self):
-        """Liga o clique no mapa: cada folha clicada vai para o painel pelo evento qgis {acao: folha}."""
+    def ligar_ferramenta_folhas(self, folhas, no_feixe, escolhidas):
+        """Carrega a malha de folhas 1:100.000 com o estado de cada uma e liga a ferramenta de escolher no mapa."""
         canvas = self.iface.mapCanvas()
+        vazio = not any(c.isValid() for c in QgsProject.instance().mapLayers().values())
+        self._malha = {"no_feixe": no_feixe, "escolhidas": set(escolhidas)}
+        malha = camadas.mostrar_malha(folhas, no_feixe, escolhidas)
+        if vazio:  # projeto em branco: mostrar o país, senão a malha cai fora da tela
+            canvas.setDestinationCrs(malha.crs())
+            canvas.setExtent(malha.extent())
+            canvas.refresh()
         if self.ferramenta_folha is None:
-            self.ferramenta_folha = FerramentaFolha(canvas, self._folha_clicada)
+            self.ferramenta_folha = FerramentaFolha(canvas, self._folha_clicada, self._retangulo_folhas)
         canvas.setMapTool(self.ferramenta_folha)
         self.iface.mainWindow().activateWindow()
         self.iface.messageBar().pushMessage(
             "Feixe",
-            "Clique nas folhas no mapa para mandá-las ao painel. Troque de ferramenta para parar.",
+            "Clique numa folha para escolher ou tirar; Ctrl ou Shift e arraste para escolher as folhas de um "
+            "retângulo. Arrastar sem tecla move o mapa.",
             Qgis.Info,
-            6,
+            8,
         )
 
+    def marcar_folhas(self, no_feixe, escolhidas):
+        self._malha = {"no_feixe": no_feixe, "escolhidas": set(escolhidas)}
+        camadas.marcar_malha(no_feixe, escolhidas)
+
+    def fim_folhas(self):
+        camadas.remover_malha()
+        self._malha = None
+        canvas = self.iface.mapCanvas()
+        if self.ferramenta_folha is not None and canvas.mapTool() is self.ferramenta_folha:
+            self.iface.actionPan().trigger()
+
+    def _mudar_escolhidas(self, adicionar, tirar):
+        """Muda a malha na hora (sem esperar o painel) e manda a mudança para o painel, que guarda a lista."""
+        if self._malha is not None:
+            self._malha["escolhidas"] |= {f["id"] for f in adicionar}
+            self._malha["escolhidas"] -= set(tirar)
+            camadas.marcar_malha(self._malha["no_feixe"], sorted(self._malha["escolhidas"]))
+        self.broker.publicar("qgis", {"acao": "folhas", "adicionar": adicionar, "tirar": tirar})
+
+    @staticmethod
+    def _so_id(f):
+        return {"id": f["id"], "cd_mi": f["cd_mi"], "nm_carta": f["nm_carta"]}
+
     def _folha_clicada(self, x, y):
-        try:
-            with db.transacao(self.amb) as ex:
-                folha = lotes_dados.folha_no_ponto(ex, x, y)
-        except Exception as e:  # noqa: BLE001
-            self.iface.messageBar().pushMessage("Feixe", f"Não deu para ler a folha: {e}", Qgis.Warning, 6)
-            return
-        if folha is None:
+        from qgis.core import QgsGeometry, QgsPointXY
+
+        achadas = camadas.folhas_da_malha(QgsGeometry.fromPointXY(QgsPointXY(x, y)))
+        if not achadas:
             self.iface.messageBar().pushMessage("Feixe", "Nenhuma folha 1:100.000 neste ponto.", Qgis.Info, 3)
             return
-        self.broker.publicar("qgis", {"acao": "folha", "folha": folha})
-        self.iface.messageBar().pushMessage("Feixe", f"Folha {folha['cd_mi']} enviada ao painel.", Qgis.Success, 2)
+        f = achadas[0]
+        if f["estado"] == camadas.ESCOLHIDA:
+            self._mudar_escolhidas([], [f["id"]])
+        elif f["estado"] == camadas.NO_FEIXE:
+            self.iface.messageBar().pushMessage("Feixe", f"A folha {f['cd_mi']} já está {f['rotulo']}.", Qgis.Info, 4)
+        else:
+            self._mudar_escolhidas([self._so_id(f)], [])
+
+    def _retangulo_folhas(self, retangulo):
+        from qgis.core import QgsGeometry
+
+        tocadas = camadas.folhas_da_malha(QgsGeometry.fromRect(retangulo), so_cobertas=True)
+        novas = [self._so_id(f) for f in tocadas if f["estado"] == camadas.LIVRE]
+        ja = [f["cd_mi"] for f in tocadas if f["estado"] == camadas.NO_FEIXE]
+        if novas:
+            self._mudar_escolhidas(novas, [])
+        partes = [f"{len(novas)} folha(s) escolhida(s)"] + ([f"{len(ja)} já no Feixe, deixadas de fora"] if ja else [])
+        self.iface.messageBar().pushMessage("Feixe", "; ".join(partes) + ".", Qgis.Info, 4)
 
     def previa_cargas(self, celulas):
         camada = camadas.mostrar_previa(celulas)

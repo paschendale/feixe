@@ -546,3 +546,134 @@ def cargas_selecionadas() -> Dict:
         ids.update(int(f[campo]) for f in camada.getSelectedFeatures())
         camadas_.append(camada.name())
     return {"ids": sorted(ids), "camadas": camadas_}
+
+
+# --- Malha de folhas para escolher no mapa (Novas folhas) ---------------------------------------------------------
+
+NOME_MALHA = "Folhas 1:100.000 · escolher"
+ESCOLHIDA, NO_FEIXE, LIVRE = "escolhida", "no_feixe", "livre"
+
+
+def camada_malha() -> Optional[QgsVectorLayer]:
+    for camada in QgsProject.instance().mapLayersByName(NOME_MALHA):
+        if camada.customProperty(_PAPEL) == "malha_folhas":
+            return camada
+    return None
+
+
+def remover_malha() -> None:
+    camada = camada_malha()
+    if camada is not None:
+        QgsProject.instance().removeMapLayer(camada.id())
+
+
+def _estado(id_folha: int, no_feixe: Dict[int, str], escolhidas: set) -> str:
+    if id_folha in escolhidas:
+        return ESCOLHIDA
+    return NO_FEIXE if id_folha in no_feixe else LIVRE
+
+
+def _estilo_malha(camada: QgsVectorLayer) -> None:
+    camada.setRenderer(
+        _regras(
+            [
+                (
+                    "Escolhidas agora",
+                    f"\"estado\" = '{ESCOLHIDA}'",
+                    QgsFillSymbol.createSimple(
+                        {"color": "19,81,180,110", "outline_color": "#0C326F", "outline_width": "0.6"}
+                    ),
+                    True,
+                ),
+                (
+                    "Já no Feixe",
+                    f"\"estado\" = '{NO_FEIXE}'",
+                    _simbolo(_hachura("#5C6B7A", 45, 1.6, 0.25, 0.7), _contorno("#5C6B7A", 0.4)),
+                    True,
+                ),
+                ("Livres", f"\"estado\" = '{LIVRE}'", _simbolo(_contorno("#8A96A3", 0.25, 0.9)), True),
+            ]
+        )  # fmt: skip
+    )
+    rot = QgsPalLayerSettings()
+    rot.isExpression = True
+    rot.fieldName = '"cd_mi" || if("rotulo" IS NOT NULL, \'\\n\' || "rotulo", \'\')'
+    rot.scaleVisibility = True
+    rot.maximumScale, rot.minimumScale = 1, 4_000_000  # o país inteiro com 3 mil rótulos não se lê
+    fmt = QgsTextFormat()
+    fmt.setSize(9)
+    fmt.setColor(QColor("#1B2733"))
+    buf = QgsTextBufferSettings()
+    buf.setEnabled(True)
+    buf.setSize(0.8)
+    buf.setColor(QColor("white"))
+    fmt.setBuffer(buf)
+    rot.setFormat(fmt)
+    camada.setLabeling(QgsVectorLayerSimpleLabeling(rot))
+    camada.setLabelsEnabled(True)
+
+
+def mostrar_malha(folhas: List[Dict], no_feixe: Dict[int, str], escolhidas: List[int]) -> QgsVectorLayer:
+    """Camada temporária (memória) no topo do projeto com a malha de folhas 1:100.000 e o estado de cada uma:
+    escolhida agora (no painel), já no Feixe (o rótulo diz onde ou em que temas) ou livre. Substitui a anterior."""
+    from qgis.core import QgsFeature, QgsField, QgsGeometry
+    from qgis.PyQt.QtCore import QVariant
+
+    remover_malha()
+    camada = QgsVectorLayer("Polygon?crs=EPSG:4674", NOME_MALHA, "memory")
+    camada.dataProvider().addAttributes([
+        QgsField("id", QVariant.Int), QgsField("cd_mi", QVariant.String), QgsField("nm_carta", QVariant.String),
+        QgsField("nomenclatura", QVariant.String), QgsField("estado", QVariant.String),
+        QgsField("rotulo", QVariant.String),
+    ])  # fmt: skip
+    camada.updateFields()
+    marcadas, feicoes = set(escolhidas), []
+    for f in folhas:
+        feicao = QgsFeature(camada.fields())
+        feicao.setGeometry(QgsGeometry.fromWkt(f["wkt"]))
+        feicao.setAttributes([
+            f["id"], f["cd_mi"], f.get("nm_carta"), f.get("nomenclatura"), _estado(f["id"], no_feixe, marcadas),
+            no_feixe.get(f["id"]),
+        ])  # fmt: skip
+        feicoes.append(feicao)
+    camada.dataProvider().addFeatures(feicoes)
+    camada.updateExtents()
+    camada.setCustomProperty(_PAPEL, "malha_folhas")
+    _estilo_malha(camada)
+    QgsProject.instance().addMapLayer(camada, False)
+    QgsProject.instance().layerTreeRoot().insertLayer(0, camada)
+    return camada
+
+
+def marcar_malha(no_feixe: Dict[int, str], escolhidas: List[int]) -> None:
+    """Atualiza o estado das folhas da malha (o painel mudou a lista, ou o fluxo, que muda o que já está no Feixe)."""
+    camada = camada_malha()
+    if camada is None:
+        return
+    marcadas = set(escolhidas)
+    i_estado, i_rotulo = camada.fields().indexOf("estado"), camada.fields().indexOf("rotulo")
+    mudancas = {}
+    for f in camada.getFeatures():
+        novo = {i_estado: _estado(f["id"], no_feixe, marcadas), i_rotulo: no_feixe.get(f["id"])}
+        if f["estado"] != novo[i_estado] or f["rotulo"] != novo[i_rotulo]:
+            mudancas[f.id()] = novo
+    if mudancas:
+        camada.dataProvider().changeAttributeValues(mudancas)
+        camada.triggerRepaint()
+
+
+def folhas_da_malha(geometria, so_cobertas: bool = False) -> List[Dict]:
+    """Folhas da malha que tocam a geometria (ponto ou retângulo, já no SIRGAS 2000 geográfico). `so_cobertas`: só as
+    que a geometria cobre em parte de fato; encostar na borda de uma folha vizinha não conta."""
+    from qgis.core import QgsFeatureRequest
+
+    camada = camada_malha()
+    if camada is None:
+        return []
+    pedido = QgsFeatureRequest().setFilterRect(geometria.boundingBox())
+    return [
+        {"id": f["id"], "cd_mi": f["cd_mi"], "nm_carta": f["nm_carta"], "estado": f["estado"], "rotulo": f["rotulo"]}
+        for f in camada.getFeatures(pedido)
+        if f.geometry().intersects(geometria)
+        and (not so_cobertas or f.geometry().intersection(geometria).area() > 1e-9)
+    ]

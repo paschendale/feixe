@@ -79,3 +79,17 @@ def test_folha_no_ponto_e_fluxos(amb):
     assert dl.folha_no_ponto(ex, 0.0, 0.0) is None  # no mar
     f = next(f for f in dl.fluxos(ex, "DF", 5, cen.tema) if f["id"] == cen.fluxo)
     assert f["primeira_etapa"] == "Etapa aquisicao" and f["projeto"]
+
+
+def test_malha_e_folhas_ja_no_feixe(amb):
+    cen, ex = amb  # o cenário já tem a 2534 neste projeto e tema, no DF
+    malha = {f["cd_mi"]: f for f in dl.malha(ex)}
+    assert len(malha) > 3000 and malha["2534"]["wkt"].startswith(("POLYGON", "MULTIPOLYGON"))
+    f2534, f2535 = _folha(ex, "2534"), _folha(ex, "2535")
+
+    do_fluxo = dl.folhas_no_feixe(ex, "DF", cen.fluxo)
+    assert do_fluxo[f2534] == "no Feixe" and f2535 not in do_fluxo
+    assert dl.folhas_no_feixe(ex, "GO", cen.fluxo)[f2534] == "no Feixe (DF)"  # outra unidade: diz qual
+
+    tema = ex.um("SELECT nome FROM mapcartacomp.tema WHERE id = %s", (cen.tema,))["nome"]
+    assert tema in dl.folhas_no_feixe(ex, "DF")[f2534]  # sem fluxo: as da unidade, com os temas

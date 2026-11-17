@@ -203,6 +203,36 @@ def um(ex: Executor, id_lote: int) -> Optional[Dict]:
     return lote
 
 
+def malha(ex: Executor) -> List[Dict]:
+    """Todas as folhas 1:100.000 da articulação, com a geometria em WKT (SIRGAS 2000 geográfico): a malha que o QGIS
+    mostra para escolher folhas no mapa. São retângulos (cerca de 3 mil no país), uma leitura só."""
+    return ex.todos(
+        "SELECT id_articulacao_scn AS id, cd_mi, nm_carta, nm_nomenclatura_scn AS nomenclatura, ST_AsText(geom) AS wkt "
+        f"FROM {_ARTICULACAO} ORDER BY cd_mi"
+    )
+
+
+def folhas_no_feixe(ex: Executor, uf: str, id_fluxo: Optional[int] = None) -> Dict[int, str]:
+    """Folhas da malha que já têm lote, para a malha mostrar o que já foi escolhido antes: {id_articulacao: rótulo}.
+
+    Com fluxo, as do mesmo projeto e tema (são as que "Criar" recusaria, D-46), de qualquer unidade; de outra unidade
+    o rótulo diz qual. Sem fluxo, as da unidade em qualquer tema, com os temas no rótulo."""
+    if id_fluxo:
+        linhas = ex.todos(
+            "SELECT l.id_articulacao_scn AS id, l.uf FROM mapcartacomp.lote l JOIN mapcartacomp.fluxo f "
+            "ON f.cod_projeto = l.cod_projeto AND f.id_tema = l.id_tema WHERE f.id = %s AND l.tipo = 'folha'",
+            (id_fluxo,),
+        )
+        return {r["id"]: ("no Feixe" if r["uf"] == uf else f"no Feixe ({r['uf']})") for r in linhas}
+    linhas = ex.todos(
+        "SELECT l.id_articulacao_scn AS id, string_agg(DISTINCT t.nome, ', ' ORDER BY t.nome) AS temas "
+        "FROM mapcartacomp.lote l JOIN mapcartacomp.tema t ON t.id = l.id_tema "
+        "WHERE l.uf = %s AND l.tipo = 'folha' GROUP BY l.id_articulacao_scn",
+        (uf,),
+    )
+    return {r["id"]: r["temas"] for r in linhas}
+
+
 def folha_no_ponto(ex: Executor, x: float, y: float) -> Optional[Dict]:
     """Folha 1:100.000 que contém o ponto (SIRGAS 2000 geográfico): o clique no mapa do QGIS."""
     return ex.um(

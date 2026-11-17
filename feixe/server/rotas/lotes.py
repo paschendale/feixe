@@ -94,10 +94,32 @@ def registrar(r, ctx) -> None:
         with ctx.tx() as ex:
             return 200, {"folha": dl.folha_no_ponto(ex, x, y)}
 
+    def _no_feixe(req):
+        id_fluxo = campo(req, "id_fluxo", int, padrao=None)
+        with ctx.tx() as ex:
+            return dl.folhas_no_feixe(ex, uf_de(ctx.eu()), id_fluxo)
+
     @r.rota("POST", "/api/qgis/escolher_folhas", exige=("supervisor",))
     def _ferramenta(req):
-        # Liga no QGIS a ferramenta de clique: cada clique publica o evento qgis {acao: "folha", folha}.
-        ctx.qgis("ferramenta_folhas")
+        # Carrega no QGIS a malha de folhas 1:100.000 (já no Feixe, escolhidas, livres) e liga a ferramenta: clique
+        # escolhe ou tira uma folha, Ctrl ou Shift e arrastar escolhe as de um retângulo. Cada mudança publica o
+        # evento qgis {acao: "folhas", adicionar, tirar}; o painel guarda a lista e devolve por /folhas_escolhidas.
+        escolhidas = campo(req, "escolhidas", lambda v: [int(x) for x in v], padrao=[])
+        with ctx.tx() as ex:
+            folhas = dl.malha(ex)
+        ctx.qgis("ferramenta_folhas", folhas, _no_feixe(req), escolhidas)
+        return 200, {"ok": True}
+
+    @r.rota("POST", "/api/qgis/folhas_escolhidas", exige=("supervisor",))
+    def _escolhidas(req):
+        # A lista do painel mudou (ou o fluxo, que muda o que já está no Feixe): a malha no QGIS acompanha.
+        escolhidas = campo(req, "escolhidas", lambda v: [int(x) for x in v], padrao=[])
+        ctx.qgis("marcar_folhas", _no_feixe(req), escolhidas)
+        return 200, {"ok": True}
+
+    @r.rota("POST", "/api/qgis/folhas_fim", exige=("supervisor",))
+    def _fim(req):
+        ctx.qgis("fim_folhas")
         return 200, {"ok": True}
 
     @r.rota("POST", "/api/qgis/selecao", exige=("supervisor",))
