@@ -29,6 +29,13 @@ MODELO_CCAR = [
 ]  # fmt: skip
 
 
+# Última passagem da folha `l` (a mais recente, concluída, pulada ou aberta). É dela que se conta "a seguinte" (D-107):
+# a etapa atual (`id_lote_etapa_atual`) ignora as puladas porque dirige o status nacional, e contar a partir dela
+# devolveria a etapa que o supervisor acabou de pular. Uma passagem nova só abre sem outra aberta, então a ordem dos
+# ids é a ordem das decisões.
+_ULTIMA = "(SELECT max(x.id) FROM mapcartacomp.lote_etapa x WHERE x.id_lote = l.id)"
+
+
 # --- Fluxos ----------------------------------------------------------------------------------------------------------
 
 
@@ -362,7 +369,7 @@ def abrir_proximas(ex: Executor, uf: str, ids: List[int], observacao: str) -> Di
         "(SELECT coalesce(max(x.instancia), 0) FROM mapcartacomp.lote_etapa x WHERE x.id_lote = l.id "
         " AND x.id_fluxo_etapa = n.id) AS ultima "
         "FROM mapcartacomp.lote l "
-        "LEFT JOIN mapcartacomp.lote_etapa le ON le.id = l.id_lote_etapa_atual "
+        f"LEFT JOIN mapcartacomp.lote_etapa le ON le.id = {_ULTIMA} "
         "LEFT JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
         "LEFT JOIN LATERAL (SELECT x.id, x.nome, x.repetivel FROM mapcartacomp.fluxo_etapa x "
         " WHERE x.id_fluxo = l.id_fluxo AND x.ordem > coalesce(fe.ordem, 0) ORDER BY x.ordem LIMIT 1) n ON true "
@@ -408,12 +415,12 @@ def abrir_proximas(ex: Executor, uf: str, ids: List[int], observacao: str) -> Di
 
 def estado(ex: Executor, id_lote: int) -> Dict:
     """Situação do lote depois de uma ação: status nacional, etapa em que está trabalhando (a aberta, se houver; senão a
-    atual, D-105) e a sugestão de próxima etapa (só sem etapa aberta)."""
+    última que terminou, concluída ou pulada, D-105 e D-107) e a sugestão de próxima etapa (só sem etapa aberta)."""
     lote = ex.um(
         "SELECT l.id, l.status_nacional, l.revisao_atual, l.id_lote_etapa_atual, le.situacao, fe.ordem, "
         "fe.nome AS etapa, l.id_fluxo FROM mapcartacomp.lote l "
         "LEFT JOIN mapcartacomp.lote_etapa le ON le.id = coalesce((SELECT x.id FROM mapcartacomp.lote_etapa x "
-        "WHERE x.id_lote = l.id AND x.situacao IN ('pendente', 'em_andamento') LIMIT 1), l.id_lote_etapa_atual) "
+        f"WHERE x.id_lote = l.id AND x.situacao IN ('pendente', 'em_andamento') LIMIT 1), {_ULTIMA}) "
         "LEFT JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa WHERE l.id = %s",
         (id_lote,),
     )

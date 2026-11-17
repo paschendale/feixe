@@ -90,3 +90,28 @@ def test_abrir_proximas_em_lote(amb):  # noqa: F811
     assert df.abrir_proximas(ex, "DF", [a], "x")["erros"][0]["erro"].startswith("lote não encontrado")
     with pytest.raises(ErroDados):
         df.abrir_proximas(ex, "GO", [a], "  ")
+
+
+def test_depois_de_pular_a_seguinte_e_a_que_vem_depois_da_pulada(amb):  # noqa: F811
+    # D-107: a etapa atual ignora as puladas (dirige o status nacional); contar a partir dela reabria a etapa pulada.
+    cen, ex = amb
+    fluxo = df.criar(ex, "GO", 5, cen.tema, "GO pular", [
+        _etapa("aquisicao", conta=True, repetivel=False, atividades=[cen.ativ["aquisicao"]]),
+        _etapa("revisao", conta=True, obrigatoria=False),
+        _etapa("correcao_topologica"),
+    ])  # fmt: skip
+    a, e = _folha(ex, "GO", fluxo, "2537")
+    df.acao(ex, "GO", _aberta(ex, a), "iniciar", OBS)
+    df.acao(ex, "GO", _aberta(ex, a), "concluir", OBS)
+    assert df.abrir_proximas(ex, "GO", [a], OBS)["abertas"][0]["etapa"] == "E revisao"
+    estado = df.acao(ex, "GO", _aberta(ex, a), "pular", OBS)
+    assert estado["sugestao"]["id"] == e["correcao_topologica"]
+
+    grupo = next(g for g in dp.esperando(ex, "GO") if any(f["id_lote"] == a for f in g["folhas"]))
+    assert (grupo["etapa"], grupo["id_proxima"]) == ("E revisao", e["correcao_topologica"])
+    assert grupo["folhas"][0]["situacao"] == "pulada"
+
+    r = df.abrir_proximas(ex, "GO", [a], OBS)
+    assert [x["etapa"] for x in r["abertas"]] == ["E correcao_topologica"], r
+    status = ex.um("SELECT status_nacional FROM mapcartacomp.lote WHERE id = %s", (a,))["status_nacional"]
+    assert status == "EM_PRODUCAO"

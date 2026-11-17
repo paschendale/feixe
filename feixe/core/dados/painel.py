@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from . import Executor
+from . import fluxos as df
 from .grupos import _agrupar
 
 _ABERTAS = "('pendente', 'em_andamento')"
@@ -138,7 +139,7 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
 
 
 def esperando(ex: Executor, uf: str) -> List[Dict]:
-    """Folhas cuja etapa atual terminou (concluída ou pulada) e que só andam quando o supervisor abrir a próxima.
+    """Folhas cuja última etapa terminou (concluída ou pulada) e que só andam quando o supervisor abrir a próxima.
 
     Agrupadas pela decisão: tema, etapa que terminou e a próxima do fluxo (nula = fim do fluxo). Folha já CONCLUIDA
     para a CCAR fica de fora.
@@ -149,7 +150,7 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
         "coalesce(le.concluida_em, le.atualizado_em) AS desde, l.id_fluxo, fl.nome AS fluxo, "
         "n.id AS id_proxima, n.nome AS proxima "
         "FROM mapcartacomp.lote l "
-        "JOIN mapcartacomp.lote_etapa le ON le.id = l.id_lote_etapa_atual "
+        f"JOIN mapcartacomp.lote_etapa le ON le.id = {df._ULTIMA} "
         "JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
         "JOIN mapcartacomp.fluxo fl ON fl.id = l.id_fluxo "
         "JOIN mapcartacomp.tema t ON t.id = l.id_tema "
