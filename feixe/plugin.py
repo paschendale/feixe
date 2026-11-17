@@ -338,7 +338,7 @@ class FeixePlugin:
         """Abre o painel na gaveta da folha (ações de fluxo, histórico, atribuir)."""
         if not self._pronto():
             return
-        QDesktopServices.openUrl(QUrl(f"{self.servidor.url_abertura}#/folhas/{int(id_lote)}"))
+        QDesktopServices.openUrl(QUrl(f"{self.servidor.url_abertura}#/supervisao/folhas/{int(id_lote)}"))
 
     def focar_carga(self, carga, progresso):
         """Faz dela a carga atual (contorno magenta) sem mudar a escala de quem trabalha: se ela já está inteira na

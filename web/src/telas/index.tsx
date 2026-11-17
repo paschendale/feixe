@@ -1,34 +1,28 @@
 import type { ComponentType } from 'react'
-import { ClipboardList, Info, ListOrdered, Map, Network, Settings2, Users } from 'lucide-react'
 import type { Papel } from '@/lib/api'
-import EmConstrucao from './EmConstrucao'
-import Atividades from './atividades/Atividades'
-import Equipe from './equipe/Equipe'
-import Folhas from './folhas/Folhas'
-import Fluxos from './fluxos/Fluxos'
-import MinhasCargas from './MinhasCargas'
+import Catalogo from './catalogo/Catalogo'
+import Execucao from './execucao/Execucao'
+import Inicio from './inicio/Inicio'
 import Sobre from './Sobre'
+import Supervisao from './supervisao/Supervisao'
 
 export type Tela = {
   id: string
   rotulo: string
-  icone: ComponentType<{ className?: string }>
-  // Quem vê a tela no menu. Vazio = todos. A API barra de novo: o menu só esconde.
+  // Quem vê o módulo no topo. Vazio = todos. A API barra de novo: o menu só esconde.
   papeis: Papel[]
+  // Fora do topo (Sobre abre pelas iniciais).
+  oculta?: boolean
   componente: ComponentType
 }
 
-const emBreve = (item: string) => () => <EmConstrucao item={item} />
-
-// Navegação por papel (D-72). Cada item da fase B troca o seu `emBreve` pela tela de verdade.
+// Módulos do topo (D-103), os mesmos modos do QGIS: o Início junta um painel por papel e leva a cada módulo.
 export const TELAS: Tela[] = [
-  { id: 'minhas-cargas', rotulo: 'Minhas cargas', icone: ClipboardList, papeis: ['apm', 'avaliador', 'supervisor'], componente: MinhasCargas },
-  { id: 'folhas', rotulo: 'Folhas', icone: Map, papeis: ['supervisor', 'gerente'], componente: Folhas },
-  { id: 'equipe', rotulo: 'Equipe', icone: Users, papeis: ['supervisor'], componente: Equipe },
-  { id: 'filas', rotulo: 'Filas', icone: ListOrdered, papeis: ['supervisor'], componente: emBreve('B8') },
-  { id: 'fluxos', rotulo: 'Fluxos', icone: Network, papeis: ['supervisor', 'gerente'], componente: Fluxos },
-  { id: 'atividades', rotulo: 'Atividades', icone: Settings2, papeis: [], componente: Atividades },
-  { id: 'sobre', rotulo: 'Sobre', icone: Info, papeis: [], componente: Sobre },
+  { id: 'inicio', rotulo: 'Início', papeis: [], componente: Inicio },
+  { id: 'supervisao', rotulo: 'Supervisão', papeis: ['supervisor', 'gerente'], componente: Supervisao },
+  { id: 'execucao', rotulo: 'Execução', papeis: ['apm', 'avaliador', 'supervisor'], componente: Execucao },
+  { id: 'catalogo', rotulo: 'Catálogo', papeis: [], componente: Catalogo },
+  { id: 'sobre', rotulo: 'Sobre', papeis: [], oculta: true, componente: Sobre },
 ]
 
 export function telasDe(papeis: Papel[]): Tela[] {

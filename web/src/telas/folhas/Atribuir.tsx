@@ -42,7 +42,24 @@ function embaralhar<T>(xs: T[]) {
 
 // Atribuir (B5, passo 3 do planejamento): folha inteira com sorteio, dividir uma folha em blocos ou a seleção do
 // QGIS. Tudo é sugestão até aplicar; a atribuição não muda a etapa da folha.
-export function Atribuir({ lotes, fechar }: { lotes: Lote[]; fechar: (feito: boolean) => void }) {
+// Sugestão (D-72: sorteio e sugestão, nunca automático): cada folha, da que tem mais cargas a atribuir para a de menos,
+// vai para quem estiver com menos pendentes naquele momento.
+function sugerir(lotes: Lote[], equipe: Pessoa[], aAtribuir: Record<number, number>) {
+  const carga = new Map(equipe.map((p) => [p.conta, p.pendentes]))
+  const por: Record<number, string> = {}
+  for (const l of [...lotes].sort((a, b) => (aAtribuir[b.id] ?? 0) - (aAtribuir[a.id] ?? 0))) {
+    if (!aAtribuir[l.id]) continue
+    const [conta] = [...carga].sort((a, b) => a[1] - b[1])[0] ?? []
+    if (!conta) break
+    por[l.id] = conta
+    carga.set(conta, (carga.get(conta) ?? 0) + aAtribuir[l.id])
+  }
+  return por
+}
+
+export function Atribuir({ lotes, fechar, aAtribuir = {} }: { lotes: Lote[]; fechar: (feito: boolean) => void; aAtribuir?: Record<number, number> }) {
+  const { eu } = useSessao()
+  const [todas, setTodas] = useState(false)
   const avisar = useAvisar()
   const { conectado } = useSessao()
   const aberto = lotes.length > 0
@@ -58,10 +75,11 @@ export function Atribuir({ lotes, fechar }: { lotes: Lote[]; fechar: (feito: boo
   const [destino, setDestino] = useState('')
   const [ocupado, setOcupado] = useState(false)
   useEffect(() => {
-    setPor({})
+    setPor(sugerir(lotes, equipe, aAtribuir))
     setDividir({ le: lotes[0]?.id_lote_etapa_atual ?? null, pessoas: [], plano: null })
     setSelecao(null)
-  }, [lotes])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lotes, dados])
 
   function sortear() {
     const ordem = embaralhar(sorteio)
@@ -82,6 +100,13 @@ export function Atribuir({ lotes, fechar }: { lotes: Lote[]; fechar: (feito: boo
       setOcupado(false)
     }
   }
+
+  const depois = new Map(equipe.map((p) => [p.conta, p.pendentes]))
+  for (const l of lotes) if (por[l.id] && por[l.id] !== '-') depois.set(por[l.id], (depois.get(por[l.id]) ?? 0) + (aAtribuir[l.id] ?? 0))
+  const totalAtribuir = lotes.reduce((s, l) => s + (por[l.id] && por[l.id] !== '-' ? aAtribuir[l.id] ?? 0 : 0), 0)
+  const maxDepois = Math.max(1, ...depois.values())
+  const pessoasOrdem = [...equipe].sort((a, b) => (depois.get(a.conta) ?? 0) - (depois.get(b.conta) ?? 0))
+  const rotuloPessoa = (p: Pessoa) => `${p.nome}${p.conta === eu?.conta ? ' (você)' : ''}`
 
   const porFolha = () =>
     aplicar(async () => {
@@ -111,45 +136,87 @@ export function Atribuir({ lotes, fechar }: { lotes: Lote[]; fechar: (feito: boo
 
   return (
     <Dialog open={aberto} onOpenChange={(v) => !v && fechar(false)}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-[880px]">
         <DialogHeader>
           <DialogTitle>Atribuir cargas</DialogTitle>
-          <DialogDescription>Só cargas pendentes de etapas abertas mudam de mão; as concluídas ficam com quem as fez.</DialogDescription>
+          <DialogDescription>
+            {lotes.length === 1 ? lotes[0].folha_revisao : `${lotes.length} folhas marcadas`}
+            {Object.keys(aAtribuir).length ? `, ${num(lotes.reduce((s, l) => s + (aAtribuir[l.id] ?? 0), 0))} cargas a atribuir` : ''}. Só cargas pendentes de etapas abertas mudam de mão; as concluídas ficam com quem as fez.
+          </DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="folha">
           <TabsList>
-            <TabsTrigger value="folha">Folha inteira</TabsTrigger>
-            <TabsTrigger value="dividir">Dividir uma folha</TabsTrigger>
+            <TabsTrigger value="folha">Uma pessoa por folha</TabsTrigger>
+            <TabsTrigger value="dividir">Dividir uma folha entre várias</TabsTrigger>
             <TabsTrigger value="qgis">Seleção do QGIS</TabsTrigger>
           </TabsList>
 
           <TabsContent value="folha" className="flex flex-col gap-3">
-            <div className="flex items-start gap-3">
+            <p className="text-sm text-[#3D4B5C]">O Feixe sugere quem tem menos pendentes no projeto. Mude à mão o que quiser, ou sorteie entre as pessoas marcadas.</p>
+            <div className="flex flex-wrap items-start gap-5">
+              <div className="max-h-72 min-w-[340px] flex-[3_1_420px] overflow-auto rounded-md border">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-muted-foreground">
+                      <th className="border-b px-3 py-2 font-medium">Folha</th>
+                      {Object.keys(aAtribuir).length > 0 && <th className="border-b px-2 py-2 text-right font-medium">A atribuir</th>}
+                      <th className="border-b px-3 py-2 font-medium">Para quem</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lotes.map((l) => (
+                      <tr key={l.id} className="border-b last:border-0">
+                        <td className="tab px-3 py-1.5 font-semibold">{l.folha_revisao}</td>
+                        {Object.keys(aAtribuir).length > 0 && <td className="tab px-2 py-1.5 text-right">{num(aAtribuir[l.id] ?? 0)}</td>}
+                        <td className="px-3 py-1.5">
+                          <Select className="h-8" value={por[l.id] ?? ''} onChange={(e) => setPor({ ...por, [l.id]: e.target.value })} aria-label={`Para quem, ${l.folha_revisao}`}>
+                            <option value="">Não mudar</option>
+                            <option value="-">Ninguém: volta a atribuir (tirar de quem está)</option>
+                            {equipe.map((p) => (
+                              <option key={p.conta} value={p.conta}>
+                                {rotuloPessoa(p)} · {num(p.pendentes)} pendentes
+                              </option>
+                            ))}
+                          </Select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex min-w-[260px] flex-[2_1_280px] flex-col gap-2">
+                <span className="text-xs text-muted-foreground">Equipe por pendentes{totalAtribuir ? ' (depois da atribuição)' : ''}</span>
+                {(todas ? pessoasOrdem : pessoasOrdem.slice(0, 6)).map((p) => {
+                  const antes = p.pendentes
+                  const dep = depois.get(p.conta) ?? antes
+                  return (
+                    <div key={p.conta} className="grid grid-cols-[120px_1fr_auto] items-center gap-2 text-[13px]">
+                      <span className="truncate" title={p.nome}>
+                        {rotuloPessoa(p)}
+                      </span>
+                      <span className="flex h-1.5 overflow-hidden rounded-sm bg-border">
+                        <span className="h-full bg-aco" style={{ width: `${(100 * antes) / maxDepois}%` }} />
+                        <span className="h-full bg-ibge" style={{ width: `${(100 * (dep - antes)) / maxDepois}%` }} />
+                      </span>
+                      <span className="tab text-right text-muted-foreground">{dep !== antes ? `${num(antes)} → ${num(dep)}` : num(antes)}</span>
+                    </div>
+                  )
+                })}
+                {pessoasOrdem.length > 6 && (
+                  <button className="self-start text-[13px] text-ibge hover:underline" onClick={() => setTodas(!todas)}>
+                    {todas ? 'Ver menos' : `Ver as ${pessoasOrdem.length} pessoas`}
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="flex items-start gap-3 border-t pt-3">
               <div className="flex-1">
+                <span className="mb-1.5 block text-xs text-muted-foreground">Sortear entre:</span>
                 <Chips equipe={equipe} marcadas={sorteio} mudar={setSorteio} />
               </div>
               <Button size="sm" variant="outline" disabled={!sorteio.length} onClick={sortear}>
-                <Shuffle /> {Object.keys(por).length ? 'Sortear de novo' : 'Sortear'}
+                <Shuffle /> Sortear
               </Button>
-            </div>
-            <div className="max-h-64 overflow-auto rounded-md border">
-              {lotes.map((l) => (
-                <div key={l.id} className="flex items-center gap-3 border-b px-3 py-1.5 last:border-0">
-                  <b className="tab w-20">{l.folha_revisao}</b>
-                  <span className="flex-1 truncate text-sm text-muted-foreground">
-                    {l.tema} · {l.etapa}
-                  </span>
-                  <Select className="h-8 w-60" value={por[l.id] ?? ''} onChange={(e) => setPor({ ...por, [l.id]: e.target.value })} aria-label={`Responsável por ${l.folha_revisao}`}>
-                    <option value="">Não mudar</option>
-                    <option value="-">Ninguém: volta a atribuir (tirar de quem está)</option>
-                    {equipe.map((p) => (
-                      <option key={p.conta} value={p.conta}>
-                        {p.nome}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              ))}
             </div>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={soDisp} onChange={(e) => setSoDisp(e.target.checked)} /> Só as cargas a atribuir (não tirar de quem já tem)
@@ -159,7 +226,7 @@ export function Atribuir({ lotes, fechar }: { lotes: Lote[]; fechar: (feito: boo
                 Cancelar
               </Button>
               <Button onClick={porFolha} disabled={ocupado || !Object.values(por).some(Boolean)}>
-                Aplicar
+                {totalAtribuir && soDisp ? `Atribuir ${num(totalAtribuir)} cargas` : 'Atribuir'}
               </Button>
             </DialogFooter>
           </TabsContent>

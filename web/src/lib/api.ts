@@ -244,3 +244,56 @@ export type Historico = { em: string; acao: string; observacao: string | null; p
 
 export type Pessoa = { conta: string; nome: string; perfis: string; pendentes: number; folhas: number; ultima: string | null }
 export type ResultadoAtribuicao = { atribuidas: number; ja_estavam: number; fora: number }
+
+// --- Painel (D-103): Início por papel e abas da Supervisão ---
+
+// Atividade em produção: o mesmo corte dos subgrupos do QGIS (as de CQ de um tema num grupo só).
+export type GrupoAtividade = {
+  chave: string
+  rotulo: string
+  id_tema: number
+  tema: string
+  fase: string
+  atividades: number[]
+  lotes: number[]
+  pessoas: number
+  total: number
+  concluidas: number
+  com_alguem: number
+  a_atribuir: number
+  concluidas_7d: number
+}
+
+export type LotePainel = { id_lote: number; responsaveis: string[]; a_atribuir: number; ultima: string | null; iniciada_em: string | null }
+
+export type PessoaPainel = {
+  conta: string
+  nome: string
+  pendentes: number
+  concluidas_7d: number
+  ultima: string | null
+  grupos: string[]
+  lotes: number[]
+}
+
+export type PainelSupervisao = {
+  grupos: GrupoAtividade[]
+  lotes: LotePainel[]
+  pessoas: PessoaPainel[]
+  status: Partial<Record<StatusNacional, number>>
+}
+
+export type GrupoEsperando = {
+  tema: string
+  etapa: string
+  fluxo: string
+  id_proxima: number | null
+  proxima: string | null
+  desde: string | null
+  ate: string | null
+  folhas: { id_lote: number; folha_revisao: string; situacao: string; desde: string | null }[]
+}
+
+export type PessoaLote = { conta: string | null; nome: string | null; total: number; concluidas: number; ultima: string | null }
+
+export type LoteCompleto = Lote & { passagens: PassagemLote[]; pessoas: PessoaLote[] }

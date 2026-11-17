@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { Layers } from 'lucide-react'
-import { Card, CardContent } from '@/components/ui/card'
 import { Logo } from '@/components/Logo'
 import { AvisosProvider, useAvisar } from '@/lib/avisos'
 import { navegar, useRota } from '@/lib/rotas'
@@ -31,9 +30,9 @@ function BotaoCamadas() {
       onClick={montar}
       disabled={!conectado || ocupado}
       title="Monta o grupo Feixe no projeto aberto do QGIS"
-      className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-white/85 hover:bg-white/10 hover:text-white disabled:opacity-40"
+      className="flex items-center gap-1.5 rounded-md bg-white/12 px-3 py-[7px] text-white hover:bg-white/20 disabled:opacity-40"
     >
-      <Layers className="size-4" /> {ocupado ? 'Montando…' : 'Camadas no QGIS'}
+      <Layers className="size-3.5" /> {ocupado ? 'Montando…' : 'Camadas no QGIS'}
     </button>
   )
 }
@@ -44,13 +43,29 @@ function iniciais(nome: string) {
   return ((partes[0]?.[0] ?? '') + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase()
 }
 
+// Bolinha e texto da conexão: verde com o QGIS e a CCAR, laranja sem a CCAR, cinza com o QGIS fechado. Fora da
+// produção, o ambiente vem junto (era um selo à parte).
+function Conexao() {
+  const { status, conectado } = useSessao()
+  const online = conectado && !!status?.online
+  const texto = !conectado ? 'QGIS fechado' : online ? 'Conectado' : 'Sem a CCAR'
+  const ambiente = status?.rotulo_ambiente && !/produ/i.test(status.ambiente) ? status.rotulo_ambiente : null
+  return (
+    <span className="flex items-center gap-1.5" title={status?.detalhe || (conectado ? 'O painel está falando com o QGIS' : 'Reabra o Feixe pelo QGIS')}>
+      <span className={cn('size-2 rounded-full', online ? 'bg-[#4CC26F]' : conectado ? 'bg-[#F0A040]' : 'bg-white/40')} />
+      {texto}
+      {ambiente ? ` · ${ambiente}` : ''}
+    </span>
+  )
+}
+
 function Casca() {
-  const { status, eu, conectado, pronta } = useSessao()
+  const { eu, conectado, pronta } = useSessao()
   const rota = useRota()
   const telas = telasDe(eu?.papeis ?? [])
   const atual = telas.find((t) => t.id === rota.tela)
 
-  // Sem tela no endereço (ou tela que o papel não vê): vai para a primeira do menu.
+  // Sem módulo no endereço (ou um que o papel não vê): vai para o Início.
   useEffect(() => {
     if (pronta && !atual && telas.length) navegar(telas[0].id)
   }, [pronta, atual, telas])
@@ -58,61 +73,46 @@ function Casca() {
   const Componente = atual?.componente
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="flex h-[52px] shrink-0 items-center gap-7 bg-ibge px-6 text-white">
-        <a href="#/" className="flex items-center gap-2.5 text-[17px] font-bold tracking-[.01em]">
+      <header className="flex min-h-[52px] shrink-0 flex-wrap items-center gap-x-7 gap-y-2 bg-ibge px-6 py-2 text-white">
+        <a href="#/inicio" className="flex items-center gap-2.5 text-[17px] font-bold tracking-[.01em]">
           <Logo tamanho={24} escuro /> feixe
         </a>
-        <nav className="flex h-full gap-1">
-          {telas.map((t) => (
-            <a
-              key={t.id}
-              href={`#/${t.id}`}
-              aria-current={t.id === atual?.id ? 'page' : undefined}
-              className={cn(
-                'flex h-full items-center border-b-2 border-transparent px-3 text-white/70 hover:text-white',
-                t.id === atual?.id && 'border-white text-white',
-              )}
-            >
-              {t.rotulo}
-            </a>
-          ))}
-        </nav>
-        <div className="ml-auto flex items-center gap-3.5 text-xs text-white/80">
-          <BotaoCamadas />
-          {status && status.rotulo_ambiente && !/produ/i.test(status.ambiente) && (
-            <span className="rounded px-2 py-0.5 font-semibold text-white" style={{ background: status.cor_ambiente }}>
-              {status.rotulo_ambiente}
-            </span>
-          )}
-          <span className="flex items-center gap-1.5" title={conectado ? 'O painel está falando com o QGIS' : 'O QGIS fechou'}>
-            <span className={cn('size-2 rounded-full', conectado ? 'bg-[#4CC26F]' : 'bg-[#F0A040]')} />
-            {conectado ? 'QGIS conectado' : 'QGIS desconectado'}
-          </span>
-          {eu && (
-            <>
-              <span>
-                {eu.papel_rotulo}
-                {eu.uf ? ` · ${eu.uf}` : ''}
-              </span>
-              <span
-                className="grid size-[30px] place-items-center rounded-full bg-white/15 font-semibold text-white"
-                title={`${eu.nome} (${eu.conta})`}
+        <nav aria-label="Módulos" className="flex flex-wrap gap-1">
+          {telas
+            .filter((t) => !t.oculta)
+            .map((t) => (
+              <a
+                key={t.id}
+                href={`#/${t.id}`}
+                aria-current={t.id === atual?.id ? 'page' : undefined}
+                className={cn(
+                  'border-b-2 border-transparent px-3 py-2 text-white/78 hover:text-white',
+                  t.id === atual?.id && 'border-white font-semibold text-white',
+                )}
               >
-                {iniciais(eu.nome)}
-              </span>
-            </>
-          )}
+                {t.rotulo}
+              </a>
+            ))}
+        </nav>
+        <div className="ml-auto flex flex-wrap items-center gap-3.5 text-[13px] text-white/85">
+          <Conexao />
+          <BotaoCamadas />
+          <a
+            href="#/sobre"
+            className="grid size-8 place-items-center rounded-full bg-white/18 font-semibold text-white hover:bg-white/28"
+            title={eu ? `${eu.nome} (${eu.conta}) · ${eu.papel_rotulo}${eu.uf ? ` · ${eu.uf}` : ''}: conta e sobre` : 'Conta e sobre'}
+            aria-label={eu ? `${eu.nome}: conta e sobre` : 'Conta e sobre'}
+          >
+            {eu ? iniciais(eu.nome) : '?'}
+          </a>
         </div>
       </header>
-      <main className="mx-auto flex w-full max-w-[1120px] flex-1 flex-col gap-6 px-8 pt-7 pb-10">
-        {!conectado && (
-          <Card className="border-destructive">
-            <CardContent className="text-sm">O QGIS fechou ou o plugin foi descarregado. Reabra o Feixe pelo QGIS.</CardContent>
-          </Card>
-        )}
-        {atual && <h1 className="text-2xl font-semibold tracking-[-.01em]">{atual.rotulo}</h1>}
-        {Componente && <Componente />}
-      </main>
+      {!conectado && (
+        <div className="border-b border-destructive/30 bg-destructive/10 px-6 py-2.5 text-center text-sm">
+          O QGIS fechou ou o plugin foi descarregado. Reabra o Feixe pelo QGIS.
+        </div>
+      )}
+      {Componente && <Componente />}
     </div>
   )
 }
