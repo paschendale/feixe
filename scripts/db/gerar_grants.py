@@ -24,7 +24,7 @@ NOME_VALIDO = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 TABELAS = [
     "schema_version", "tema", "fase", "atividade", "fluxo", "fluxo_etapa", "fluxo_etapa_atividade", "cq_elemento",
     "usuario_feixe", "calendario", "lote", "lote_etapa", "lote_etapa_hist", "carga_trabalho", "cq_plano", "cq_amostra",
-    "cq_inspecao", "sync_log",
+    "cq_inspecao", "sync_log", "fila_folha",
 ]  # fmt: skip
 # Tabelas de configuração fixa: só leitura para os usuários (alteradas pelas migrações).
 SO_LEITURA = ["schema_version", "fase"]

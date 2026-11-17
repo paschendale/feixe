@@ -131,11 +131,17 @@ def _minha_para_mudar(ex: Executor, id_carga: int) -> Dict:
 
 
 def concluir(ex: Executor, id_carga: int) -> Dict:
-    """Conclui uma carga minha. Concluir de novo não faz nada (o clique duplo não vira erro)."""
+    """Conclui uma carga minha. Concluir de novo não faz nada (o clique duplo não vira erro). Se era a minha última
+    pendente (em qualquer etapa aberta), a minha fila (B8) me passa a próxima folha, na mesma transação: volta em
+    `fila`."""
+    from . import filas
+
     linha = _minha_para_mudar(ex, id_carga)
+    fila = None
     if not linha["concluido"]:
         ex.executar("UPDATE mapcartacomp.carga_trabalho SET concluido = true WHERE id = %s", (id_carga,))
-    return {"carga": uma(ex, id_carga), "progresso": progresso(ex, linha["id_lote_etapa"])}
+        fila = filas.puxar(ex, ex.um("SELECT current_user AS u")["u"])
+    return {"carga": uma(ex, id_carga), "progresso": progresso(ex, linha["id_lote_etapa"]), "fila": fila}
 
 
 def desfazer(ex: Executor, id_carga: int) -> Dict:

@@ -16,7 +16,7 @@ flowchart LR
 | `ccar/001_schema.sql` | Schema `mapcartacomp` e `schema_version` (controle das migrações) |
 | `ccar/002_referencias.sql` | Tema, fase (com carga inicial), atividade, fluxo e etapas, usuários do Feixe, calendário |
 | `ccar/003_lotes.sql` | Lotes (folhas e lotes livres), passagens por etapa e histórico |
-| `ccar/004_cargas_cq.sql` | Planos de amostragem, cargas de trabalho, amostras e ocorrências de inspeção |
+| `ccar/004_cargas_cq.sql` | Planos de amostragem, cargas de trabalho, amostras, ocorrências de inspeção e a fila de folhas por pessoa |
 | `ccar/005_sync_log.sql` | Registro da sincronização |
 | `ccar/006_regras.sql` | Triggers: datas de conclusão e avaliação, auditoria, derivação do status nacional, recusa de carga fora da folha ou de atividade fora da etapa |
 | `ccar/007_views.sql` | Views de compatibilidade (`vw_*`, filtradas pelo usuário), de acompanhamento (`ctrl_*`) e `vw_carga_supervisao` (cargas da unidade para o supervisor, só leitura) |

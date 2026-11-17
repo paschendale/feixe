@@ -28,6 +28,10 @@ def _mudou(ctx, r: Dict) -> Dict:
 def concluir(ctx, id_carga: int) -> Dict:
     with ctx.tx() as ex:
         r = dc.concluir(ex, id_carga)
+    if r.get("fila"):
+        # A fila passou a próxima folha: o supervisor vê no painel (Filas, Folhas) e as camadas mudam de dono.
+        ctx.publicar("fila", {"atribuida": r["fila"]})
+        ctx.publicar("lote", {"fila": r["fila"]["id_lote"]})
     return _mudou(ctx, r)
 
 

@@ -285,9 +285,19 @@ class FeixePlugin:
             if id_carga in ids:
                 ids.remove(id_carga)
         p = r["progresso"]
-        self.iface.messageBar().pushMessage(
-            "Feixe", f"Carga concluída · {p['folha_revisao']} · {p['concluidas']}/{p['total']}", Qgis.Success, 3
-        )
+        f = r.get("fila")
+        if f:
+            self.iface.messageBar().pushMessage(
+                "Feixe",
+                f"Folha {p['folha_revisao']} concluída. A próxima da sua fila é a {f['folha_revisao']} "
+                f"({f['atribuidas']} cargas), já atribuída a você.",
+                Qgis.Success,
+                8,
+            )
+        else:
+            self.iface.messageBar().pushMessage(
+                "Feixe", f"Carga concluída · {p['folha_revisao']} · {p['concluidas']}/{p['total']}", Qgis.Success, 3
+            )
         self._proxima(id_carga)
 
     def pular_carga(self, id_carga=None):
