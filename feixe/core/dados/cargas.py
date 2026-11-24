@@ -244,8 +244,114 @@ def gerar_pela_grade(ex: Executor, id_lote_etapa: int, previa: bool, uf: Optiona
     return {**resumo, "gravadas": gravadas}
 
 
+def preparar(ex: Executor, uf: str, ids_lote_etapa: List[int]) -> Dict:
+    """O que a passagem recém-aberta precisa sem decisão de ninguém (D-109): as cargas pela grade, se a etapa tem uma
+    atividade pela grade; se a etapa não tem atividade que gere cargas (nenhuma, ou só de geração "nenhuma", como o
+    envio à GCQ), não há o que distribuir e ela começa já. Etapa com atividade que não é pela grade (CQ por amostragem,
+    fase D; geração manual), ou que já tem cargas, fica como está, com o motivo em `avisos`.
+
+    Em lote, em poucas idas e voltas: uma leitura das passagens, uma da grade de todas, um INSERT das cargas e um das
+    etapas iniciadas. Volta `geradas` (por passagem), `iniciadas` (sem atividade) e `avisos` (as que ficaram sem
+    cargas, com o motivo)."""
+    if not ids_lote_etapa:
+        return {"geradas": [], "iniciadas": [], "avisos": []}
+    ps = ex.todos(
+        "SELECT le.id, le.situacao, le.uf, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, "
+        "fe.nome AS etapa, coalesce(l.geom, ST_Multi(ar.geom)) AS geom, "
+        "fe.fase, (SELECT count(*) FROM mapcartacomp.fluxo_etapa_atividade x "
+        " JOIN mapcartacomp.atividade a ON a.id = x.id_atividade "
+        " WHERE x.id_fluxo_etapa = fe.id AND a.geracao <> 'nenhuma') AS atividades, "
+        "(SELECT array_agg(a.id) FROM mapcartacomp.fluxo_etapa_atividade x "
+        " JOIN mapcartacomp.atividade a ON a.id = x.id_atividade "
+        " WHERE x.id_fluxo_etapa = fe.id AND a.geracao = 'grade' AND a.ativo AND a.grade_nivel IS NOT NULL) AS grade, "
+        "(SELECT a.grade_nivel FROM mapcartacomp.fluxo_etapa_atividade x "
+        " JOIN mapcartacomp.atividade a ON a.id = x.id_atividade "
+        " WHERE x.id_fluxo_etapa = fe.id AND a.geracao = 'grade' AND a.ativo AND a.grade_nivel IS NOT NULL "
+        " LIMIT 1) AS nivel, "
+        "EXISTS (SELECT 1 FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id) AS tem_cargas "
+        "FROM mapcartacomp.lote_etapa le JOIN mapcartacomp.lote l ON l.id = le.id_lote "
+        "JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+        "LEFT JOIN mapcartctrl.t_articulacao_scn ar ON ar.id_articulacao_scn = l.id_articulacao_scn "
+        "WHERE le.id = ANY(%s) ORDER BY folha_revisao",
+        (list(ids_lote_etapa),),
+    )
+    gerar, iniciar, avisos = [], [], []
+    for p in ps:
+        if p["uf"] != uf or p["situacao"] not in ABERTAS or p["tem_cargas"]:
+            continue
+        if not p["atividades"]:
+            if p["situacao"] == "pendente":
+                iniciar.append(p)
+        elif p["grade"] and len(p["grade"]) == 1:
+            gerar.append(p)
+        elif p["grade"]:
+            avisos.append({**_ident(p), "aviso": f"a etapa {p['etapa']} tem mais de uma atividade pela grade"})
+        elif p["fase"] == "cq":
+            avisos.append({**_ident(p), "aviso": "as amostras do CQ saem do plano de amostragem (fase D)"})
+        else:
+            aviso = f"as cargas de {p['etapa']} não saem da grade: inicie a etapa pela gaveta quando a equipe começar"
+            avisos.append({**_ident(p), "aviso": aviso})
+    geradas = []
+    if gerar:
+        # A grade é calculada uma vez: as células voltam com a geometria e entram por unnest, com os uuids do plugin.
+        ativ = {p["id"]: p["grade"][0] for p in gerar}
+        celulas = ex.todos(
+            "SELECT p.id, c.geocodigo, c.geom::text AS geom "
+            "FROM unnest(%s::int[], %s::int[], %s::text[]) AS p(id, nivel, geom) CROSS JOIN LATERAL "
+            "mapcartacomp.f_grade_celulas(p.geom::geometry, p.nivel) c",
+            ([p["id"] for p in gerar], [p["nivel"] for p in gerar], [p["geom"] for p in gerar]),
+        )
+        por: Dict[int, int] = {}
+        for c in celulas:
+            por[c["id"]] = por.get(c["id"], 0) + 1
+        if celulas:
+            ex.executar(
+                "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_atividade, geocodigo, geom) "
+                "SELECT u, le, a, g, geom::geometry FROM unnest(%s::uuid[], %s::int[], %s::int[], %s::text[], "
+                "%s::text[]) AS t(u, le, a, g, geom)",
+                (
+                    [novo_uuid() for _ in celulas], [c["id"] for c in celulas], [ativ[c["id"]] for c in celulas],
+                    [c["geocodigo"] for c in celulas], [c["geom"] for c in celulas],
+                ),
+            )  # fmt: skip
+        for p in gerar:
+            n = por.get(p["id"], 0)
+            if n:
+                geradas.append({**_ident(p), "gravadas": n})
+            else:
+                avisos.append({**_ident(p), "aviso": "nenhuma célula da grade tem o centroide dentro do lote"})
+    if iniciar:
+        obs = "Iniciada ao abrir: a etapa não tem atividade, não há cargas a distribuir"
+        _iniciar(ex, [p["id"] for p in iniciar], obs)
+    return {"geradas": geradas, "iniciadas": [_ident(p) for p in iniciar], "avisos": avisos}
+
+
+def _ident(p: Dict) -> Dict:
+    return {"id_lote_etapa": p["id"], "folha_revisao": p["folha_revisao"], "etapa": p["etapa"]}
+
+
+def _iniciar(ex: Executor, ids_lote_etapa: List[int], observacao: str) -> List[int]:
+    """Passa para em andamento as passagens a iniciar entre `ids_lote_etapa`, com a linha no histórico."""
+    feitas = [
+        r["id"]
+        for r in ex.todos(
+            "UPDATE mapcartacomp.lote_etapa SET situacao = 'em_andamento', iniciada_em = now() "
+            "WHERE id = ANY(%s) AND situacao = 'pendente' RETURNING id",
+            (list(ids_lote_etapa),),
+        )
+    ]
+    if feitas:
+        ex.executar(
+            "INSERT INTO mapcartacomp.lote_etapa_hist (uuid, id_lote_etapa, acao, observacao) "
+            "SELECT u::uuid, le, 'iniciar', %s FROM unnest(%s::text[], %s::int[]) AS t(u, le)",
+            (observacao, [novo_uuid() for _ in feitas], feitas),
+        )
+    return feitas
+
+
 # --- Equipe e atribuição (B5) ----------------------------------------------------------------------------------------
-# Atribuição é do supervisor e não é transição de etapa: não grava lote_etapa_hist. Só cargas pendentes de passagens
+# Atribuição é do supervisor e não é transição de etapa. Mas é ela que começa o trabalho: a etapa a iniciar que recebe
+# a primeira carga com dono passa a em andamento (D-109), com a linha no histórico. Só cargas pendentes de passagens
 # abertas mudam de mão; carga concluída fica com quem a fez.
 
 PERFIS_EXECUTORES = ("O", "V", "S")  # APM, avaliador, supervisor (que também executa)
@@ -323,6 +429,13 @@ def atribuir(
         "SELECT count(*) AS n FROM mapcartacomp.carga_trabalho c WHERE c.id = ANY(%s) OR c.id_lote_etapa = ANY(%s)",
         (list(ids or []), list(lote_etapas or [])),
     )["n"]
+    if responsavel is not None and feitas["atribuidas"]:
+        tocadas = ex.todos(
+            "SELECT DISTINCT c.id_lote_etapa AS id FROM mapcartacomp.carga_trabalho c "
+            "WHERE (c.id = ANY(%s) OR c.id_lote_etapa = ANY(%s)) AND c.responsavel IS NOT NULL",
+            (list(ids or []), list(lote_etapas or [])),
+        )
+        _iniciar(ex, [r["id"] for r in tocadas], "Iniciada ao distribuir as cargas")
     return {"atribuidas": feitas["atribuidas"], "ja_estavam": feitas["alvo"] - feitas["atribuidas"],
             "fora": pedidas - feitas["alvo"]}  # fmt: skip
 

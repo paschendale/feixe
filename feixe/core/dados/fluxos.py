@@ -349,7 +349,7 @@ def nova_passagem(
         (novo_uuid(), id_lote, id_fluxo_etapa, feitas["ultima"] + 1, bool(expor_ocorrencias)),
     )["id"]
     _hist(ex, id_le, "repetir" if feitas["n"] else "abrir", obs)
-    return estado(ex, id_lote)
+    return {**estado(ex, id_lote), "id_lote_etapa": id_le}
 
 
 def abrir_proximas(ex: Executor, uf: str, ids: List[int], observacao: str) -> Dict:
@@ -410,7 +410,75 @@ def abrir_proximas(ex: Executor, uf: str, ids: List[int], observacao: str) -> Di
         (obs, [novo_uuid() for _ in novas], [n["id"] for n in novas], [acao[n["id_lote"]] for n in novas]),
     )
     etapa = {r["id"]: r["etapa"] for r in validas}
-    return {"abertas": [{"id_lote": n["id_lote"], "etapa": etapa[n["id_lote"]]} for n in novas], "erros": erros}
+    return {
+        "abertas": [{"id_lote": n["id_lote"], "id_lote_etapa": n["id"], "etapa": etapa[n["id_lote"]]} for n in novas],
+        "erros": erros,
+    }
+
+
+def avancar(ex: Executor, uf: str, ids: List[int], observacao: Optional[str], previa: bool) -> Dict:
+    """Próxima etapa em várias folhas (D-109): a folha com a etapa em andamento conclui essa etapa e abre a seguinte; a
+    que já terminou a etapa só abre a seguinte. Na prévia, volta por folha o que vai acontecer (ou por que não), para o
+    supervisor confirmar; sem prévia, faz, em poucas idas e voltas, e as recusadas voltam em `erros`.
+
+    Recusa: etapa a iniciar (ainda não começou: distribua as cargas ou pule pela gaveta), envio à GCQ em andamento (o
+    resultado da GCQ se registra na gaveta) e fim do fluxo."""
+    linhas = ex.todos(
+        "SELECT l.id AS id_lote, l.uf, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, "
+        "t.nome AS tema, le.id AS id_lote_etapa, le.situacao, fe.nome AS etapa, fe.fase, "
+        "(SELECT count(*) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id) AS cargas, "
+        "(SELECT count(*) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id AND NOT c.concluido) "
+        "AS pendentes, n.nome AS proxima, n.repetivel, "
+        "(SELECT count(*) FROM mapcartacomp.lote_etapa x WHERE x.id_lote = l.id AND x.id_fluxo_etapa = n.id "
+        " AND x.situacao <> 'pulada') AS nao_puladas "
+        "FROM mapcartacomp.lote l JOIN mapcartacomp.tema t ON t.id = l.id_tema "
+        "LEFT JOIN mapcartacomp.lote_etapa le ON le.id = coalesce((SELECT x.id FROM mapcartacomp.lote_etapa x "
+        f"WHERE x.id_lote = l.id AND x.situacao IN ('pendente', 'em_andamento') LIMIT 1), {_ULTIMA}) "
+        "LEFT JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+        "LEFT JOIN LATERAL (SELECT x.id, x.nome, x.repetivel FROM mapcartacomp.fluxo_etapa x "
+        " WHERE x.id_fluxo = l.id_fluxo AND x.ordem > coalesce(fe.ordem, 0) ORDER BY x.ordem LIMIT 1) n ON true "
+        "WHERE l.id = ANY(%s) ORDER BY t.nome, folha_revisao" + ("" if previa else " FOR UPDATE OF l"),
+        (list(ids),),
+    )
+    itens = []
+    for r in linhas:
+        erro = None
+        if r["uf"] != uf:
+            erro = "folha de outra unidade"
+        elif r["situacao"] == "pendente":
+            erro = f"{r['etapa']} ainda não começou: distribua as cargas, ou pule a etapa pela gaveta"
+        elif r["situacao"] == "em_andamento" and r["fase"] == "envio_gcq":
+            erro = "o resultado da GCQ se registra na gaveta da folha"
+        elif r["proxima"] is None:
+            erro = "é a última etapa do fluxo"
+        elif r["nao_puladas"] and not r["repetivel"]:
+            erro = f"a etapa {r['proxima']} não se repete neste fluxo"
+        itens.append({
+            "id_lote": r["id_lote"], "folha_revisao": r["folha_revisao"], "tema": r["tema"], "etapa": r["etapa"],
+            "concluir": r["situacao"] == "em_andamento", "cargas": r["cargas"], "pendentes": r["pendentes"],
+            "proxima": r["proxima"], "erro": erro,
+        })  # fmt: skip
+    if previa:
+        return {"itens": itens}
+    obs = _obs(observacao)
+    validos = [i for i in itens if not i["erro"]]
+    erros = [{"id_lote": i["id_lote"], "erro": i["erro"]} for i in itens if i["erro"]]
+    concluir = [r["id_lote_etapa"] for r, i in zip(linhas, itens) if not i["erro"] and i["concluir"]]
+    if concluir:
+        ex.executar(
+            "UPDATE mapcartacomp.lote_etapa SET situacao = 'concluida', concluida_em = now(), "
+            "concluida_por = current_user WHERE id = ANY(%s) AND situacao = 'em_andamento'",
+            (concluir,),
+        )
+        ex.executar(
+            "INSERT INTO mapcartacomp.lote_etapa_hist (uuid, id_lote_etapa, acao, observacao) "
+            "SELECT u::uuid, le, 'concluir', %s FROM unnest(%s::text[], %s::int[]) AS t(u, le)",
+            (obs, [novo_uuid() for _ in concluir], concluir),
+        )
+    if not validos:
+        return {"abertas": [], "erros": erros}
+    r = abrir_proximas(ex, uf, [i["id_lote"] for i in validos], obs)
+    return {"abertas": r["abertas"], "erros": erros + r["erros"]}
 
 
 def estado(ex: Executor, id_lote: int) -> Dict:

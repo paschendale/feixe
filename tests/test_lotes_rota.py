@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 
 import pytest
+from feixe.core.dados import cargas as dc
 from feixe.core.dados import lotes as dl
 from feixe.server.api import Contexto, criar_roteador
 
@@ -19,9 +20,19 @@ def montar(monkeypatch):
 
     def criar_folhas(ex, uf, fluxo, folhas, projetos):
         ch["chamadas"].append(("folhas", uf, fluxo, folhas, list(projetos)))
-        return {"tema": "Hidrografia", "criados": [{"cd_mi": "2535", "id_lote": 9}], "existentes": []}
+        return {
+            "tema": "Hidrografia",
+            "criados": [{"cd_mi": "2535", "id_lote": 9, "id_lote_etapa": 90}],
+            "existentes": [],
+        }
+
+    def preparar(ex, uf, ids):
+        ch["chamadas"].append(("preparar", uf, ids))
+        return {"geradas": [{"id_lote_etapa": 90, "folha_revisao": "2535-1", "etapa": "Aquisição", "gravadas": 7}],
+                "iniciadas": [], "avisos": []}  # fmt: skip
 
     monkeypatch.setattr(dl, "criar_folhas", criar_folhas)
+    monkeypatch.setattr(dc, "preparar", preparar)
     monkeypatch.setattr(dl, "listar", lambda ex, uf, tema, status: ch["chamadas"].append(("listar", uf, tema)) or [])
 
     def fazer(eu):
@@ -40,8 +51,10 @@ def test_supervisor_cria_folhas_na_sua_uf_e_projetos(montar):
     r, ch = montar(SUP)
     status, obj = r.despachar("POST", "/api/lotes", {}, {"tipo": "folha", "id_fluxo": 1, "folhas": ["11", 12]})
     assert status == 200 and obj["criados"][0]["cd_mi"] == "2535"
-    assert ch["chamadas"] == [("folhas", "DF", 1, [11, 12], [5])]
-    assert ch["eventos"] == ["lote"]
+    # A folha nova já sai com as cargas (D-109), numa transação à parte.
+    assert ch["chamadas"] == [("folhas", "DF", 1, [11, 12], [5]), ("preparar", "DF", [90])]
+    assert obj["preparo"]["geradas"][0]["gravadas"] == 7
+    assert ch["eventos"] == ["lote", "carga", "lote"]
 
 
 def test_validacoes_e_papeis(montar):

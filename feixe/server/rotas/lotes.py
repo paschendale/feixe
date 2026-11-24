@@ -57,6 +57,8 @@ def registrar(r, ctx) -> None:
 
     @r.rota("POST", "/api/lotes", exige=("supervisor",))
     def _criar(req):
+        from .cargas import preparar
+
         eu = ctx.eu()
         uf, projetos = uf_de(eu), projetos_supervisor(eu)
         tipo = campo(req, "tipo", str)
@@ -71,6 +73,7 @@ def registrar(r, ctx) -> None:
                 raise ErroApi(400, "tipo deve ser folha ou livre")
         if resultado["criados"]:
             ctx.publicar("lote", {"criados": [c["id_lote"] for c in resultado["criados"]]})
+            resultado["preparo"] = preparar(ctx, uf, [c.get("id_lote_etapa") for c in resultado["criados"]])
         return 200, resultado
 
     @r.rota("GET", "/api/fluxos", exige=("supervisor", "gerente"))

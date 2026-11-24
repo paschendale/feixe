@@ -58,17 +58,18 @@ def _fluxo_da_uf(ex: Executor, uf: str, id_fluxo: int, projetos: Optional[Iterab
     return fluxo
 
 
-def _primeira_passagem(ex: Executor, id_lote: int, id_fluxo_etapa: int) -> None:
-    ex.executar(
-        "INSERT INTO mapcartacomp.lote_etapa (uuid, id_lote, id_fluxo_etapa) VALUES (%s, %s, %s)",
+def _primeira_passagem(ex: Executor, id_lote: int, id_fluxo_etapa: int) -> int:
+    return ex.um(
+        "INSERT INTO mapcartacomp.lote_etapa (uuid, id_lote, id_fluxo_etapa) VALUES (%s, %s, %s) RETURNING id",
         (novo_uuid(), id_lote, id_fluxo_etapa),
-    )
+    )["id"]
 
 
 def criar_folhas(
     ex: Executor, uf: str, id_fluxo: int, ids_articulacao: List[int], projetos: Optional[Iterable[int]] = None
 ) -> Dict:
-    """Cria um lote do tipo folha por folha 1:100.000, no projeto e tema do fluxo, já na primeira etapa (pendente).
+    """Cria um lote do tipo folha por folha 1:100.000, no projeto e tema do fluxo, já na primeira etapa (pendente; as
+    cargas vêm logo depois, em `cargas.preparar`).
 
     Folha que já tem lote no mesmo projeto e tema (D-46) não é criada de novo: volta em `existentes`.
     """
@@ -100,8 +101,8 @@ def criar_folhas(
             "VALUES (%s, %s, %s, %s, %s, 'folha', %s, %s) RETURNING id",
             (novo_uuid(), fluxo["cod_projeto"], fluxo["id_tema"], id_fluxo, uf, f["id"], f["cd_mi"]),
         )["id"]
-        _primeira_passagem(ex, id_lote, fluxo["primeira_etapa"])
-        criados.append({"cd_mi": f["cd_mi"], "id_lote": id_lote})
+        le = _primeira_passagem(ex, id_lote, fluxo["primeira_etapa"])
+        criados.append({"cd_mi": f["cd_mi"], "id_lote": id_lote, "id_lote_etapa": le})
     return {"tema": fluxo["tema"], "criados": criados, "existentes": existentes}
 
 
@@ -135,8 +136,9 @@ def criar_livre(
         "VALUES (%s, %s, %s, %s, %s, 'livre', %s, ST_Multi(ST_GeomFromText(%s, 4674))) RETURNING id",
         (novo_uuid(), fluxo["cod_projeto"], fluxo["id_tema"], id_fluxo, uf, nome, wkt),
     )["id"]
-    _primeira_passagem(ex, id_lote, fluxo["primeira_etapa"])
-    return {"tema": fluxo["tema"], "criados": [{"nome": nome, "id_lote": id_lote}], "existentes": []}
+    le = _primeira_passagem(ex, id_lote, fluxo["primeira_etapa"])
+    criado = {"nome": nome, "id_lote": id_lote, "id_lote_etapa": le}
+    return {"tema": fluxo["tema"], "criados": [criado], "existentes": []}
 
 
 # Etapa em que a folha está trabalhando (D-105): a aberta (pendente ou em andamento; no máximo uma), se houver; senão a

@@ -139,7 +139,8 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
 
 
 def esperando(ex: Executor, uf: str) -> List[Dict]:
-    """Folhas cuja última etapa terminou (concluída ou pulada) e que só andam quando o supervisor abrir a próxima.
+    """Folhas cuja última etapa terminou (concluída ou pulada, ou em andamento com todas as cargas concluídas) e que só
+    andam quando o supervisor abrir a próxima.
 
     Agrupadas pela decisão: tema, etapa que terminou e a próxima do fluxo (nula = fim do fluxo). Folha já CONCLUIDA
     para a CCAR fica de fora.
@@ -160,6 +161,26 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
         "AND NOT EXISTS (SELECT 1 FROM mapcartacomp.lote_etapa x WHERE x.id_lote = l.id "
         f"AND x.situacao IN {_ABERTAS}) "
         "ORDER BY t.nome, fe.ordem, folha_revisao",
+        (uf,),
+    )
+    # E as que terminaram as cargas (D-109): etapa em andamento com todas as cargas concluídas. Para o supervisor é a
+    # mesma decisão; abrir a próxima conclui a etapa (`fluxos.avancar`).
+    linhas += ex.todos(
+        "SELECT l.id AS id_lote, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, "
+        "l.id_tema, t.nome AS tema, fe.id AS id_etapa, fe.nome AS etapa, le.situacao, "
+        "(SELECT max(c.concluido_em) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id) AS desde, "
+        "l.id_fluxo, fl.nome AS fluxo, n.id AS id_proxima, n.nome AS proxima "
+        "FROM mapcartacomp.lote l "
+        "JOIN mapcartacomp.lote_etapa le ON le.id_lote = l.id AND le.situacao = 'em_andamento' "
+        "JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+        "JOIN mapcartacomp.fluxo fl ON fl.id = l.id_fluxo "
+        "JOIN mapcartacomp.tema t ON t.id = l.id_tema "
+        "LEFT JOIN LATERAL (SELECT x.id, x.nome FROM mapcartacomp.fluxo_etapa x WHERE x.id_fluxo = l.id_fluxo "
+        "AND x.ordem > fe.ordem ORDER BY x.ordem LIMIT 1) n ON true "
+        "WHERE l.uf = %s AND fe.fase <> 'envio_gcq' "
+        "AND EXISTS (SELECT 1 FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id) "
+        "AND NOT EXISTS (SELECT 1 FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id "
+        "AND NOT c.concluido) ORDER BY t.nome, fe.ordem, folha_revisao",
         (uf,),
     )
     grupos: Dict[tuple, Dict] = {}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ...core.dados import fluxos as df
 from ..api import ErroApi, campo, inteiro
+from .cargas import preparar
 from .lotes import projetos_supervisor, uf_de
 
 ACOES = ("iniciar", "concluir", "pular", "reabrir", "gcq")
@@ -79,6 +80,7 @@ def registrar(r, ctx) -> None:
                 campo(req, "observacao", str, padrao=""), campo(req, "expor_ocorrencias", bool, padrao=False),
             )  # fmt: skip
         ctx.publicar("lote", {"id": estado["id"], "acao": "passagem"})
+        estado["preparo"] = preparar(ctx, uf_de(ctx.eu()), [estado["id_lote_etapa"]])
         return 200, estado
 
     @r.rota("GET", "/api/lotes/{id}/historico", exige=("supervisor", "gerente"))

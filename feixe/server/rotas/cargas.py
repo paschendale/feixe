@@ -85,7 +85,33 @@ def gerar(ctx, ids_lote_etapa, previa: bool, uf: Optional[str]) -> Dict:
     return {"resultados": resultados, "erros": erros}
 
 
+def preparar(ctx, uf: str, ids_lote_etapa) -> Dict:
+    """Depois de abrir passagens (folha nova, próxima etapa): gera as cargas pela grade e inicia as etapas sem
+    atividade, numa transação à parte, para a folha aberta não depender disso (D-109). Uma falha volta em `erro`."""
+    ids = [i for i in ids_lote_etapa if i]
+    if not ids:
+        return {"geradas": [], "iniciadas": [], "avisos": []}
+    try:
+        with ctx.tx() as ex:
+            r = dc.preparar(ex, uf, ids)
+    except ErroDados as e:
+        return {"geradas": [], "iniciadas": [], "avisos": [], "erro": e.mensagem}
+    if r["geradas"]:
+        ctx.publicar("carga", {"geradas": [g["id_lote_etapa"] for g in r["geradas"]]})
+        _no_qgis(ctx, "cargas_geradas")
+    if r["geradas"] or r["iniciadas"]:
+        ctx.publicar("lote", {"preparadas": ids})
+    return r
+
+
 def registrar(r, ctx) -> None:
+    @r.rota("POST", "/api/lotes/preparar", exige=("supervisor",))
+    def _preparar(req):
+        # Para a folha que ficou sem cargas (a geração falhou, ou a etapa ganhou atividade depois de aberta).
+        from .lotes import uf_de
+
+        return 200, preparar(ctx, uf_de(ctx.eu()), campo(req, "lote_etapas", lambda v: [int(x) for x in v]))
+
     @r.rota("GET", "/api/equipe", exige=("supervisor",))
     def _equipe(req):
         from .lotes import uf_de

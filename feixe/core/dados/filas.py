@@ -158,3 +158,108 @@ def puxar(ex: Executor, responsavel: str) -> Optional[Dict]:
             "atribuidas": r["atribuidas"],
         }
     return None
+
+
+# --- Distribuir (D-109) ----------------------------------------------------------------------------------------------
+# Uma folha por pessoa, sempre: quem está sem carga recebe a folha agora; quem já tem, recebe na fila. Distribuir é pôr
+# cada folha na fila de alguém (`adicionar`), e a fila de quem está sem carga anda na hora.
+
+
+def _perfil_da_fase(fase: Optional[str]) -> str:
+    return "V" if fase == "cq" else "O"
+
+
+def sugestao(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
+    """Para cada folha, a passagem aberta com cargas a atribuir e a pessoa sugerida: entre as de perfil da fase no
+    projeto (O na produção, V no CQ; sem ninguém com esse perfil, toda a equipe), quem tem menos nas mãos (sem carga
+    primeiro, depois a fila mais curta), uma folha por pessoa neste lote antes de repetir alguém, e nunca quem já
+    trabalhou numa passagem anterior da folha, se houver outra pessoa (a revisão é às cegas)."""
+    folhas = ex.todos(
+        "SELECT l.id AS id_lote, l.cod_projeto, le.id AS id_lote_etapa, "
+        "mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, t.nome AS tema, fe.nome AS etapa, "
+        "fe.fase, (SELECT count(*) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id "
+        " AND c.responsavel IS NULL AND NOT c.concluido) AS a_atribuir, "
+        "(SELECT count(*) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id) AS cargas, "
+        "(SELECT f.responsavel FROM mapcartacomp.fila_folha f WHERE f.id_lote_etapa = le.id "
+        " AND f.atribuida_em IS NULL) AS na_fila_de, "
+        "(SELECT array_agg(DISTINCT c.responsavel) FROM mapcartacomp.carga_trabalho c "
+        " JOIN mapcartacomp.lote_etapa x ON x.id = c.id_lote_etapa "
+        " WHERE x.id_lote = l.id AND x.id <> le.id AND c.responsavel IS NOT NULL) AS anteriores, "
+        "(SELECT array_agg(DISTINCT c.responsavel) FROM mapcartacomp.carga_trabalho c "
+        " WHERE c.id_lote_etapa = le.id AND c.responsavel IS NOT NULL) AS com_cargas "
+        "FROM mapcartacomp.lote l JOIN mapcartacomp.tema t ON t.id = l.id_tema "
+        f"JOIN mapcartacomp.lote_etapa le ON le.id_lote = l.id AND le.situacao IN {_ABERTAS} "
+        "JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+        "WHERE l.id = ANY(%s) AND l.uf = %s ORDER BY t.nome, folha_revisao",
+        (list(id_lotes), uf),
+    )
+    filas = {
+        r["responsavel"]: r["n"]
+        for r in ex.todos(
+            "SELECT responsavel, count(*) AS n FROM mapcartacomp.fila_folha WHERE uf = %s AND atribuida_em IS NULL "
+            "GROUP BY responsavel",
+            (uf,),
+        )
+    }
+    pessoas: Dict[str, Dict] = {}
+    equipes: Dict[int, List[Dict]] = {}
+    for f in folhas:
+        if f["cod_projeto"] not in equipes:
+            equipes[f["cod_projeto"]] = dc.equipe(ex, uf, f["cod_projeto"])
+            for p in equipes[f["cod_projeto"]]:
+                pessoas.setdefault(p["conta"], {**p, "na_fila": filas.get(p["conta"], 0)})
+    neste = dict.fromkeys(pessoas, 0)
+    for f in folhas:
+        f["anteriores"] = [c for c in (f["anteriores"] or []) if c]
+        f["com_cargas"] = [c for c in (f["com_cargas"] or []) if c]
+        f["sugerida"] = None
+        if not f["a_atribuir"] or f["na_fila_de"]:
+            f["sugerida"] = f["na_fila_de"]
+            continue
+        equipe = equipes[f["cod_projeto"]]
+        perfil = _perfil_da_fase(f["fase"])
+        pool = [p for p in equipe if f":{perfil}" in (p["perfis"] or "")] or equipe
+        livres = [p for p in pool if p["conta"] not in f["anteriores"]] or pool
+        if not livres:
+            continue
+
+        def peso(p):
+            x = pessoas[p["conta"]]
+            return (neste[p["conta"]] + (1 if x["pendentes"] else 0) + x["na_fila"], x["nome"] or "")
+
+        escolhida = min(livres, key=peso)
+        f["sugerida"] = escolhida["conta"]
+        neste[escolhida["conta"]] += 1
+    return {
+        "folhas": folhas,
+        "pessoas": sorted(
+            (
+                {
+                    "conta": p["conta"],
+                    "nome": p["nome"],
+                    "perfis": p["perfis"],
+                    "pendentes": p["pendentes"],
+                    "na_fila": p["na_fila"],
+                }
+                for p in pessoas.values()
+            ),
+            key=lambda p: p["nome"] or "",
+        ),  # fmt: skip
+    }
+
+
+def distribuir_uma(ex: Executor, uf: str, id_lote_etapa: int, responsavel: str) -> Dict:
+    """Dá a folha a `responsavel`: entra no fim da fila dele (se estava na fila de outra pessoa, sai de lá) e, se ele
+    está sem carga, a fila anda na hora. Volta `atribuida` (o que ele recebeu agora) ou nada (ficou na fila)."""
+    ex.executar(
+        "DELETE FROM mapcartacomp.fila_folha WHERE id_lote_etapa = %s AND uf = %s AND atribuida_em IS NULL "
+        "AND responsavel <> %s",
+        (id_lote_etapa, uf, responsavel),
+    )
+    ja = ex.um(
+        "SELECT id, ordem FROM mapcartacomp.fila_folha WHERE id_lote_etapa = %s AND atribuida_em IS NULL",
+        (id_lote_etapa,),
+    )
+    if ja:
+        return {**ja, "atribuida": puxar(ex, responsavel)}
+    return adicionar(ex, uf, responsavel, id_lote_etapa)
