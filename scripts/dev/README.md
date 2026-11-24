@@ -47,3 +47,13 @@ scp apoio/<dump> $O/pre.sql $O/post.sql scripts/dev/restaurar_recorte.sh victor@
 3. Depois: `scripts/db/aplicar.sh` na CCAR de dev, `scripts/db/testar_espelho.sh` no GGC de dev e, como a CCAR de dev não é a de produção e não tem as contas do DF, `scripts/dev/copiar_usuarios_df.sh "$FEIXE_GGC" "$FEIXE_CCAR"` (copia as contas lotadas no DF e as citadas em `bc100ggcdf_apoio`, sem senha e sem disparar os triggers de sincronização).
 
 Resultado em 2026-10-14: GGC com 45.009 cargas, 10.974 amostras e 19 ocorrências em `bc100ggcdf_apoio`, 456 contas em `mapcartctrl` e `dominios` com 183 tabelas; CCAR com 548 contas (mais 116 copiadas do DF), 64.831 folhas e `dominios` com 179 tabelas.
+
+## Medir o pull (S-03)
+
+`medir_pull.py` cronometra o pull inicial do workspace (C2) contra a CCAR de dev, em workspaces numa pasta temporária: (a) o escopo da pessoa com mais cargas no DF e (b) toda a `carga_trabalho` do DF, cada um seguido de um pull sem mudanças, separando o tempo de CCAR (consultas e rede) e o de gravação no workspace. Só lê o banco.
+
+```bash
+/Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 scripts/dev/medir_pull.py 3
+```
+
+Com o Python do QGIS ele usa as conexões do plugin e confere também a sincronização de ponta a ponta (CCAR de dev e uma porta fechada, que tem de dar `offline`). Sem o QGIS (só `psycopg2`), conecta pela URL `FEIXE_CCAR`; é o jeito de medir no disbelief, num container descartável com `python:3.9-slim` e `pip install psycopg2-binary`, com o código copiado por `rsync` (sem `.git` e sem `node_modules`).
