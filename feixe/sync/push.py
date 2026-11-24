@@ -54,6 +54,7 @@ from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple
 
 from ..core.dados import cargas as dc
 from ..core.dados import novo_uuid
+from ..core.dados.local import rotulo
 from . import esquema
 from .pull import _colunas
 from .workspace import Workspace, _json_padrao, agora, de_iso, iso_exato
@@ -225,6 +226,45 @@ def _buscar_linhas(rx, tabela: str, uuids: List[str]) -> Dict[str, Dict]:
     return {r["uuid"]: r for r in linhas}
 
 
+# --- referência legível (C5) ------------------------------------------------------------------------------------------
+
+_JUNCOES_REF = (
+    "LEFT JOIN lote_etapa le ON le.id = x.id_lote_etapa LEFT JOIN lote l ON l.id = le.id_lote "
+    "LEFT JOIN fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+)
+_REF = {
+    "carga_trabalho": (
+        f"SELECT x.uuid, x.id, x.geocodigo, x.id_lote_etapa, le.id_lote, x.id_atividade, {rotulo()} AS folha, "
+        f"fe.nome AS etapa, at.nome AS atividade FROM carga_trabalho x {_JUNCOES_REF}"
+        "LEFT JOIN atividade at ON at.id = x.id_atividade"
+    ),
+    "fila_folha": f"SELECT x.uuid, x.id, x.id_lote_etapa, le.id_lote, {rotulo()} AS folha, fe.nome AS etapa "
+    f"FROM fila_folha x {_JUNCOES_REF}",
+    "lote_etapa_hist": f"SELECT x.uuid, x.id, x.id_lote_etapa, le.id_lote, {rotulo()} AS folha, fe.nome AS etapa "
+    f"FROM lote_etapa_hist x {_JUNCOES_REF}",
+    "lote_etapa": f"SELECT x.uuid, x.id, x.id AS id_lote_etapa, x.id_lote, {rotulo()} AS folha, fe.nome AS etapa "
+    "FROM lote_etapa x LEFT JOIN lote_etapa le ON le.id = x.id LEFT JOIN lote l ON l.id = x.id_lote "
+    "LEFT JOIN fluxo_etapa fe ON fe.id = x.id_fluxo_etapa",
+}
+
+
+def _referencias(ws: Workspace, por_tabela: Dict[str, List[str]]) -> Dict[Tuple[str, str], Dict]:
+    """A carga ou a folha de cada linha enviada, como o workspace a conhece agora (folha-revisão, geocódigo, etapa,
+    atividade e ids): vai no `detalhe.ref` do `sync_log`, para a tela de conflitos dizer de que carga se trata mesmo
+    depois de a linha ser apagada na CCAR (C5)."""
+    refs: Dict[Tuple[str, str], Dict] = {}
+    with ws.leitura() as wx:
+        for tabela, uuids in por_tabela.items():
+            sql = _REF.get(tabela)
+            if not sql or not uuids:
+                continue
+            marcas = ", ".join("?" * len(uuids))
+            for r in wx.todos(f"{sql} WHERE x.uuid IN ({marcas})", tuple(uuids)):
+                u = r.pop("uuid")
+                refs[(tabela, u)] = {k: v for k, v in r.items() if v is not None}
+    return refs
+
+
 # --- push -------------------------------------------------------------------------------------------------------------
 
 
@@ -243,6 +283,7 @@ class _Push:
         self.log_ccar: List[Dict] = []  # envios, na ordem, para o sync_log da CCAR
         self.savepoint = False
         self.equipes: Dict[int, set] = {}
+        self.refs: Dict[Tuple[str, str], Dict] = {}  # (tabela, uuid) -> carga/folha legível, do workspace
 
     # --- leitura do servidor ---
 
@@ -254,6 +295,7 @@ class _Push:
                 por_tabela[it["tabela"]].append(it["uuid"])
         for t, uuids in por_tabela.items():
             self.servidor[t] = _buscar_linhas(self.rx, t, uuids)
+        self.refs = _referencias(self.ws, por_tabela)
         todos = sorted({it["uuid"] for it in itens})
         for r in self.rx.todos(
             f"SELECT s.uuid::text AS uuid, s.usuario, s.resultado, s.detalhe FROM {S}.sync_log s "
@@ -368,6 +410,9 @@ class _Push:
                 "versao": iso_exato(antes["atualizado_em"]),
             }
         d["versao_base"] = g["versao_base"]
+        ref = self.refs.get((g["tabela"], g["uuid"]))
+        if ref:
+            d["ref"] = ref
         if g["juntados"]:
             d["juntados"] = g["juntados"]
         d.update({k: v for k, v in extra.items() if v is not None})
