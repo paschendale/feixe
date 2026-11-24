@@ -8,7 +8,7 @@ import { href, navegar, useRota } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
-import { ABERTAS, Continuar, Producao, pendentesDe, usePorDia } from './comum'
+import { ABERTAS, Continuar, Preparando, Producao, pendentesDe, usePorDia } from './comum'
 
 const JANELA_DESFAZER_MS = 24 * 3600 * 1000
 const chaveDe = (p: Passagem) => `${p.tema} · ${p.etapa}`
@@ -47,7 +47,7 @@ function Cargas({ p }: { p: Passagem }) {
   const { conectado } = useSessao()
   const acoes = useAcoes()
   const [aba, setAba] = useState<Aba>(pendentesDe(p) > 0 ? 'pendentes' : 'concluidas')
-  const { dados, erro } = useApi<{ itens: Carga[] }>(`/api/cargas?lote_etapa=${p.id_lote_etapa}`, ['carga'])
+  const { dados, erro } = useApi<{ itens: Carga[] }>(`/api/cargas?lote_etapa=${p.id_lote_etapa}`, ['carga', 'sincronizacao'])
   const aberta = ABERTAS.includes(p.situacao)
   if (!dados) return <Carregando erro={erro} />
   const pendentes = dados.itens.filter((c) => !c.concluido)
@@ -148,19 +148,17 @@ function Cargas({ p }: { p: Passagem }) {
 // acompanhamento e o atalho para levar o QGIS até uma carga.
 export default function Execucao() {
   const rota = useRota()
-  const { dados, erro } = useApi<ResumoCargas>('/api/cargas/resumo', ['carga', 'lote'])
+  const { dados, erro } = useApi<ResumoCargas>('/api/cargas/resumo', ['carga', 'lote', 'sincronizacao'])
   const { dias, hoje } = usePorDia()
   const abasModulo = [
     { id: 'cargas', rotulo: 'Minhas cargas', href: href('execucao') },
     { id: 'amostras', rotulo: 'Minhas amostras · fase D', desabilitada: true },
   ]
-  if (!dados)
+  if (!dados || dados.preparando)
     return (
       <>
         <CabecalhoModulo titulo="Execução" abas={abasModulo} ativa="cargas" />
-        <Conteudo largura={1240}>
-          <Carregando erro={erro} />
-        </Conteudo>
+        <Conteudo largura={1240}>{dados?.preparando ? <Preparando /> : <Carregando erro={erro} />}</Conteudo>
       </>
     )
 

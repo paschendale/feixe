@@ -4,7 +4,7 @@ import type { Passagem, ResumoCargas } from '@/lib/api'
 import { lista, num, pc, plural } from '@/lib/formato'
 import { href } from '@/lib/rotas'
 import { useApi } from '@/lib/useApi'
-import { ABERTAS, Continuar, Producao, pendentesDe, usePorDia } from '../execucao/comum'
+import { ABERTAS, Continuar, Preparando, Producao, pendentesDe, usePorDia } from '../execucao/comum'
 
 function CartaoFolha({ p, principal }: { p: Passagem; principal: boolean }) {
   const aberta = ABERTAS.includes(p.situacao)
@@ -44,9 +44,10 @@ function CartaoFolha({ p, principal }: { p: Passagem; principal: boolean }) {
 
 // Execução no Início: frase, as folhas com "Continuar no QGIS" e as conclusões dos últimos dias.
 export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
-  const { dados } = useApi<ResumoCargas>('/api/cargas/resumo', ['carga', 'lote'])
+  const { dados } = useApi<ResumoCargas>('/api/cargas/resumo', ['carga', 'lote', 'sincronizacao'])
   const { dias, hoje } = usePorDia()
   if (!dados) return null
+  if (dados.preparando) return comTitulo ? <Secao titulo="Execução" sub="as cargas que estão com você"><Preparando /></Secao> : <Preparando />
   const comPendentes = dados.passagens.filter((p) => pendentesDe(p) > 0 && ABERTAS.includes(p.situacao))
   const outras = dados.passagens.filter((p) => !comPendentes.includes(p))
   const cartoes = [...comPendentes, ...outras].slice(0, 4)

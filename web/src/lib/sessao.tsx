@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
-import { api, type Eu, type Papel, type Status } from '@/lib/api'
+import { api, type EstadoSincronizacao, type Eu, type Papel, type Status } from '@/lib/api'
 import { useEventos, type Evento } from '@/lib/sse'
 
 type Sessao = {
@@ -17,7 +17,7 @@ type Sessao = {
 const Ctx = createContext<Sessao | null>(null)
 
 // Eventos que o plugin publica. Cada item da fase B acrescenta os seus aqui.
-export const EVENTOS = ['estado', 'configuracao', 'carga', 'lote', 'fluxo', 'atividade', 'fila', 'qgis']
+export const EVENTOS = ['estado', 'configuracao', 'carga', 'lote', 'fluxo', 'atividade', 'fila', 'qgis', 'sincronizacao']
 
 export function SessaoProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status | null>(null)
@@ -33,6 +33,11 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
   }, [])
   const { conectado, ultimo } = useEventos(EVENTOS, (e) => {
     if (e.evento === 'estado' || e.evento === 'configuracao') recarregar()
+    // A sincronização em segundo plano (C3) avisa quando começa e quando termina: o indicador muda sem recarregar.
+    if (e.evento === 'sincronizacao') {
+      const sinc = e.dados as unknown as EstadoSincronizacao
+      setStatus((s) => (s ? { ...s, sincronizacao: sinc, online: sinc.online ?? s.online } : s))
+    }
   })
   useEffect(() => recarregar(), [recarregar])
   const tem = useCallback((...p: Papel[]) => !!eu && p.some((x) => eu.papeis.includes(x)), [eu])

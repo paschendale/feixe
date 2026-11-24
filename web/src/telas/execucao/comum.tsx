@@ -11,9 +11,18 @@ export const ABERTAS = ['pendente', 'em_andamento']
 export const pendentesDe = (p: Passagem) => p.total - p.concluidas
 export const fuso = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo'
 
+// Workspace ainda sem o primeiro pull (C3): no lugar da lista vazia, o aviso de que as cargas estão chegando.
+export function Preparando() {
+  return (
+    <p className="text-sm text-muted-foreground" role="status">
+      Preparando seu espaço de trabalho: o Feixe está trazendo as suas cargas da CCAR. Já, já fica pronto.
+    </p>
+  )
+}
+
 // Minhas conclusões por dia (fuso de quem olha), para as barras do Início e da Execução.
 export function usePorDia() {
-  const { dados } = useApi<{ por_dia: { dia: string; n: number }[] }>(`/api/painel/execucao?fuso=${encodeURIComponent(fuso())}`, ['carga'])
+  const { dados } = useApi<{ por_dia: { dia: string; n: number }[] }>(`/api/painel/execucao?fuso=${encodeURIComponent(fuso())}`, ['carga', 'sincronizacao'])
   const mapa = new Map((dados?.por_dia ?? []).map((d) => [d.dia, d.n]))
   const hoje = new Date()
   const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`

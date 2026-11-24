@@ -42,6 +42,18 @@ export type Status = {
   online: boolean
   usuario: string | null
   detalhe: string
+  sincronizacao?: EstadoSincronizacao
+}
+
+// Estado da sincronização do workspace com a CCAR (C3): vem em /api/status e no evento SSE `sincronizacao`.
+export type EstadoSincronizacao = {
+  online: boolean | null
+  em_andamento: boolean
+  ultima_sincronizacao: string | null
+  ultima_tentativa: string | null
+  ultimo_estado: 'ok' | 'offline' | 'erro' | null
+  mensagem: string | null
+  pendentes: number | null
 }
 
 export type Folha = {
@@ -108,6 +120,8 @@ export type ResumoCargas = {
   pendentes: number
   folhas_pendentes: number
   passagens: Passagem[]
+  // Workspace ainda sem o primeiro pull (C3): a lista vazia não quer dizer "sem cargas".
+  preparando?: boolean
 }
 
 export type StatusNacional = 'PLANEJADA' | 'EM_PRODUCAO' | 'EM_CQ' | 'ENTREGUE_GCQ' | 'CONCLUIDA' | 'DEVOLVIDA'
