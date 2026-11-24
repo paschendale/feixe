@@ -1,0 +1,17 @@
+import type { Preparo } from '@/lib/api'
+import { lista, num, plural } from '@/lib/formato'
+
+// Frase do que o Feixe fez sozinho depois de abrir passagens (D-109), para o aviso.
+export function resumoPreparo(p?: Preparo) {
+  if (!p) return ''
+  const partes: string[] = []
+  const total = p.geradas.reduce((s, g) => s + g.gravadas, 0)
+  if (total) partes.push(`${plural(total, 'carga gerada', 'cargas geradas')} em ${plural(p.geradas.length, 'folha', 'folhas')}.`)
+  if (p.iniciadas.length) partes.push(`${lista([...new Set(p.iniciadas.map((i) => i.etapa))])} sem atividade: já em andamento em ${plural(p.iniciadas.length, 'folha', 'folhas')}.`)
+  if (p.avisos.length) partes.push(`Sem cargas: ${lista(p.avisos.slice(0, 3).map((a) => `${a.folha_revisao} (${a.aviso})`))}${p.avisos.length > 3 ? ` e mais ${num(p.avisos.length - 3)}` : ''}.`)
+  if (p.erro) partes.push(`As cargas não foram geradas: ${p.erro}.`)
+  return partes.join(' ')
+}
+
+// Passagens que ganharam cargas: é o que vai para o Distribuir.
+export const comCargas = (p?: Preparo) => new Set((p?.geradas ?? []).map((g) => g.id_lote_etapa))

@@ -3,17 +3,17 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Barra, Bloco, COR, Carregando, Conteudo, Fichas } from '@/components/painel'
-import type { FluxoCompleto, GrupoAtividade, Lote, LotePainel } from '@/lib/api'
+import type { FluxoCompleto, GrupoAtividade, LotePainel } from '@/lib/api'
 import { diasAtras, lista, num, parado, pc, plural, quando } from '@/lib/formato'
 import { href, navegar, useRota } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'
 import { SITUACAO, Status } from '@/lib/status'
 import { useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
-import { Atribuir } from '../folhas/Atribuir'
-import { GerarCargas } from '../folhas/GerarCargas'
+import { Distribuir } from '../folhas/Distribuir'
 import { NovaFolha } from '../folhas/NovaFolha'
 import { NovoLoteLivre } from '../folhas/NovoLoteLivre'
+import { ProximaEtapa } from '../folhas/ProximaEtapa'
 import { usePainel } from '../inicio/ResumoSupervisao'
 import { Gaveta } from './Gaveta'
 
@@ -23,23 +23,9 @@ const ABERTAS = ['pendente', 'em_andamento']
 const padrao = (gs: GrupoAtividade[]) => [...gs].sort((a, b) => Number(a.fase === 'cq') - Number(b.fase === 'cq') || b.lotes.length - a.lotes.length)[0] ?? null
 type Filtro = '' | 'pendente' | 'em_andamento' | 'parado' | 'esperando'
 
-function Passos({ n, ativo, children, onClick }: { n?: number; ativo?: boolean; children: React.ReactNode; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn('inline-flex h-9 items-center gap-2 rounded-lg border px-3', ativo ? 'border-ibge bg-ibge text-white' : 'border-input bg-card hover:bg-accent')}
-    >
-      {n !== undefined && (
-        <span className={cn('grid size-5 place-items-center rounded-full text-xs font-semibold', ativo ? 'bg-white/20' : 'bg-aco-claro text-ibge')}>{n}</span>
-      )}
-      {children}
-    </button>
-  )
-}
-
-// Supervisão › Folhas: escolher a atividade em produção (como os subgrupos do QGIS), ver as folhas e planejar
-// (gerar cargas → atribuir). Clicar na folha abre a gaveta, onde ela anda pelo fluxo.
+// Supervisão › Folhas: escolher a atividade em produção (como os subgrupos do QGIS), ver as folhas e decidir para as
+// marcadas: distribuir (uma folha por pessoa) ou abrir a próxima etapa. As cargas saem sozinhas quando a etapa abre
+// (D-109). Clicar na folha abre a gaveta, onde ela anda pelo fluxo.
 export default function Folhas() {
   const { tem } = useSessao()
   const supervisor = tem('supervisor')
@@ -57,9 +43,10 @@ export default function Folhas() {
   const [filtro, setFiltro] = useState<Filtro>('')
   const [quem, setQuem] = useState('')
   const [marcados, setMarcados] = useState<Set<number>>(new Set())
-  const [gerar, setGerar] = useState<Lote[]>([])
-  const [atribuir, setAtribuir] = useState<Lote[]>([])
+  const [distribuir, setDistribuir] = useState<number[]>([])
+  const [avancar, setAvancar] = useState<number[]>([])
   const [dialogo, setDialogo] = useState<'folha' | 'livre' | null>(null)
+  const [fluxoNovas, setFluxoNovas] = useState<number | null>(null)
 
   const extra = useMemo(() => new Map<number, LotePainel>((p?.lotes ?? []).map((l) => [l.id_lote, l])), [p])
   const aAtribuir = useMemo(() => Object.fromEntries((p?.lotes ?? []).map((l) => [l.id_lote, l.a_atribuir])), [p])
@@ -76,14 +63,20 @@ export default function Folhas() {
     return true
   })
 
-  // Vindo do Início ("Atribuir"): abre o diálogo com as folhas da atividade que têm cargas a atribuir.
+  // Vindo do Início ou de Fluxos: ?distribuir=1 abre a distribuição das folhas da atividade com cargas a atribuir (o
+  // ?atribuir=1 de antes também); ?novas=<fluxo> abre Novas folhas já com o fluxo.
   useEffect(() => {
-    if (rota.query.get('atribuir') && grupo && todos.length && p) {
-      setAtribuir(todos.filter((l) => grupo.lotes.includes(l.id) && (aAtribuir[l.id] ?? 0) > 0))
-      navegar(`supervisao/folhas?grupo=${grupo.chave}`)
+    const q = rota.query
+    if ((q.get('distribuir') || q.get('atribuir')) && todos.length && p) {
+      const alvo = todos.filter((l) => (grupo ? grupo.lotes.includes(l.id) : true) && (aAtribuir[l.id] ?? 0) > 0)
+      setDistribuir(alvo.map((l) => l.id))
+      navegar(`supervisao/folhas${grupoQ ? `?grupo=${grupoQ}` : ''}`)
+    } else if (q.get('novas')) {
+      setFluxoNovas(Number(q.get('novas')) || null)
+      setDialogo('folha')
+      navegar(`supervisao/folhas${grupoQ ? `?grupo=${grupoQ}` : ''}`)
     }
-  }, [rota.query, grupo, todos, p, aAtribuir])
-
+  }, [rota.query, grupo, grupoQ, todos, p, aAtribuir])
   useEffect(() => setMarcados(new Set()), [chaveAtiva])
 
   const marcar = (id: number) =>
@@ -157,23 +150,17 @@ export default function Folhas() {
           <b>{plural(marcadosLotes.length, 'folha marcada', 'folhas marcadas')}</b>
           <span className="text-[#3D4B5C]">{marcadosLotes.length <= 5 ? lista(marcadosLotes.map((l) => l.folha_revisao)) : ''}</span>
           <span className="flex-1" />
-          <ol aria-label="Planejar" className="flex flex-wrap gap-2">
-            <li>
-              <Passos n={1} onClick={() => setGerar(marcadosLotes)}>
-                Gerar cargas
-              </Passos>
-            </li>
-            <li>
-              <Passos n={2} ativo onClick={() => setAtribuir(marcadosLotes)}>
-                Atribuir
-              </Passos>
-            </li>
-            <li>
-              <button type="button" className="h-9 px-3 text-[#3D4B5C] hover:underline" onClick={() => setMarcados(new Set())}>
-                Limpar
-              </button>
-            </li>
-          </ol>
+          <div className="flex flex-wrap gap-2">
+            <Button className="font-semibold" onClick={() => setDistribuir(marcadosLotes.map((l) => l.id))}>
+              Distribuir
+            </Button>
+            <Button variant="outline" className="bg-card" onClick={() => setAvancar(marcadosLotes.map((l) => l.id))}>
+              Abrir a próxima etapa
+            </Button>
+            <button type="button" className="h-9 px-3 text-[#3D4B5C] hover:underline" onClick={() => setMarcados(new Set())}>
+              Limpar
+            </button>
+          </div>
         </div>
       )}
 
@@ -290,27 +277,41 @@ export default function Folhas() {
           id={selecionado}
           fluxos={fluxos?.itens ?? []}
           fechar={() => navegar(`supervisao/folhas${grupoQ ? `?grupo=${grupoQ}` : ''}`)}
-          atribuir={(l) => setAtribuir([l])}
+          distribuir={(ids) => setDistribuir(ids)}
         />
       )}
 
-      <GerarCargas
-        lotes={gerar}
-        fechar={(gravou) => {
-          setGerar([])
-          if (gravou) setMarcados(new Set())
-        }}
-      />
-      <Atribuir
-        lotes={atribuir}
-        aAtribuir={aAtribuir}
+      <Distribuir
+        lotes={distribuir}
         fechar={(feito) => {
-          setAtribuir([])
+          setDistribuir([])
           if (feito) setMarcados(new Set())
         }}
       />
-      <NovaFolha aberto={dialogo === 'folha'} fechar={() => setDialogo(null)} />
-      <NovoLoteLivre aberto={dialogo === 'livre'} fechar={() => setDialogo(null)} />
+      <ProximaEtapa
+        lotes={avancar}
+        fechar={(abertas) => {
+          setAvancar([])
+          if (abertas) setMarcados(new Set())
+          if (abertas?.length) setDistribuir(abertas)
+        }}
+      />
+      <NovaFolha
+        aberto={dialogo === 'folha'}
+        fluxoInicial={fluxoNovas}
+        fechar={(criados) => {
+          setDialogo(null)
+          setFluxoNovas(null)
+          if (criados?.length) setDistribuir(criados)
+        }}
+      />
+      <NovoLoteLivre
+        aberto={dialogo === 'livre'}
+        fechar={(criados) => {
+          setDialogo(null)
+          if (criados?.length) setDistribuir(criados)
+        }}
+      />
     </Conteudo>
   )
 }

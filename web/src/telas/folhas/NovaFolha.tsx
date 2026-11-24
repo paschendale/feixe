@@ -9,20 +9,31 @@ import { useAvisar } from '@/lib/avisos'
 import { useSessao } from '@/lib/sessao'
 import { enviar } from '@/lib/useApi'
 import { EscolherFluxo } from './EscolherFluxo'
+import { comCargas, resumoPreparo } from './preparo'
 
 type Escolhida = Pick<Folha, 'id' | 'cd_mi'> & { nm_carta?: string | null }
 
 export function resumoCriacao(r: ResultadoCriacao) {
   const criadas = r.criados.map((c) => c.cd_mi ?? c.nome).join(', ')
   const ja = r.existentes.map((e) => e.cd_mi).join(', ')
-  return [criadas && `Criadas em ${r.tema}: ${criadas}.`, ja && `Já existiam: ${ja}.`].filter(Boolean).join(' ')
+  return [criadas && `Criadas em ${r.tema}: ${criadas}.`, ja && `Já existiam: ${ja}.`, resumoPreparo(r.preparo)].filter(Boolean).join(' ')
 }
 
-// Criar folhas: fluxo + uma ou várias folhas 1:100.000, achadas pela busca ou pelo clique no mapa do QGIS (B3).
-export function NovaFolha({ aberto, fechar: fecharDialogo }: { aberto: boolean; fechar: () => void }) {
+// Lotes criados que já têm cargas: são os que vão para o Distribuir.
+export function criadosComCargas(r: ResultadoCriacao) {
+  const prontas = comCargas(r.preparo)
+  return r.criados.filter((c) => c.id_lote_etapa && prontas.has(c.id_lote_etapa)).map((c) => c.id_lote)
+}
+
+// Criar folhas: fluxo + uma ou várias folhas 1:100.000, achadas pela busca ou pelo clique no mapa do QGIS (B3). As
+// cargas da primeira etapa saem junto (D-109), e quem abriu o diálogo recebe os lotes com cargas para distribuir.
+export function NovaFolha({ aberto, fechar: fecharDialogo, fluxoInicial = null }: { aberto: boolean; fechar: (criados?: number[]) => void; fluxoInicial?: number | null }) {
   const avisar = useAvisar()
   const { ultimo, conectado } = useSessao()
-  const [fluxo, setFluxo] = useState<number | null>(null)
+  const [fluxo, setFluxo] = useState<number | null>(fluxoInicial)
+  useEffect(() => {
+    if (aberto && fluxoInicial) setFluxo(fluxoInicial)
+  }, [aberto, fluxoInicial])
   const [busca, setBusca] = useState('')
   const [achadas, setAchadas] = useState<Folha[]>([])
   const [escolhidas, setEscolhidas] = useState<Escolhida[]>([])
@@ -45,10 +56,10 @@ export function NovaFolha({ aberto, fechar: fecharDialogo }: { aberto: boolean; 
     if (noMapa) enviar('/api/qgis/folhas_escolhidas', { id_fluxo: fluxo, escolhidas: escolhidas.map((f) => f.id) }).catch(() => {})
   }, [noMapa, fluxo, escolhidas])
 
-  function fechar() {
+  function fechar(criados?: number[]) {
     if (noMapa) enviar('/api/qgis/folhas_fim').catch(() => {})
     setNoMapa(false)
-    fecharDialogo()
+    fecharDialogo(criados)
   }
 
   async function buscar() {
@@ -73,9 +84,9 @@ export function NovaFolha({ aberto, fechar: fecharDialogo }: { aberto: boolean; 
     setOcupado(true)
     try {
       const r = await enviar<ResultadoCriacao>('/api/lotes', { tipo: 'folha', id_fluxo: fluxo, folhas: escolhidas.map((f) => f.id) })
-      avisar(resumoCriacao(r))
+      avisar(resumoCriacao(r), r.preparo?.erro ? 'erro' : undefined)
       setEscolhidas([])
-      fechar()
+      fechar(criadosComCargas(r))
     } catch (e) {
       avisar((e as Error).message, 'erro')
     } finally {
@@ -88,7 +99,7 @@ export function NovaFolha({ aberto, fechar: fecharDialogo }: { aberto: boolean; 
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>Novas folhas</DialogTitle>
-          <DialogDescription>Cada folha entra na primeira etapa do fluxo, a iniciar.</DialogDescription>
+          <DialogDescription>Cada folha entra na primeira etapa do fluxo, já com as cargas. Depois de criar, você distribui as folhas para a equipe.</DialogDescription>
         </DialogHeader>
         <EscolherFluxo valor={fluxo} mudar={(f) => setFluxo(f?.id ?? null)} />
         <div className="grid gap-1.5">
@@ -141,11 +152,11 @@ export function NovaFolha({ aberto, fechar: fecharDialogo }: { aberto: boolean; 
           ))}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={fechar}>
+          <Button variant="outline" onClick={() => fechar()}>
             Cancelar
           </Button>
           <Button onClick={criar} disabled={!fluxo || escolhidas.length === 0 || ocupado}>
-            {ocupado ? 'Criando…' : escolhidas.length > 1 ? `Criar ${escolhidas.length} folhas` : 'Criar folha'}
+            {ocupado ? 'Criando e gerando as cargas…' : escolhidas.length > 1 ? `Criar ${escolhidas.length} folhas e gerar as cargas` : 'Criar a folha e gerar as cargas'}
           </Button>
         </DialogFooter>
       </DialogContent>

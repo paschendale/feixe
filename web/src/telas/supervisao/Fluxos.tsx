@@ -5,7 +5,7 @@ import { Bloco, COR, Carregando, Conteudo } from '@/components/painel'
 import type { Catalogo, FluxoCompleto, Lote } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { plural } from '@/lib/formato'
-import { href, useRota } from '@/lib/rotas'
+import { href, navegar, useRota } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
@@ -134,7 +134,12 @@ export default function Fluxos() {
           </ol>
           {supervisor && (
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => setEditar(f)} disabled={!catalogo}>
+              {f.ativo && (
+                <Button className="font-semibold" onClick={() => navegar(`supervisao/folhas?novas=${f.id}`)}>
+                  {doFluxo.length ? 'Pôr mais folhas neste fluxo' : 'Próximo: pôr as folhas deste fluxo'}
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => setEditar(f)} disabled={!catalogo}>
                 Editar etapas
               </Button>
               <Button variant="outline" onClick={() => alternar(f)}>
@@ -142,7 +147,9 @@ export default function Fluxos() {
               </Button>
             </div>
           )}
-          <span className="text-xs text-muted-foreground">No editor: subir, descer e tirar etapa, escolher a atividade de cada uma (as de CQ, uma por medida) e marcar obrigatória, repetível e conta revisão.</span>
+          <span className="text-xs text-muted-foreground">
+            No editor: subir, descer e tirar etapa, escolher a atividade de cada uma (as de CQ, uma por medida) e marcar obrigatória, repetível e conta revisão. A etapa com atividade pela grade ganha as cargas quando abre; a etapa sem atividade não tem cargas e começa assim que abre.
+          </span>
         </Bloco>
       )}
       {catalogo && <EditarFluxo fluxo={editar} catalogo={catalogo} fechar={() => setEditar(null)} />}

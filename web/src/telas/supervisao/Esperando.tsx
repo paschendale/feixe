@@ -2,12 +2,14 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Bloco, COR, Carregando, Conteudo } from '@/components/painel'
-import type { GrupoEsperando } from '@/lib/api'
+import type { GrupoEsperando, ResultadoAvanco } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { diaMes, num, plural } from '@/lib/formato'
 import { href } from '@/lib/rotas'
 import { enviar } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
+import { Distribuir } from '../folhas/Distribuir'
+import { comCargas, resumoPreparo } from '../folhas/preparo'
 
 const VISIVEIS = 12
 
@@ -28,7 +30,7 @@ function resumirRecusas(erros: { id_lote: number; erro: string }[], nome: (id: n
     .join(' · ')
 }
 
-function Grupo({ g, recarregar }: { g: GrupoEsperando; recarregar: () => void }) {
+function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: () => void; distribuir: (ids: number[]) => void }) {
   const avisar = useAvisar()
   const [marcadas, setMarcadas] = useState<Set<number>>(new Set())
   const [todas, setTodas] = useState(false)
@@ -41,13 +43,14 @@ function Grupo({ g, recarregar }: { g: GrupoEsperando; recarregar: () => void })
   async function abrir() {
     setOcupado(true)
     try {
-      const r = await enviar<{ abertas: { id_lote: number }[]; erros: { id_lote: number; erro: string }[] }>('/api/lotes/proxima_etapa', {
-        lotes: [...marcadas],
-        observacao: obs,
-      })
+      // Conclui a etapa das que terminaram as cargas e abre a seguinte; as cargas saem na hora (D-109).
+      const r = await enviar<ResultadoAvanco>('/api/lotes/avancar', { lotes: [...marcadas], observacao: obs, previa: false })
       const nome = (id: number) => g.folhas.find((f) => f.id_lote === id)?.folha_revisao ?? `#${id}`
-      if (r.abertas.length) avisar(`${g.proxima} aberta em ${plural(r.abertas.length, 'folha', 'folhas')}.`)
+      if (r.abertas.length) avisar(`${g.proxima} aberta em ${plural(r.abertas.length, 'folha', 'folhas')}. ${resumoPreparo(r.preparo)}`.trim())
       if (r.erros.length) avisar(resumirRecusas(r.erros, nome), 'erro')
+      const prontas = comCargas(r.preparo)
+      const paraDistribuir = r.abertas.filter((a) => prontas.has(a.id_lote_etapa)).map((a) => a.id_lote)
+      if (paraDistribuir.length) distribuir(paraDistribuir)
       setMarcadas(new Set())
       setObs('')
     } catch (e) {
@@ -63,7 +66,7 @@ function Grupo({ g, recarregar }: { g: GrupoEsperando; recarregar: () => void })
     <Bloco className={cn('gap-4', fim && 'border-[#E8C9A0]')}>
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <h2 className="text-base font-semibold">
-          {g.tema} · {fim ? 'fim do fluxo' : `${g.etapa} concluída`}
+          {g.tema} · {fim ? 'fim do fluxo' : `${g.etapa} terminada`}
         </h2>
         <span className="text-[13px] text-muted-foreground">
           {plural(g.folhas.length, 'folha', 'folhas')} · {fim ? `última etapa (${g.etapa}) concluída` : 'paradas'} {periodo(g)}
@@ -88,7 +91,7 @@ function Grupo({ g, recarregar }: { g: GrupoEsperando; recarregar: () => void })
           ) : (
             <label
               key={f.id_lote}
-              title={`${f.situacao === 'pulada' ? 'pulada' : 'concluída'} em ${diaMes(f.desde)}`}
+              title={`${f.situacao === 'pulada' ? 'pulada' : f.situacao === 'em_andamento' ? 'cargas concluídas' : 'concluída'} em ${diaMes(f.desde)}`}
               className={cn('tab inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm', marcadas.has(f.id_lote) ? 'border-ibge bg-[#EEF3FA]' : 'hover:bg-accent')}
             >
               <input
@@ -135,6 +138,7 @@ function Grupo({ g, recarregar }: { g: GrupoEsperando; recarregar: () => void })
 // Supervisão › Esperando você: folhas que terminaram a etapa atual e só andam quando o supervisor abrir a próxima.
 // Agrupadas pela decisão; marque as que vão juntas e decida de uma vez, com uma observação só.
 export default function Esperando({ grupos, recarregar }: { grupos: GrupoEsperando[] | null; recarregar: () => void }) {
+  const [distribuir, setDistribuir] = useState<number[]>([])
   if (!grupos)
     return (
       <Conteudo largura={1240}>
@@ -148,12 +152,13 @@ export default function Esperando({ grupos, recarregar }: { grupos: GrupoEsperan
         <Bloco className="text-muted-foreground">Nenhuma folha esperando você: todas as folhas da unidade estão com uma etapa aberta ou encerradas.</Bloco>
       ) : (
         <p className="max-w-[820px] text-base">
-          <b>{plural(n, 'folha', 'folhas')}</b> {n === 1 ? 'terminou' : 'terminaram'} a etapa atual e só {n === 1 ? 'anda' : 'andam'} quando você abrir a próxima. Elas estão agrupadas pela decisão; marque as que vão juntas e decida de uma vez, com uma observação só.
+          <b>{plural(n, 'folha', 'folhas')}</b> {n === 1 ? 'terminou' : 'terminaram'} a etapa atual (as cargas estão concluídas) e só {n === 1 ? 'anda' : 'andam'} quando você abrir a próxima. Elas estão agrupadas pela decisão; marque as que vão juntas e decida de uma vez, com uma observação só. Abrir a próxima conclui a etapa, gera as cargas da seguinte e abre a distribuição.
         </p>
       )}
       {grupos.map((g) => (
-        <Grupo key={`${g.tema}-${g.etapa}-${g.id_proxima}`} g={g} recarregar={recarregar} />
+        <Grupo key={`${g.tema}-${g.etapa}-${g.id_proxima}`} g={g} recarregar={recarregar} distribuir={setDistribuir} />
       ))}
+      <Distribuir lotes={distribuir} fechar={() => setDistribuir([])} />
     </Conteudo>
   )
 }

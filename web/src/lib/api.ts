@@ -166,8 +166,52 @@ export type Fluxo = {
 
 export type ResultadoCriacao = {
   tema: string
-  criados: { cd_mi?: string; nome?: string; id_lote: number }[]
+  criados: { cd_mi?: string; nome?: string; id_lote: number; id_lote_etapa?: number }[]
   existentes: { cd_mi: string; id_lote: number; uf: string }[]
+  preparo?: Preparo
+}
+
+// O que o Feixe fez sozinho depois de abrir passagens (D-109): cargas geradas, etapas sem atividade iniciadas e avisos.
+type PassagemPreparada = { id_lote_etapa: number; folha_revisao: string; etapa: string }
+export type Preparo = {
+  geradas: (PassagemPreparada & { gravadas: number })[]
+  iniciadas: PassagemPreparada[]
+  avisos: (PassagemPreparada & { aviso: string })[]
+  erro?: string
+}
+
+export type FolhaDistribuir = {
+  id_lote: number
+  id_lote_etapa: number
+  folha_revisao: string
+  tema: string
+  etapa: string
+  fase: string
+  a_atribuir: number
+  cargas: number
+  na_fila_de: string | null
+  anteriores: string[]
+  com_cargas: string[]
+  sugerida: string | null
+}
+export type PessoaDistribuir = { conta: string; nome: string; perfis: string | null; pendentes: number; na_fila: number }
+export type SugestaoDistribuicao = { folhas: FolhaDistribuir[]; pessoas: PessoaDistribuir[] }
+
+export type ItemAvanco = {
+  id_lote: number
+  folha_revisao: string
+  tema: string
+  etapa: string | null
+  concluir: boolean
+  cargas: number
+  pendentes: number
+  proxima: string | null
+  erro: string | null
+}
+export type ResultadoAvanco = {
+  abertas: { id_lote: number; id_lote_etapa: number; etapa: string }[]
+  erros: { id_lote: number; erro: string }[]
+  preparo?: Preparo
 }
 
 export type Atividade = {
@@ -238,6 +282,7 @@ export type EstadoLote = {
   situacao: string | null
   etapa: string | null
   sugestao: { id: number; nome: string; ordem: number } | null
+  preparo?: Preparo
 }
 
 export type Historico = { em: string; acao: string; observacao: string | null; por: string; por_nome: string; etapa: string; instancia: number }

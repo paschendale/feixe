@@ -73,8 +73,8 @@ function PrecisaDeVoce({ p, esperando, lotes }: { p: PainelSupervisao; esperando
         <span className="text-[13px] text-muted-foreground">
           {comCargas.length <= 4 ? lista(comCargas.map((l) => `${nome(l.id_lote)} (${num(l.a_atribuir)})`)) : plural(comCargas.length, 'folha', 'folhas')} · {g.rotulo}
         </span>
-        <LinkSeta href={href('supervisao/folhas', { grupo: g.chave, atribuir: 1 })} className="mt-2">
-          Atribuir
+        <LinkSeta href={href('supervisao/folhas', { grupo: g.chave, distribuir: 1 })} className="mt-2">
+          Distribuir
         </LinkSeta>
       </Bloco>,
     )

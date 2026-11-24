@@ -4,13 +4,14 @@ import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Barra, COR } from '@/components/painel'
-import type { EstadoLote, FluxoCompleto, Historico, Lote, LoteCompleto, PassagemLote } from '@/lib/api'
+import type { EstadoLote, FluxoCompleto, Historico, LoteCompleto, PassagemLote, Preparo } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { diaMes, diasAtras, num, pc, plural } from '@/lib/formato'
 import { useSessao } from '@/lib/sessao'
 import { STATUS } from '@/lib/status'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
+import { comCargas, resumoPreparo } from '../folhas/preparo'
 
 const ABERTAS = ['pendente', 'em_andamento']
 
@@ -69,7 +70,7 @@ function Trilho({ fluxo, lote, estado }: { fluxo: FluxoCompleto; lote: LoteCompl
 type Pedido = { titulo: string; passos: { caminho: string; corpo?: Record<string, unknown> }[]; escolher?: boolean }
 
 // Andar com a folha (B6): toda ação é do supervisor, com observação, e vai para o histórico. O Feixe só sugere.
-function Andar({ lote, fluxo, estado }: { lote: LoteCompleto; fluxo: FluxoCompleto | undefined; estado: EstadoLote | null }) {
+function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo: FluxoCompleto | undefined; estado: EstadoLote | null; distribuir: (ids: number[]) => void }) {
   const avisar = useAvisar()
   const [obs, setObs] = useState('')
   const [outra, setOutra] = useState(false)
@@ -91,9 +92,11 @@ function Andar({ lote, fluxo, estado }: { lote: LoteCompleto; fluxo: FluxoComple
     try {
       let r: EstadoLote | null = null
       for (const passo of p.passos) r = await enviar<EstadoLote>(passo.caminho, { ...passo.corpo, observacao: obs })
-      avisar(`${lote.folha_revisao}: ${p.titulo.toLowerCase()}${r?.etapa ? ` · ${r.etapa}` : ''}`)
+      avisar(`${lote.folha_revisao}: ${p.titulo.toLowerCase()}${r?.etapa ? ` · ${r.etapa}` : ''}. ${resumoPreparo(r?.preparo)}`.trim())
       setObs('')
       setOutra(false)
+      // A etapa nova já tem cargas (D-109): o próximo passo é distribuir.
+      if (comCargas(r?.preparo).size) distribuir([lote.id])
     } catch (e) {
       avisar((e as Error).message, 'erro')
     } finally {
@@ -115,7 +118,8 @@ function Andar({ lote, fluxo, estado }: { lote: LoteCompleto; fluxo: FluxoComple
       botoes.push({ titulo: seguinte ? 'Só concluir' : 'Concluir etapa', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/concluir` }] })
     }
   }
-  if (aberta?.situacao === 'pendente') botoes.push({ titulo: 'Iniciar etapa', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/iniciar` }] })
+  // Etapa com cargas começa ao distribuir (D-109); só a sem cargas se inicia à mão.
+  if (aberta?.situacao === 'pendente' && !aberta.cargas_total) botoes.push({ titulo: 'Iniciar etapa', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/iniciar` }] })
   if (aberta && eAberta && !eAberta.obrigatoria) botoes.push({ titulo: 'Pular etapa', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/pular` }] })
   if (!aberta) {
     if (estado?.sugestao) botoes.push({ titulo: `Abrir ${estado.sugestao.nome}`, passos: [{ caminho: `/api/lotes/${lote.id}/passagens`, corpo: { id_fluxo_etapa: estado.sugestao.id } }] })
@@ -134,7 +138,8 @@ function Andar({ lote, fluxo, estado }: { lote: LoteCompleto; fluxo: FluxoComple
           as cargas estão concluídas: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
         </>
       )
-  else if (aberta?.situacao === 'pendente') sugestao = <>a etapa está a iniciar; inicie quando a equipe começar.</>
+  else if (aberta?.situacao === 'pendente' && aberta.cargas_total) sugestao = <>distribuir a folha: a etapa começa quando alguém receber as cargas.</>
+  else if (aberta?.situacao === 'pendente') sugestao = <>a etapa não tem cargas; inicie quando a equipe começar.</>
   else if (!aberta && estado?.sugestao) sugestao = <>abrir <b>{estado.sugestao.nome}</b>, a etapa seguinte do fluxo.</>
   else if (!aberta) sugestao = <>a folha terminou a última etapa do fluxo; não há etapa seguinte.</>
 
@@ -209,7 +214,7 @@ function Andar({ lote, fluxo, estado }: { lote: LoteCompleto; fluxo: FluxoComple
 }
 
 // Gaveta da folha (D-72, D-103): abre por cima da lista, sem trocar de página; é onde a folha anda pelo fluxo.
-export function Gaveta({ id, fluxos, fechar, atribuir }: { id: number; fluxos: FluxoCompleto[]; fechar: () => void; atribuir: (l: Lote) => void }) {
+export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos: FluxoCompleto[]; fechar: () => void; distribuir: (ids: number[]) => void }) {
   const avisar = useAvisar()
   const { conectado, tem, eu } = useSessao()
   const { dados: lote, erro } = useApi<LoteCompleto>(`/api/lotes/${id}`, ['lote', 'carga'])
@@ -256,10 +261,8 @@ export function Gaveta({ id, fluxos, fechar, atribuir }: { id: number; fluxos: F
               <Button variant="outline" disabled={!conectado} onClick={() => enviar(`/api/lotes/${id}/zoom`).catch((e) => avisar((e as Error).message, 'erro'))}>
                 Ver no QGIS
               </Button>
-              {supervisor && aberta && (atual?.cargas_total ?? 0) > 0 && (
-                <Button variant="outline" onClick={() => atribuir(lote)}>
-                  Atribuir cargas
-                </Button>
+              {supervisor && aberta && lote.pessoas.some((p) => !p.conta && p.total > p.concluidas) && (
+                <Button onClick={() => distribuir([lote.id])}>Distribuir</Button>
               )}
             </div>
 
@@ -317,12 +320,31 @@ export function Gaveta({ id, fluxos, fechar, atribuir }: { id: number; fluxos: F
                     </table>
                   </>
                 ) : (
-                  <span className="text-[13px] text-muted-foreground">Sem cargas nesta etapa{aberta && supervisor ? ': gere as cargas na tabela (marque a folha e use "Gerar cargas").' : '.'}</span>
+                  <div className="flex flex-wrap items-center gap-3 text-[13px] text-muted-foreground">
+                    <span>Sem cargas nesta etapa.</span>
+                    {aberta && supervisor && atual && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={async () => {
+                          try {
+                            const r = await enviar<Preparo>('/api/lotes/preparar', { lote_etapas: [atual.id] })
+                            avisar(resumoPreparo(r) || 'Nada a gerar: a etapa não tem atividade pela grade.')
+                            if (comCargas(r).size) distribuir([lote.id])
+                          } catch (e) {
+                            avisar((e as Error).message, 'erro')
+                          }
+                        }}
+                      >
+                        Gerar as cargas
+                      </Button>
+                    )}
+                  </div>
                 )}
               </section>
             )}
 
-            {supervisor && <Andar lote={lote} fluxo={fluxo} estado={estado} />}
+            {supervisor && <Andar lote={lote} fluxo={fluxo} estado={estado} distribuir={distribuir} />}
 
             {hist && hist.itens.length > 0 && (
               <section className="flex flex-col gap-2.5">

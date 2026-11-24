@@ -9,12 +9,12 @@ import { useAvisar } from '@/lib/avisos'
 import { useSessao } from '@/lib/sessao'
 import { enviar } from '@/lib/useApi'
 import { EscolherFluxo } from './EscolherFluxo'
-import { resumoCriacao } from './NovaFolha'
+import { criadosComCargas, resumoCriacao } from './NovaFolha'
 
 type Selecao = { camada: string; feicoes: number; wkt: string }
 
 // Lote livre: polígono ad hoc (bacia, município, área desenhada) vindo da seleção da camada ativa no QGIS (B3).
-export function NovoLoteLivre({ aberto, fechar }: { aberto: boolean; fechar: () => void }) {
+export function NovoLoteLivre({ aberto, fechar }: { aberto: boolean; fechar: (criados?: number[]) => void }) {
   const avisar = useAvisar()
   const { conectado } = useSessao()
   const [fluxo, setFluxo] = useState<number | null>(null)
@@ -34,10 +34,10 @@ export function NovoLoteLivre({ aberto, fechar }: { aberto: boolean; fechar: () 
     setOcupado(true)
     try {
       const r = await enviar<ResultadoCriacao>('/api/lotes', { tipo: 'livre', id_fluxo: fluxo, nome, wkt: selecao?.wkt })
-      avisar(resumoCriacao(r))
+      avisar(resumoCriacao(r), r.preparo?.erro ? 'erro' : undefined)
       setNome('')
       setSelecao(null)
-      fechar()
+      fechar(criadosComCargas(r))
     } catch (e) {
       avisar((e as Error).message, 'erro')
     } finally {
@@ -68,11 +68,11 @@ export function NovoLoteLivre({ aberto, fechar }: { aberto: boolean; fechar: () 
           </span>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={fechar}>
+          <Button variant="outline" onClick={() => fechar()}>
             Cancelar
           </Button>
           <Button onClick={criar} disabled={!fluxo || !nome.trim() || !selecao || ocupado}>
-            {ocupado ? 'Criando…' : 'Criar lote'}
+            {ocupado ? 'Criando e gerando as cargas…' : 'Criar o lote e gerar as cargas'}
           </Button>
         </DialogFooter>
       </DialogContent>
