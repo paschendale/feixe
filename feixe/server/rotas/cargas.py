@@ -24,9 +24,19 @@ def _no_qgis(ctx, nome: str, *args) -> None:
         ctx.qgis(nome, *args)
 
 
-def _mudou(ctx, r: Dict) -> Dict:
+def _publicar(ctx, r: Dict) -> None:
     ctx.publicar("carga", {"id": r["carga"]["id"], "concluido": r["carga"]["concluido"], "progresso": r["progresso"]})
-    _no_qgis(ctx, "cargas_mudaram", r["progresso"])
+    if r.get("fila"):
+        # A fila passou a próxima folha: o supervisor vê no painel (Filas, Folhas) e as camadas mudam de dono.
+        ctx.publicar("fila", {"atribuida": r["fila"]})
+        ctx.publicar("lote", {"fila": r["fila"]["id_lote"]})
+
+
+def _mudou(ctx, r: Dict) -> Dict:
+    """Depois de uma escrita da execução no workspace: o painel fica sabendo e as camadas do workspace (C4) mostram já;
+    as da supervisão, na CCAR, esperam o push (`so_workspace`)."""
+    _publicar(ctx, r)
+    _no_qgis(ctx, "cargas_mudaram", r["progresso"], True)
     return r
 
 
@@ -34,10 +44,6 @@ def concluir(ctx, id_carga: int) -> Dict:
     ctx.exigir_pronto()
     with ctx.local() as ex:
         r = lc.concluir(ex, id_carga)
-    if r.get("fila"):
-        # A fila passou a próxima folha: o supervisor vê no painel (Filas, Folhas) e as camadas mudam de dono.
-        ctx.publicar("fila", {"atribuida": r["fila"]})
-        ctx.publicar("lote", {"fila": r["fila"]["id_lote"]})
     return _mudou(ctx, r)
 
 

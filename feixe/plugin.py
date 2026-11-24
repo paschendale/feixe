@@ -46,8 +46,8 @@ class FeixePlugin:
         self.broker = Broker()
         # Ações que as rotas pedem ao QGIS, por nome; cada item da fase B registra as suas. Rodam na thread principal.
         self.acoes_qgis = {
-            "montar_camadas": lambda eu, responsaveis, supervisao, execucao: camadas.montar(
-                self.amb, config.authcfg_id(self.amb), eu, responsaveis, supervisao, execucao
+            "montar_camadas": lambda eu, responsaveis, supervisao, execucao, gpkg: camadas.montar(
+                self.amb, config.authcfg_id(self.amb), eu, responsaveis, supervisao, execucao, gpkg
             ),
             "focar_carga": self.focar_carga,
             "ferramenta_folhas": self.ligar_ferramenta_folhas,
@@ -339,7 +339,8 @@ class FeixePlugin:
             self.estado["online"] = est["online"]
         self._publicar_estado({})
         if est.get("mudou"):
-            # As camadas do QGIS ainda leem a CCAR (o GPKG é do C4): o que o push levou passa a aparecer nelas.
+            # O push levou e o pull trouxe: as camadas do workspace mostram o que veio da CCAR (outra pessoa, o
+            # supervisor, a recusa que desfez o local) e as da supervisão, o que o push gravou lá.
             camadas.recarregar_cargas()
         for aviso in est.get("avisos") or []:
             self.iface.messageBar().pushMessage("Feixe", aviso, Qgis.Warning, 10)
@@ -539,13 +540,15 @@ class FeixePlugin:
             canvas.refresh()
         camada = camadas.camada_com_carga(carga["id"])
         if camada is not None:
-            f = next(camada.getFeatures(f'"id_carga_trabalho" = {int(carga["id"])}'), None)
+            f = next(camada.getFeatures(f'"id" = {int(carga["id"])}'), None)
             if f is not None:
                 canvas.flashFeatureIds(camada, [f.id()])
         self.mostrar_progresso(progresso)
 
-    def cargas_mudaram(self, progresso):
-        camadas.recarregar_cargas()
+    def cargas_mudaram(self, progresso, so_workspace=False):
+        """Uma rota mudou cargas: na execução (`so_workspace`), as camadas do workspace mostram já, online ou offline;
+        na supervisão (na CCAR), todas releem."""
+        camadas.recarregar_cargas(so_workspace)
         self.mostrar_progresso(progresso)
 
     def mostrar_progresso(self, progresso):
@@ -659,6 +662,8 @@ class FeixePlugin:
             self.iface.messageBar().pushMessage("Feixe", f"Não foi possível montar as camadas: {e}", Qgis.Critical, 8)
             return
         self.barra.mostrar_modo(r.get("modo"))
+        for aviso in r.get("avisos") or []:
+            self.iface.messageBar().pushMessage("Feixe", aviso, Qgis.Warning, 10)
         dicas = getattr(self.iface, "actionMapTips", lambda: None)()
         if dicas is not None and not dicas.isChecked():
             dicas.trigger()  # as camadas do Feixe têm dica ao passar o mouse (D-102)
