@@ -74,6 +74,7 @@ class FeixePlugin:
         # de rede a acorda) e no primeiro uso. O resultado volta à barra pela thread principal, via sinal, e ao painel
         # pelo SSE.
         self._ws = None
+        self._ws_trava = threading.RLock()
         self.sinc = Sincronizacao(
             abrir_workspace=self.workspace,
             remota=lambda: db.transacao(self.amb, timeout_conexao=5),
@@ -237,17 +238,20 @@ class FeixePlugin:
         cred = config.credenciais(self.amb)
         if not cred:
             raise RuntimeError("usuário e senha ainda não configurados")
-        if self._ws is not None and self._ws.usuario == cred[0]:
+        with self._ws_trava:  # as threads do servidor HTTP e a da sincronização pedem ao mesmo tempo
+            if self._ws is not None and self._ws.usuario == cred[0]:
+                return self._ws
+            self._fechar_workspace()
+            uf = wsmod.uf_gravada(wsmod.caminho(self.amb.nome, cred[0]))
+            if not uf:
+                uf = (self.ctx.eu() if self.ctx else {}).get("uf")  # pode abrir o workspace (_guardar_eu)
+                if self._ws is not None and self._ws.usuario == cred[0]:
+                    return self._ws
+            if not uf:
+                raise RuntimeError("a conta não tem UF de lotação no SGBC: sem ela não há escopo para sincronizar")
+            self._ws = wsmod.Workspace.abrir(self.amb.nome, cred[0], uf)
+            self.sinc.usar(self._ws)
             return self._ws
-        self._fechar_workspace()
-        uf = wsmod.uf_gravada(wsmod.caminho(self.amb.nome, cred[0]))
-        if not uf:
-            uf = (self.ctx.eu() if self.ctx else {}).get("uf")
-        if not uf:
-            raise RuntimeError("a conta não tem UF de lotação no SGBC: sem ela não há escopo para sincronizar")
-        self._ws = wsmod.Workspace.abrir(self.amb.nome, cred[0], uf)
-        self.sinc.usar(self._ws)
-        return self._ws
 
     def _guardar_eu(self, eu):
         """A identidade veio da CCAR: fica no workspace (meta), para a execução abrir offline com os mesmos papéis.
@@ -255,15 +259,23 @@ class FeixePlugin:
         cred = config.credenciais(self.amb)
         if not cred or eu.get("conta") != cred[0] or not eu.get("uf"):
             return
-        if self._ws is not None and self._ws.uf != eu["uf"]:
-            self._fechar_workspace()
-        if self._ws is None:
-            self._ws = wsmod.Workspace.abrir(self.amb.nome, cred[0], eu["uf"])
-            self.sinc.usar(self._ws)
-        with self._ws.transacao() as ex:
-            ex.definir_meta("eu", json.dumps(eu, ensure_ascii=False, default=str))
+        with self._ws_trava:
+            if self._ws is not None and (self._ws.uf != eu["uf"] or self._ws.usuario != cred[0]):
+                self._fechar_workspace()
+            if self._ws is None:
+                self._ws = wsmod.Workspace.abrir(self.amb.nome, cred[0], eu["uf"])
+                self.sinc.usar(self._ws)
+            with self._ws.transacao() as ex:
+                ex.definir_meta("eu", json.dumps(eu, ensure_ascii=False, default=str))
 
     def _eu_guardado(self):
+        """A identidade guardada no workspace da conta. Só abre um workspace que já existe (pela UF gravada): sem ele
+        não há o que ler, e ir ao banco aqui seria pedir à CCAR que não respondeu."""
+        cred = config.credenciais(self.amb)
+        if not cred:
+            return None
+        if self._ws is None and not wsmod.uf_gravada(wsmod.caminho(self.amb.nome, cred[0])):
+            return None
         try:
             ws = self.workspace()
         except Exception:  # noqa: BLE001 - sem workspace, sem identidade guardada
