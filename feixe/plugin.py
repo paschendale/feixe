@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 
@@ -13,7 +14,6 @@ from qgis.PyQt.QtWidgets import QLabel, QMessageBox
 from .core import ambiente as ambmod
 from .core import camadas, config, db, dispatch, log
 from .core.dados import ErroDados
-from .core.dados import cargas as cargas_dados
 from .core.versao import raiz_plugin, versao_plugin
 from .server.api import Contexto, ErroApi, criar_roteador
 from .server.http import ServidorLocal
@@ -22,6 +22,7 @@ from .server.rotas import cargas as rotas_cargas
 from .server.sse import Broker
 from .sync import workspace as wsmod
 from .sync.sincronizar import Sincronizacao, hora_local
+from .sync.trabalhador import Trabalhador
 from .ui.barra import BarraFeixe, DialogoCredenciais
 from .ui.ferramentas import FerramentaFolha, SemSelecao, selecao_wkt
 
@@ -68,15 +69,19 @@ class FeixePlugin:
         self._passagem_atual = (None, None)  # (id_lote_etapa, id_lote) da carga atual
         self.sinais = _Sinais()
         self.estado = {"online": False, "usuario": None, "detalhe": "não verificado"}
-        # Sincronização (C2): push (C3) e pull do workspace da conta. Roda na thread de quem pede (rota, botão); o
-        # resultado volta à barra pela thread principal, via sinal, e ao painel pelo SSE.
+        # Sincronização (C2, C3): push e pull do workspace da conta. A execução lê e grava no workspace, e uma thread
+        # de segundo plano (`Trabalhador`) sincroniza depois de cada escrita (com debounce), a cada minuto (o QTimer
+        # de rede a acorda) e no primeiro uso. O resultado volta à barra pela thread principal, via sinal, e ao painel
+        # pelo SSE.
         self._ws = None
         self.sinc = Sincronizacao(
             abrir_workspace=self.workspace,
             remota=lambda: db.transacao(self.amb, timeout_conexao=5),
             alcancavel=lambda: db.alcancavel(self.amb),
             ao_terminar=self._sincronizacao_terminou,
+            ao_comecar=lambda est: self.broker.publicar("sincronizacao", est),
         )
+        self.trabalhador = Trabalhador(self._sincronizar_fundo)
         self.sincronizacao = {}
         self._timer = QTimer()
         self._timer.setInterval(60_000)
@@ -111,6 +116,7 @@ class FeixePlugin:
         self.sinais.sincronizacao_mudou.connect(self._aplicar_sincronizacao)
         self._abrir_workspace_gravado()
         self.iniciar_servidor()
+        self.trabalhador.iniciar()
         self.verificar_rede()
         self._timer.start()
         if config.credenciais(self.amb) is None:
@@ -118,6 +124,7 @@ class FeixePlugin:
 
     def unload(self):
         self._timer.stop()
+        self.trabalhador.parar()
         self.fim_folhas()
         if self.servidor:
             self.servidor.parar()
@@ -149,6 +156,11 @@ class FeixePlugin:
             sincronizar=self.sinc.sincronizar,
             publicar=self.broker.publicar,
             qgis=self.acao_qgis,
+            workspace=self.workspace,
+            acordar=self.trabalhador.acordar,
+            online=lambda: self.sinc.online,
+            eu_guardado=self._eu_guardado,
+            guardar_eu=self._guardar_eu,
         )
         self.ctx = ctx
         pasta = os.path.join(raiz_plugin(), "web", "dist")
@@ -185,6 +197,8 @@ class FeixePlugin:
         if self.ctx:
             self.ctx.esquecer_eu()
         self._fechar_workspace()  # outra conta, outro workspace
+        self.sinc.marcar_rede(True)  # a credencial acabou de ser testada contra a CCAR
+        self.trabalhador.acordar(0)
         r = dlg.resultado_teste or {}
         schema = "sim" if r.get("schema_feixe") else "não"
         self._publicar_estado(
@@ -217,20 +231,46 @@ class FeixePlugin:
 
     # --- workspace e sincronização (C2) ----------------------------------------------------------
     def workspace(self):
-        """O workspace da conta conectada, aberto uma vez. A UF vem da lotação no SGBC (precisa do banco); offline,
-        da que ficou gravada no arquivo (`_abrir_workspace_gravado`)."""
+        """O workspace da conta conectada, aberto uma vez. Se o arquivo já existe, abre com a UF gravada nele (sem
+        banco: a execução funciona offline); senão, com a UF da lotação no SGBC (precisa da CCAR, uma vez). Lotação
+        trocada no SGBC recria o workspace na próxima vez que a identidade vier da CCAR (`_guardar_eu`)."""
         cred = config.credenciais(self.amb)
         if not cred:
             raise RuntimeError("usuário e senha ainda não configurados")
         if self._ws is not None and self._ws.usuario == cred[0]:
             return self._ws
         self._fechar_workspace()
-        uf = (self.ctx.eu() if self.ctx else {}).get("uf")
+        uf = wsmod.uf_gravada(wsmod.caminho(self.amb.nome, cred[0]))
+        if not uf:
+            uf = (self.ctx.eu() if self.ctx else {}).get("uf")
         if not uf:
             raise RuntimeError("a conta não tem UF de lotação no SGBC: sem ela não há escopo para sincronizar")
         self._ws = wsmod.Workspace.abrir(self.amb.nome, cred[0], uf)
         self.sinc.usar(self._ws)
         return self._ws
+
+    def _guardar_eu(self, eu):
+        """A identidade veio da CCAR: fica no workspace (meta), para a execução abrir offline com os mesmos papéis.
+        UF diferente da do workspace (lotação mudou) reabre, e o workspace é recriado levando a outbox (D-114)."""
+        cred = config.credenciais(self.amb)
+        if not cred or eu.get("conta") != cred[0] or not eu.get("uf"):
+            return
+        if self._ws is not None and self._ws.uf != eu["uf"]:
+            self._fechar_workspace()
+        if self._ws is None:
+            self._ws = wsmod.Workspace.abrir(self.amb.nome, cred[0], eu["uf"])
+            self.sinc.usar(self._ws)
+        with self._ws.transacao() as ex:
+            ex.definir_meta("eu", json.dumps(eu, ensure_ascii=False, default=str))
+
+    def _eu_guardado(self):
+        try:
+            ws = self.workspace()
+        except Exception:  # noqa: BLE001 - sem workspace, sem identidade guardada
+            return None
+        with ws.leitura() as ex:
+            texto = ex.meta("eu")
+        return json.loads(texto) if texto else None
 
     def _abrir_workspace_gravado(self):
         """Ao abrir o QGIS: se a conta já tem workspace, abre com a UF gravada nele, sem ir ao banco, para o estado
@@ -255,23 +295,30 @@ class FeixePlugin:
             self._ws = None
 
     def sincronizar_agora(self):
-        """Botão da barra: sincroniza numa thread (a rede pode demorar); o resultado volta pelo sinal."""
+        """Botão da barra: a thread de segundo plano sincroniza já; o resultado volta pelo sinal."""
         if config.credenciais(self.amb) is None:
             self.pedir_credenciais()
             return
         if not self.servidor:
             self.iniciar_servidor()
+        self.trabalhador.acordar(0)
 
-        def rodar():
-            r = self.sinc.sincronizar()
-            if r["estado"] == "erro":
-                log.erro(f"sincronizar: {r.get('mensagem')}")
-
-        threading.Thread(target=rodar, name="feixe-sincronizar", daemon=True).start()
+    def _sincronizar_fundo(self):
+        """Na thread do `Trabalhador`: sem conta configurada, nada a fazer."""
+        if config.credenciais(self.amb) is None:
+            return {"estado": "sem_conta"}
+        r = self.sinc.sincronizar()
+        if r["estado"] == "erro":
+            log.erro(f"sincronizar: {r.get('mensagem')}")
+        return r
 
     def _sincronizacao_terminou(self, est):
-        """Na thread que sincronizou: o painel fica sabendo pelo SSE e a barra pela thread principal."""
+        """Na thread que sincronizou: o painel fica sabendo pelo SSE e a barra pela thread principal. Se algo mudou
+        (o push aplicou, o pull trouxe linhas), as telas recarregam pelos eventos de sempre."""
         self.broker.publicar("sincronizacao", est)
+        if est.get("mudou"):
+            self.broker.publicar("carga", {"sincronizacao": True})
+            self.broker.publicar("lote", {"sincronizacao": True})
         self.sinais.sincronizacao_mudou.emit(est)
 
     def _aplicar_sincronizacao(self, est):
@@ -279,6 +326,11 @@ class FeixePlugin:
         if est.get("online") is not None:
             self.estado["online"] = est["online"]
         self._publicar_estado({})
+        if est.get("mudou"):
+            # As camadas do QGIS ainda leem a CCAR (o GPKG é do C4): o que o push levou passa a aparecer nelas.
+            camadas.recarregar_cargas()
+        for aviso in est.get("avisos") or []:
+            self.iface.messageBar().pushMessage("Feixe", aviso, Qgis.Warning, 10)
 
     def verificar_rede(self):
         """Checagem barata (TCP) em thread própria; o resultado volta pela thread principal via sinal."""
@@ -286,10 +338,12 @@ class FeixePlugin:
         def rodar():
             ok = db.alcancavel(self.amb)
             detalhe = f"{self.amb.descricao_banco} {'responde' if ok else 'não responde'}"
-            # Por enquanto o teste de rede só atualiza o estado; sincronizar sozinho em segundo plano é do C3.
             self.sinc.marcar_rede(ok)
             self.sinais.estado_mudou.emit({"online": ok, "detalhe": detalhe})
             self.sinais.sincronizacao_mudou.emit(self.sinc.estado())
+            # O periódico: a cada minuto (e ao abrir o QGIS) a thread de segundo plano sincroniza. Offline, ela só
+            # testa a rede e volta; as pendências esperam.
+            self.trabalhador.acordar(0)
 
         threading.Thread(target=rodar, name="feixe-rede", daemon=True).start()
 
@@ -328,8 +382,9 @@ class FeixePlugin:
             self.iniciar_servidor()
         return True
 
-    def _executar(self, fn, *args):
-        """Roda uma ação da barra pelo mesmo caminho da API; recusa vira aviso na barra de mensagens."""
+    def _executar(self, fn, *args, falhou=None):
+        """Roda uma ação da barra pelo mesmo caminho da API; recusa vira aviso na barra de mensagens (e um item em
+        `falhou`, para quem precisa separar "deu errado" de "voltou nada")."""
         try:
             return fn(self.ctx, *args)
         except (ErroApi, ErroDados) as e:
@@ -337,6 +392,8 @@ class FeixePlugin:
         except Exception as e:  # noqa: BLE001
             log.erro(f"{getattr(fn, '__name__', fn)}: {e}")
             self.iface.messageBar().pushMessage("Feixe", f"Não deu certo: {e}", Qgis.Critical, 8)
+        if falhou is not None:
+            falhou.append(True)
         return None
 
     def _para_execucao(self) -> bool:
@@ -414,11 +471,9 @@ class FeixePlugin:
                 "Feixe", "Nenhuma carga atual para pular: use Próxima carga.", Qgis.Info, 5
             )
             return
-        try:
-            with self.ctx.tx() as ex:
-                carga = cargas_dados.uma(ex, int(id_carga))
-        except Exception as e:  # noqa: BLE001
-            self.iface.messageBar().pushMessage("Feixe", f"Não deu certo: {e}", Qgis.Critical, 8)
+        falhou = []
+        carga = self._executar(rotas_cargas.uma, int(id_carga), falhou=falhou)
+        if falhou:
             return
         if carga is None or carga["concluido"]:
             self.iface.messageBar().pushMessage("Feixe", "Só dá para pular carga pendente.", Qgis.Info, 5)

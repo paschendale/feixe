@@ -1,4 +1,8 @@
-"""B2: minhas cargas. As funções de módulo servem às rotas e aos botões da barra do Feixe (mesmo caminho)."""
+"""B2: minhas cargas. As funções de módulo servem às rotas e aos botões da barra do Feixe (mesmo caminho).
+
+Execução (minhas cargas, resumo, próxima, concluir, desfazer, zoom): sobre o workspace local (C3, D-111), online ou
+offline, com `core/dados/local`; cada escrita acorda a sincronização em segundo plano. Supervisão (gerar, atribuir,
+dividir, descartar, equipe): na CCAR, como antes."""
 
 from __future__ import annotations
 
@@ -7,6 +11,7 @@ from typing import Dict, Optional
 
 from ...core.dados import ErroDados
 from ...core.dados import cargas as dc
+from ...core.dados.local import cargas as lc
 from ..api import ErroApi, campo, inteiro
 
 # Quem pode ter carga atribuída. Consulta só olha.
@@ -26,8 +31,9 @@ def _mudou(ctx, r: Dict) -> Dict:
 
 
 def concluir(ctx, id_carga: int) -> Dict:
-    with ctx.tx() as ex:
-        r = dc.concluir(ex, id_carga)
+    ctx.exigir_pronto()
+    with ctx.local() as ex:
+        r = lc.concluir(ex, id_carga)
     if r.get("fila"):
         # A fila passou a próxima folha: o supervisor vê no painel (Filas, Folhas) e as camadas mudam de dono.
         ctx.publicar("fila", {"atribuida": r["fila"]})
@@ -36,17 +42,26 @@ def concluir(ctx, id_carga: int) -> Dict:
 
 
 def desfazer(ctx, id_carga: int) -> Dict:
-    with ctx.tx() as ex:
-        r = dc.desfazer(ex, id_carga)
+    ctx.exigir_pronto()
+    with ctx.local() as ex:
+        r = lc.desfazer(ex, id_carga)
     return _mudou(ctx, r)
 
 
+def uma(ctx, id_carga: int) -> Optional[Dict]:
+    """A carga, do workspace (para o pular da barra)."""
+    ctx.exigir_pronto()
+    with ctx.leitura() as ex:
+        return lc.uma(ex, id_carga)
+
+
 def focar(ctx, id_carga: int) -> Dict:
-    with ctx.tx() as ex:
-        carga = dc.uma(ex, id_carga)
+    ctx.exigir_pronto()
+    with ctx.leitura() as ex:
+        carga = lc.uma(ex, id_carga)
         if not carga:
             raise ErroApi(404, "carga não encontrada")
-        progresso = dc.progresso(ex, carga["id_lote_etapa"])
+        progresso = lc.progresso(ex, carga["id_lote_etapa"])
     carga.pop("responsavel", None)
     ctx.qgis("focar_carga", carga, progresso)
     return {"carga": carga, "progresso": progresso}
@@ -54,9 +69,10 @@ def focar(ctx, id_carga: int) -> Dict:
 
 def proxima(ctx, referencia: Optional[int] = None, excluir=None, id_lote: Optional[int] = None) -> Dict:
     """Próxima carga pendente; no QGIS, vira a carga atual. Sem pendentes: carga nula."""
-    with ctx.tx() as ex:
-        carga = dc.proxima(ex, referencia, excluir, id_lote)
-        progresso = dc.progresso(ex, carga["id_lote_etapa"]) if carga else None
+    ctx.exigir_pronto()
+    with ctx.leitura() as ex:
+        carga = lc.proxima(ex, referencia, excluir, id_lote)
+        progresso = lc.progresso(ex, carga["id_lote_etapa"]) if carga else None
     if carga:
         _no_qgis(ctx, "focar_carga", carga, progresso)
     return {"carga": carga, "progresso": progresso}
@@ -183,13 +199,19 @@ def registrar(r, ctx) -> None:
         concluido = {"pendente": False, "concluida": True}.get(situacao or "")
         if situacao and concluido is None:
             raise ErroApi(400, "situacao deve ser pendente ou concluida")
-        with ctx.tx() as ex:
-            return 200, {"itens": dc.minhas(ex, inteiro(le, "lote_etapa") if le else None, concluido)}
+        id_le = inteiro(le, "lote_etapa") if le else None
+        if ctx.preparando():
+            return 200, {"itens": [], "preparando": True}
+        with ctx.leitura() as ex:
+            return 200, {"itens": lc.minhas(ex, id_le, concluido)}
 
     @r.rota("GET", "/api/cargas/resumo", exige=EXECUTORES)
     def _resumo(req):
-        with ctx.tx() as ex:
-            return 200, dc.resumo(ex)
+        if ctx.preparando():
+            vazio = {"concluidas": 0, "desde": None, "pendentes": 0, "folhas_pendentes": 0, "passagens": []}
+            return 200, {**vazio, "preparando": True}
+        with ctx.leitura() as ex:
+            return 200, lc.resumo(ex)
 
     @r.rota("POST", "/api/cargas/proxima", exige=EXECUTORES)
     def _proxima(req):

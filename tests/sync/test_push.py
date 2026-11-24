@@ -451,3 +451,55 @@ def test_consultas_do_push_rodam_no_96(tmp_path):
     finally:
         conn.rollback()
         conn.close()
+
+
+def test_sincronizar_de_ponta_a_ponta_como_a_conta(ccar, cen, tmp_path):
+    """Como no plugin: a conta loga com a própria role (membro do grupo de dev que tem os GRANTs gerados), a
+    sincronização confere o `current_user`, a primeira rodada faz o pull inicial e uma conclusão local vai para a CCAR
+    pela thread de segundo plano, sem a pessoa pedir."""
+    import time
+
+    from feixe.sync.sincronizar import Sincronizacao
+    from feixe.sync.trabalhador import Trabalhador
+
+    senha = uuid.uuid4().hex
+    cen.executar(
+        f"DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{EU}') THEN "
+        f"CREATE ROLE {EU} LOGIN; END IF; END $$"
+    )
+    cen.executar(f"ALTER ROLE {EU} LOGIN PASSWORD %s", (senha,))
+    cen.executar(f"GRANT feixe_dev_usuarios TO {EU}")
+    dsn = psycopg2.extensions.parse_dsn(url("FEIXE_CCAR"))
+    conn = psycopg2.connect(**{**dsn, "user": EU, "password": senha})
+    ws = _ws(tmp_path, "conta")
+    trab = None
+    try:
+
+        @contextlib.contextmanager
+        def remota():
+            with conn, conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
+                yield ExecutorPg(cur)
+
+        terminou = []
+        sinc = Sincronizacao(lambda: ws, remota, alcancavel=lambda: True, ao_terminar=terminou.append)
+        r = sinc.sincronizar()
+        assert r["estado"] == "ok" and r["push"] is None and r["pull"]["primeira"] is True
+        with ws.transacao() as ex:
+            lc.concluir(ex, cen.minhas[0])
+        trab = Trabalhador(sinc.sincronizar, atraso=0.05).iniciar()
+        trab.acordar()
+        fim = time.monotonic() + 30
+        while trab.rodadas == 0 and time.monotonic() < fim:
+            time.sleep(0.05)
+        assert trab.ultimo["estado"] == "ok", trab.ultimo
+        assert trab.ultimo["push"]["resultados"]["aplicado"] == 1
+        assert cen.linha("carga_trabalho", cen.minhas[0])["concluido"] is True
+        assert sinc.estado()["pendentes"] == 0 and terminou[-1]["mudou"] is True
+        (log,) = cen.logs(cen.linha("carga_trabalho", cen.minhas[0])["uuid"])
+        assert log["resultado"] == "aplicado"
+    finally:
+        if trab is not None:
+            trab.parar()
+        ws.fechar()
+        conn.close()
+        cen.executar(f"DROP ROLE IF EXISTS {EU}")

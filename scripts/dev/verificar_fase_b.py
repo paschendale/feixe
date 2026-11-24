@@ -267,11 +267,16 @@ def b1(amb, usuario, senha):
 
 @secao("b2")
 def b2(amb, usuario, senha):
-    """Minhas cargas: próxima e concluir pelo caminho da barra, com a carga atual, o estilo e a recarga da camada."""
+    """Minhas cargas: próxima e concluir pelo caminho da barra, com a carga atual, o estilo e a recarga da camada.
+    Desde o C3 a execução grava no workspace e a sincronização leva à CCAR: aqui ela roda na hora, no lugar da thread
+    de segundo plano do plugin."""
+    import tempfile
+
     from feixe.core import camadas
-    from feixe.core.dados import cargas as dc
     from feixe.server.api import Contexto
     from feixe.server.rotas import cargas as rc
+    from feixe.sync.sincronizar import Sincronizacao
+    from feixe.sync.workspace import Workspace
     from qgis.core import QgsExpressionContextUtils, QgsProject, QgsRenderContext
 
     copias = []
@@ -292,7 +297,10 @@ def b2(amb, usuario, senha):
                 (u, o["id_lote_etapa"], o["id_atividade"], o["uf"], o["geom"]),
             )
             copias.append(u)
+    ws = Workspace.abrir(amb.nome, usuario, "DF", raiz=tempfile.mkdtemp(prefix="feixe-b2-"))
+    sinc = Sincronizacao(lambda: ws, lambda: db.transacao(amb, usuario, senha, timeout_conexao=5))
     try:
+        assert sinc.sincronizar()["estado"] == "ok"
         camadas.montar(amb, config.authcfg_id(amb), {"uf": "DF", "papeis": ["apm"]}, [], [], [])
         focadas = []
         ctx = Contexto(
@@ -301,6 +309,7 @@ def b2(amb, usuario, senha):
                 "focar_carga": lambda c, p: (camadas.definir_atual(c["id"]), focadas.append(c["id"])),
                 "cargas_mudaram": lambda p: camadas.recarregar_cargas(),
             }[nome](*a),
+            workspace=lambda: ws,
         )
         r = rc.proxima(ctx)
         assert r["carga"] is not None and camadas.carga_atual() == r["carga"]["id"] == focadas[-1]
@@ -329,18 +338,23 @@ def b2(amb, usuario, senha):
         alvo = camadas.carga_atual()
         r = rc.concluir(ctx, alvo)
         assert r["progresso"]["concluidas"] == 1 and r["progresso"]["total"] == 4, r["progresso"]
+        s = sinc.sincronizar()
+        assert s["estado"] == "ok" and s["push"]["resultados"]["aplicado"] == 1, s
+        camadas.recarregar_cargas()
         feicao = next(minhas.getFeatures(f'"id_carga_trabalho" = {alvo}'))
         assert feicao["concluido"] is True or feicao["concluido"] == 1, feicao["concluido"]
-        ok("concluir grava, recarrega a camada e devolve o progresso 1/4")
+        ok("concluir grava no workspace, a sincronização leva à CCAR e a camada mostra; progresso 1/4")
         seguinte = rc.proxima(ctx, alvo)["carga"]
         assert seguinte["id"] != alvo and not seguinte["concluido"] and camadas.carga_atual() == seguinte["id"]
         ok("a seguinte é outra carga pendente e vira a atual")
-        with db.transacao(amb, usuario, senha) as ex:
-            assert not dc.desfazer(ex, alvo)["carga"]["concluido"]
-        ok("desfazer dentro de 24 horas")
+        assert not rc.desfazer(ctx, alvo)["carga"]["concluido"]
+        assert sinc.sincronizar()["push"]["resultados"]["aplicado"] == 1
+        ok("desfazer dentro de 24 horas, e a CCAR recebe")
     finally:
         QgsProject.instance().clear()
+        ws.fechar()
         with db.transacao(amb, usuario, senha) as ex:
+            ex.executar("DELETE FROM mapcartacomp.sync_log WHERE uuid::text = ANY(%s)", (copias,))
             ex.executar("DELETE FROM mapcartacomp.carga_trabalho WHERE uuid::text = ANY(%s)", (copias,))
 
 

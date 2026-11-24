@@ -6,6 +6,7 @@ from typing import Dict, List
 
 from ...core.dados import fluxos as df
 from ...core.dados import painel as dp
+from ...core.dados.local import cargas as lc
 from ..api import ErroApi, campo
 from .cargas import EXECUTORES, preparar
 from .lotes import uf_de
@@ -49,8 +50,11 @@ def registrar(r, ctx) -> None:
         fuso = req.query.get("fuso") or "America/Sao_Paulo"
         if len(fuso) > 64 or not all(ch.isalnum() or ch in "/_+-" for ch in fuso):
             raise ErroApi(400, "fuso inválido")
-        with ctx.tx() as ex:
-            return 200, dp.execucao(ex, fuso)
+        # Execução: do workspace, como Minhas cargas (C3).
+        if ctx.preparando():
+            return 200, {"por_dia": [], "preparando": True}
+        with ctx.leitura() as ex:
+            return 200, lc.execucao(ex, fuso)
 
     @r.rota("POST", "/api/lotes/proxima_etapa", exige=("supervisor",))
     def _proximas(req):

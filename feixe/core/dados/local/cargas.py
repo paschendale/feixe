@@ -8,11 +8,12 @@ supervisor é recusado; concluir de novo não faz nada; desfazer só pelo respon
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 from typing import Dict, List, Optional
 
 from .. import ErroDados
-from . import SQL_ABERTAS, converter, rotulo
+from . import SQL_ABERTAS, converter, data, rotulo
 
 JANELA_DESFAZER_HORAS = 24
 
@@ -186,6 +187,32 @@ def proxima(
         return (mesma, dist is None, dist or 0.0, c["folha_revisao"] or "", c["id"])
 
     return _carga(min(candidatas, key=chave))
+
+
+def _fuso(nome: str) -> dt.tzinfo:
+    """O fuso de quem olha (IANA). O Python do QGIS no Windows pode não ter a base de fusos (`tzdata`): aí vale o fuso
+    da própria estação, que é o de quem está diante dela."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(nome)
+    except Exception:  # noqa: BLE001
+        return dt.datetime.now().astimezone().tzinfo
+
+
+def execucao(ex, fuso: str, dias: int = 14) -> Dict:
+    """Minhas conclusões por dia no fuso de quem olha: a versão local de `painel.execucao`."""
+    tz = _fuso(fuso)
+    desde = (ex.agora - dt.timedelta(days=dias + 1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    linhas = ex.todos(
+        "SELECT concluido_em FROM carga_trabalho WHERE responsavel = ? AND concluido AND concluido_em > ?",
+        (ex.usuario, desde),
+    )
+    por_dia: Dict[dt.date, int] = {}
+    for r in linhas:
+        dia = data(r["concluido_em"]).astimezone(tz).date()
+        por_dia[dia] = por_dia.get(dia, 0) + 1
+    return {"por_dia": [{"dia": d.isoformat(), "n": n} for d, n in sorted(por_dia.items())]}
 
 
 # --- pular carga (B12, D-102) ---------------------------------------------------------------------------------------
