@@ -281,7 +281,7 @@ def _gravar_espelho(wx, nome: str, linhas: List[Dict], no_escopo: set, cont: Dic
             continue
         if u in versoes and versoes[u] == iso_exato(r["atualizado_em"]):
             continue
-        cont["inseridas" if wx.gravar_remoto(nome, r) == "insert" else "atualizadas"] += 1
+        cont["inseridas" if wx.gravar_remoto(nome, r, nova=u not in versoes) == "insert" else "atualizadas"] += 1
     for u in versoes:
         if u in no_escopo:
             continue

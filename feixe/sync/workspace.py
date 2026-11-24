@@ -278,11 +278,11 @@ class ExecutorLocal(Executor):
 
     # --- escrita vinda da CCAR (pull, C2), sem outbox ---
 
-    def gravar_remoto(self, tabela: str, linha: Dict[str, Any]) -> str:
+    def gravar_remoto(self, tabela: str, linha: Dict[str, Any], nova: bool = False) -> str:
         """Grava a linha como veio da CCAR: UPDATE pela chave e, se não havia, INSERT. Nas tabelas do espelho a linha
         fica limpa (`sujo` = 0) e `versao_base` = o `atualizado_em` remoto. `geom` vem em WKB (`ST_AsBinary`).
         Não olha se a linha local tem alteração pendente: quem decide isso é o pull/push (C2/C3). Volta 'update' ou
-        'insert'."""
+        'insert'. `nova`: quem chama já sabe que a linha não está no workspace (vai direto ao INSERT)."""
         t = esquema.TABELAS[tabela]
         vals = _valores(t, linha)
         if t.sincroniza:
@@ -295,14 +295,19 @@ class ExecutorLocal(Executor):
         sets = [c for c in vals if c not in chaves]
         onde = " AND ".join(f"{c} = ?" for c in chaves)
         n = 0
-        if sets:
+        if sets and not nova:
             n = self.executar(
                 f"UPDATE {tabela} SET {', '.join(f'{c} = ?' for c in sets)} WHERE {onde}",
                 (*(vals[c] for c in sets), *(vals[c] for c in chaves)),
             )
         if n:
             return "update"
-        if not sets and self.um(f"SELECT 1 AS x FROM {tabela} WHERE {onde}", tuple(vals[c] for c in chaves)):
+        achou = (
+            not sets
+            and not nova
+            and self.um(f"SELECT 1 AS x FROM {tabela} WHERE {onde}", tuple(vals[c] for c in chaves))
+        )
+        if achou:
             return "update"
         self.executar(
             f"INSERT INTO {tabela} ({', '.join(vals)}) VALUES ({', '.join('?' * len(vals))})", tuple(vals.values())
