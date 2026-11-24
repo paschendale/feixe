@@ -40,7 +40,8 @@ class Sincronizacao:
     - `remota()`: gerenciador de contexto com um executor psycopg2 numa transação nova na CCAR;
     - `alcancavel()`: teste barato de rede (TCP), para separar "sem rede" de "senha errada";
     - `ao_terminar(estado)`: chamado depois de cada sincronização, na thread que sincronizou (o plugin manda para a
-      thread principal por sinal e publica no SSE)."""
+      thread principal por sinal e publica no SSE), com `avisos` (recusas, conflitos perdidos, relógio) e `mudou`;
+    - `ao_comecar(estado)`: chamado quando uma sincronização começa (o indicador do painel mostra "sincronizando")."""
 
     def __init__(
         self,
@@ -48,11 +49,13 @@ class Sincronizacao:
         remota: Callable[[], ContextManager[Any]],
         alcancavel: Optional[Callable[[], bool]] = None,
         ao_terminar: Optional[Callable[[Dict], None]] = None,
+        ao_comecar: Optional[Callable[[Dict], None]] = None,
     ):
         self._abrir_workspace = abrir_workspace
         self._remota = remota
         self._alcancavel = alcancavel
         self._ao_terminar = ao_terminar
+        self._ao_comecar = ao_comecar
         self._trava = threading.Lock()
         self._em_andamento = False
         self._online: Optional[bool] = None
@@ -102,6 +105,8 @@ class Sincronizacao:
         self._ultima_tentativa = iso_exato(agora())
         r: Dict[str, Any] = {"estado": "ok", "mensagem": None, "push": None, "pull": None}
         try:
+            if self._ao_comecar is not None:
+                self._ao_comecar(self.estado())
             if self._alcancavel is not None and not self._alcancavel():
                 r.update(estado="offline", mensagem="a CCAR não responde")
             else:
