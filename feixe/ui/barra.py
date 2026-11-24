@@ -51,7 +51,7 @@ MODOS: List[Tuple[str, str, str, str]] = [
 
 ESTADOS = {
     "conectado": ("#3FA45B", "Conectado"),
-    "fora": ("#F0A040", "Sem resposta da CCAR"),
+    "fora": ("#F0A040", "Sem a CCAR (offline)"),
     "sem_conta": ("#9AA0A6", "Usuário e senha não configurados"),
 }
 
@@ -232,8 +232,12 @@ class BarraFeixe(QToolBar):
             linhas.append(detalhe)
         if self._sincronizacao:
             linhas.append(self._sincronizacao)
+        if estado == "fora":
+            linhas.append(
+                "Minhas cargas continuam funcionando: o que você fizer fica guardado e vai quando a conexão voltar."
+            )
         if pendentes:
-            linhas.append(f"{pendentes} alterações locais a enviar")
+            linhas.append(f"{pendentes} alteração a enviar" if pendentes == 1 else f"{pendentes} alterações a enviar")
         clique = "trocar de usuário" if estado != "sem_conta" else "informar usuário e senha"
         linhas.append(f"Clique para {clique}.")
         self._dicas[self.acao_conta] = ("Conectar ao Feixe", "<br>".join(linhas))

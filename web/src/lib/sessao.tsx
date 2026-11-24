@@ -17,7 +17,7 @@ type Sessao = {
 const Ctx = createContext<Sessao | null>(null)
 
 // Eventos que o plugin publica. Cada item da fase B acrescenta os seus aqui.
-export const EVENTOS = ['estado', 'configuracao', 'carga', 'lote', 'fluxo', 'atividade', 'fila', 'qgis', 'sincronizacao']
+export const EVENTOS = ['estado', 'configuracao', 'carga', 'lote', 'fluxo', 'atividade', 'fila', 'qgis', 'sincronizacao', 'rede']
 
 export function SessaoProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status | null>(null)

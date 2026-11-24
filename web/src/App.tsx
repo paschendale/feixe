@@ -18,8 +18,10 @@ function BotaoCamadas() {
   async function montar() {
     setOcupado(true)
     try {
-      const r = await enviar<{ camadas: { nome: string; feicoes: number }[] }>('/api/camadas/montar')
+      const r = await enviar<{ camadas: { nome: string; feicoes: number }[]; avisos?: string[] }>('/api/camadas/montar')
       avisar('Camadas no QGIS: ' + r.camadas.map((c) => `${c.nome} (${c.feicoes})`).join(', '))
+      // Sem a CCAR, o grupo vem só com a Execução (C4): o porquê aparece também aqui.
+      for (const a of r.avisos ?? []) avisar(a, 'erro')
     } catch (e) {
       avisar((e as Error).message, 'erro')
     } finally {
@@ -68,8 +70,13 @@ function Sincronia() {
   const s = status?.sincronizacao
   // O que o push recusou ou perdeu num conflito (e o relógio errado) também aparece aqui, não só no QGIS.
   useEffect(() => {
-    if (ultimo?.evento !== 'sincronizacao') return
-    for (const a of (ultimo.dados.avisos as string[] | undefined) ?? []) avisar(a, 'erro')
+    if (ultimo?.evento === 'sincronizacao') {
+      for (const a of (ultimo.dados.avisos as string[] | undefined) ?? []) avisar(a, 'erro')
+    }
+    // A troca de online para offline e a volta (C4): o mesmo aviso da barra de mensagens do QGIS, uma vez só.
+    if (ultimo?.evento === 'rede' && ultimo.dados.texto) {
+      avisar(ultimo.dados.texto as string, ultimo.dados.online ? 'ok' : 'erro')
+    }
   }, [ultimo, avisar])
   if (!conectado || !status?.credencial || !s) return null
   const pendentes = s.pendentes ?? 0
@@ -89,7 +96,7 @@ function Sincronia() {
   else texto = hora ? `Sincronizado às ${hora}` : 'Ainda não sincronizado'
   const dica = [
     hora ? `Última sincronização às ${hora}.` : 'Ainda não sincronizou.',
-    offline ? 'Sem a CCAR: o que você fizer em Minhas cargas fica guardado e vai quando a conexão voltar.' : null,
+    offline ? 'Sem a CCAR: o Feixe segue offline. O que você fizer em Minhas cargas fica guardado e vai para a CCAR quando a conexão voltar.' : null,
     s.ultimo_estado === 'erro' && s.mensagem ? `Última tentativa: ${s.mensagem}` : null,
     'Clique para sincronizar agora.',
   ]

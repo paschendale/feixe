@@ -167,6 +167,28 @@ class Sincronizacao:
             return pull.puxar(ws, rx)
 
 
+# Avisos da troca de online e offline (C4), os mesmos na barra de mensagens do QGIS e no painel (evento `rede`).
+OFFLINE = (
+    "Sem a CCAR: o Feixe segue offline. O que você fizer em Minhas cargas fica guardado e vai para a CCAR quando a "
+    "conexão voltar."
+)
+
+
+def aviso_de_rede(antes: Optional[bool], depois: Optional[bool], pendentes: int = 0) -> Optional[str]:
+    """O aviso da troca de estado da rede, só na troca: offline (também ao abrir o QGIS sem rede) e a volta. Abrir
+    com a CCAR respondendo, ou continuar no mesmo estado, não avisa."""
+    if depois is None or antes == depois:
+        return None
+    if depois is False:
+        return OFFLINE
+    if antes is False:
+        if pendentes:
+            n = f"{pendentes} alteração guardada" if pendentes == 1 else f"{pendentes} alterações guardadas"
+            return f"A conexão com a CCAR voltou: enviando {n}."
+        return "A conexão com a CCAR voltou."
+    return None
+
+
 def hora_local(iso: Optional[str]) -> Optional[str]:
     """Hora "hh:mm" no fuso da estação, para a dica da barra."""
     d = de_iso(iso) if iso else None

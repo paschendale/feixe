@@ -78,3 +78,16 @@ def test_estado_le_pendencias_e_ultima_sincronizacao(ws):
 def test_rota_sincronizar_devolve_o_resultado():
     r = criar_roteador(Contexto(sincronizar=lambda: {"estado": "offline", "pull": None}))
     assert r.despachar("POST", "/api/sincronizar", {}, None) == (200, {"estado": "offline", "pull": None})
+
+
+def test_aviso_de_rede_so_na_troca():
+    from feixe.sync.sincronizar import OFFLINE, aviso_de_rede
+
+    assert aviso_de_rede(None, True) is None  # abriu com a CCAR respondendo: nada a dizer
+    assert aviso_de_rede(None, False) == OFFLINE  # abriu sem rede: avisa uma vez
+    assert aviso_de_rede(False, False, 3) is None and aviso_de_rede(True, True) is None  # o QTimer não repete
+    assert aviso_de_rede(True, False, 2) == OFFLINE
+    assert aviso_de_rede(False, True, 0) == "A conexão com a CCAR voltou."
+    assert aviso_de_rede(False, True, 1) == "A conexão com a CCAR voltou: enviando 1 alteração guardada."
+    assert aviso_de_rede(False, True, 4) == "A conexão com a CCAR voltou: enviando 4 alterações guardadas."
+    assert aviso_de_rede(True, None) is None

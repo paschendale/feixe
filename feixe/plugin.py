@@ -22,7 +22,7 @@ from .server.rotas import camadas as rotas_camadas
 from .server.rotas import cargas as rotas_cargas
 from .server.sse import Broker
 from .sync import workspace as wsmod
-from .sync.sincronizar import Sincronizacao, hora_local
+from .sync.sincronizar import Sincronizacao, aviso_de_rede, hora_local
 from .sync.trabalhador import Trabalhador
 from .ui.barra import BarraFeixe, DialogoCredenciais
 from .ui.ferramentas import FerramentaFolha, SemSelecao, selecao_wkt
@@ -85,6 +85,7 @@ class FeixePlugin:
         )
         self.trabalhador = Trabalhador(self._sincronizar_fundo)
         self.sincronizacao = {}
+        self._rede = None  # última notícia de online/offline já avisada (C4): avisa só na troca
         # Camadas Minhas cargas do workspace com a edição ligada à outbox (C4): id -> (camada, funções ligadas).
         self._edicao = {}
         self._timer = QTimer()
@@ -348,12 +349,25 @@ class FeixePlugin:
         if est.get("online") is not None:
             self.estado["online"] = est["online"]
         self._publicar_estado({})
+        self._avisar_rede(est.get("online"))
         if est.get("mudou"):
             # O push levou e o pull trouxe: as camadas do workspace mostram o que veio da CCAR (outra pessoa, o
             # supervisor, a recusa que desfez o local) e as da supervisão, o que o push gravou lá.
             camadas.recarregar_cargas()
         for aviso in est.get("avisos") or []:
             self.iface.messageBar().pushMessage("Feixe", aviso, Qgis.Warning, 10)
+
+    def _avisar_rede(self, online):
+        """Na troca de online para offline e de volta, um aviso só, na barra de mensagens e no painel (sem repetir a
+        cada minuto do QTimer nem a cada sincronização)."""
+        if online is None:
+            return
+        aviso = aviso_de_rede(self._rede, online, self.sincronizacao.get("pendentes") or 0)
+        self._rede = online
+        if aviso is None:
+            return
+        self.iface.messageBar().pushMessage("Feixe", aviso, Qgis.Info if online else Qgis.Warning, 6 if online else 12)
+        self.broker.publicar("rede", {"online": online, "texto": aviso})
 
     def verificar_rede(self):
         """Checagem barata (TCP) em thread própria; o resultado volta pela thread principal via sinal."""
@@ -394,6 +408,7 @@ class FeixePlugin:
 
     def _aplicar_estado(self, novo: dict):
         self._publicar_estado(novo)
+        self._avisar_rede(novo.get("online"))
 
     # --- barra: próxima carga e concluir carga (B2) ---------------------------------------------
     def _pronto(self) -> bool:
