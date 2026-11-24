@@ -51,10 +51,13 @@ def registrar(r, ctx) -> None:
     @r.rota("POST", "/api/distribuir", exige=("supervisor",))
     def _distribuir(req):
         # Uma folha por pessoa (D-109): cada item entra na fila da pessoa, numa transação própria (a recusa de um não
-        # impede os outros); quem está sem carga recebe na hora.
+        # impede os outros). Redistribuir (D-112) tira as cargas pendentes de quem estava com a folha. Só depois de
+        # todos os itens as filas andam (quem recebeu e quem ficou sem carga), para a troca entre duas pessoas não
+        # depender da ordem.
         uf = uf_de(ctx.eu())
         itens = campo(req, "itens", list)
-        agora, na_fila, erros = [], [], []
+        pedidos, recebidas, erros = [], {}, []
+        puxar: list = []
         for it in itens:
             try:
                 id_le, resp = int(it["id_lote_etapa"]), str(it["responsavel"])
@@ -62,14 +65,25 @@ def registrar(r, ctx) -> None:
                 raise ErroApi(400, "cada item precisa de id_lote_etapa e responsavel") from None
             try:
                 with ctx.tx() as ex:
-                    r = dfi.distribuir_uma(ex, uf, id_le, resp)
+                    r = dfi.distribuir_uma(ex, uf, id_le, resp, puxar_agora=False)
             except ErroDados as e:
                 erros.append({"id_lote_etapa": id_le, "erro": e.mensagem})
                 continue
-            (agora if r.get("atribuida") else na_fila).append({"id_lote_etapa": id_le, "responsavel": resp,
-                                                                "atribuida": r.get("atribuida")})  # fmt: skip
-        if agora or na_fila:
-            ctx.publicar("fila", {"distribuidas": len(agora) + len(na_fila)})
+            pedidos.append((id_le, resp))
+            if r.get("atribuida"):
+                recebidas[id_le] = r["atribuida"]
+            puxar += [resp] + r.get("liberados", [])
+        for conta in dict.fromkeys(puxar):
+            with ctx.tx() as ex:
+                a = dfi.puxar(ex, conta)
+            if a:
+                recebidas[a["id_lote_etapa"]] = a
+        agora = [
+            {"id_lote_etapa": i, "responsavel": c, "atribuida": recebidas[i]} for i, c in pedidos if i in recebidas
+        ]
+        na_fila = [{"id_lote_etapa": i, "responsavel": c, "atribuida": None} for i, c in pedidos if i not in recebidas]
+        if pedidos:
+            ctx.publicar("fila", {"distribuidas": len(pedidos)})
             ctx.publicar("carga", {"distribuidas": len(agora)})
             ctx.publicar("lote", {"distribuidas": len(agora)})
             with contextlib.suppress(ErroApi):

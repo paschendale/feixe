@@ -141,6 +141,53 @@ def test_uma_folha_por_pessoa_e_a_revisao_as_cegas(amb):
     assert dfi.sugestao(ex, "DF", [lote])["folhas"][0]["sugerida"] not in (feito_por, None)
 
 
+def test_redistribuir_folha_que_ja_esta_com_alguem(amb):
+    """D-112: escolher outra pessoa tira as cargas pendentes de quem estava; as concluídas ficam com quem fez."""
+    cen, ex = amb
+    (_, x), (_, y), (_, z) = [_livre(cen, f"r{i}", -44.5) for i in range(3)]
+    dc.preparar(ex, "DF", [x, y, z])
+    _conta(cen.cur, "t_apm_d")
+    assert dfi.distribuir_uma(ex, "DF", x, "t_apm_a")["atribuida"]
+    assert dfi.distribuir_uma(ex, "DF", y, "t_apm_b")["atribuida"]
+    assert not dfi.distribuir_uma(ex, "DF", z, "t_apm_a")["atribuida"]  # Z na fila de A, atrás de X
+    feita = ex.um("SELECT min(id) AS id FROM mapcartacomp.carga_trabalho WHERE id_lote_etapa = %s", (x,))["id"]
+    ex.executar("UPDATE mapcartacomp.carga_trabalho SET concluido = true WHERE id = %s", (feita,))
+
+    s = {f["id_lote_etapa"]: f for f in dfi.sugestao(ex, "DF", [_lote(ex, x), _lote(ex, y)])["folhas"]}
+    assert s[x]["sugerida"] is None and [p["conta"] for p in s[x]["com"]] == ["t_apm_a"]
+
+    # X vai para D (livre): D recebe agora; A perde X e a fila dele anda (recebe Z).
+    r = dfi.distribuir_uma(ex, "DF", x, "t_apm_d")
+    assert r["atribuida"] and r["liberados"] == ["t_apm_a"]
+    donos = ex.todos(
+        "SELECT responsavel, concluido, count(*) AS n FROM mapcartacomp.carga_trabalho WHERE id_lote_etapa = %s "
+        "GROUP BY 1, 2",
+        (x,),
+    )
+    assert {(d["responsavel"], d["concluido"]) for d in donos} == {("t_apm_a", True), ("t_apm_d", False)}
+    assert _pendentes(ex, z, "t_apm_a") > 0
+
+    # Troca entre duas pessoas, como faz a rota: primeiro move, depois as filas andam.
+    a = dfi.distribuir_uma(ex, "DF", y, "t_apm_d", puxar_agora=False)
+    b = dfi.distribuir_uma(ex, "DF", x, "t_apm_b", puxar_agora=False)
+    assert a["liberados"] == ["t_apm_b"] and b["liberados"] == ["t_apm_d"]
+    assert dfi.puxar(ex, "t_apm_d")["id_lote_etapa"] == y
+    assert dfi.puxar(ex, "t_apm_b")["id_lote_etapa"] == x
+    assert _pendentes(ex, x, "t_apm_b") and _pendentes(ex, y, "t_apm_d")
+
+
+def _lote(ex, le):
+    return ex.um("SELECT id_lote FROM mapcartacomp.lote_etapa WHERE id = %s", (le,))["id_lote"]
+
+
+def _pendentes(ex, le, conta):
+    return ex.um(
+        "SELECT count(*) AS n FROM mapcartacomp.carga_trabalho WHERE id_lote_etapa = %s AND responsavel = %s "
+        "AND NOT concluido",
+        (le, conta),
+    )["n"]
+
+
 def test_proxima_etapa_em_varias_folhas(amb):
     cen, ex = amb
     feita, le1 = _livre(cen, "pronta", -44.5, "em_andamento")

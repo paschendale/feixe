@@ -191,7 +191,7 @@ export type FolhaDistribuir = {
   cargas: number
   na_fila_de: string | null
   anteriores: string[]
-  com_cargas: string[]
+  com: { conta: string; nome: string; pendentes: number }[]
   sugerida: string | null
 }
 export type PessoaDistribuir = { conta: string; nome: string; perfis: string | null; pendentes: number; na_fila: number }

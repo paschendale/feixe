@@ -50,9 +50,8 @@ def listar(ex: Executor, uf: str) -> Dict:
     return {"itens": itens, "recentes": recentes}
 
 
-def adicionar(ex: Executor, uf: str, responsavel: str, id_lote_etapa: int) -> Dict:
-    """Põe a folha (passagem aberta e com cargas, da UF) no fim da fila da pessoa. Se a pessoa está sem carga pendente,
-    a fila anda na hora: volta em `atribuida` o que ela recebeu."""
+def _conferir(ex: Executor, uf: str, responsavel: str, id_lote_etapa: int) -> Dict:
+    """A passagem é da UF, está aberta, tem cargas e a pessoa pode recebê-las; senão, ErroDados."""
     p = ex.um(
         "SELECT le.id, le.uf, le.situacao, l.cod_projeto, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha, "
         "(SELECT count(*) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id) AS cargas "
@@ -69,6 +68,13 @@ def adicionar(ex: Executor, uf: str, responsavel: str, id_lote_etapa: int) -> Di
         raise ErroDados(
             f"{responsavel} não pode receber cargas desta folha (conta ativa, lotação {uf} e perfil O, V ou S)"
         )
+    return p
+
+
+def adicionar(ex: Executor, uf: str, responsavel: str, id_lote_etapa: int, puxar_agora: bool = True) -> Dict:
+    """Põe a folha (passagem aberta e com cargas, da UF) no fim da fila da pessoa. Se a pessoa está sem carga pendente,
+    a fila anda na hora: volta em `atribuida` o que ela recebeu (com `puxar_agora`; senão, quem chama puxa depois)."""
+    p = _conferir(ex, uf, responsavel, id_lote_etapa)
     ja = ex.um(
         "SELECT f.responsavel, coalesce(u.nom_usuario::text, f.responsavel) AS nome FROM mapcartacomp.fila_folha f "
         "LEFT JOIN mapcartctrl.t_usuario u ON u.nom_contausuario = f.responsavel "
@@ -88,7 +94,7 @@ def adicionar(ex: Executor, uf: str, responsavel: str, id_lote_etapa: int) -> Di
         (novo_uuid(), id_lote_etapa, responsavel, ordem),
     )
     # Quem está sem carga pendente não vai concluir nada para a fila andar: recebe já a primeira folha da fila.
-    item["atribuida"] = puxar(ex, responsavel)
+    item["atribuida"] = puxar(ex, responsavel) if puxar_agora else None
     return item
 
 
@@ -185,8 +191,9 @@ def sugestao(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
         "(SELECT array_agg(DISTINCT c.responsavel) FROM mapcartacomp.carga_trabalho c "
         " JOIN mapcartacomp.lote_etapa x ON x.id = c.id_lote_etapa "
         " WHERE x.id_lote = l.id AND x.id <> le.id AND c.responsavel IS NOT NULL) AS anteriores, "
-        "(SELECT array_agg(DISTINCT c.responsavel) FROM mapcartacomp.carga_trabalho c "
-        " WHERE c.id_lote_etapa = le.id AND c.responsavel IS NOT NULL) AS com_cargas "
+        "(SELECT array_agg(c.responsavel || '|' || c.n ORDER BY c.n DESC) FROM (SELECT responsavel, count(*) AS n "
+        " FROM mapcartacomp.carga_trabalho WHERE id_lote_etapa = le.id AND responsavel IS NOT NULL AND NOT concluido "
+        " GROUP BY responsavel) c) AS com "
         "FROM mapcartacomp.lote l JOIN mapcartacomp.tema t ON t.id = l.id_tema "
         f"JOIN mapcartacomp.lote_etapa le ON le.id_lote = l.id AND le.situacao IN {_ABERTAS} "
         "JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
@@ -209,11 +216,23 @@ def sugestao(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
             for p in equipes[f["cod_projeto"]]:
                 pessoas.setdefault(p["conta"], {**p, "na_fila": filas.get(p["conta"], 0)})
     neste = dict.fromkeys(pessoas, 0)
+    # Nome de quem tem cargas e saiu da equipe (perdeu o perfil): o diálogo mostra de quem a folha sai.
+    contas = {x.rsplit("|", 1)[0] for f in folhas for x in (f["com"] or [])}
+    nomes = {c: p["nome"] for c, p in pessoas.items()}
+    if contas - set(nomes):
+        for r in ex.todos(
+            "SELECT nom_contausuario AS conta, nom_usuario::text AS nome FROM mapcartctrl.t_usuario "
+            "WHERE nom_contausuario = ANY(%s)",
+            (list(contas - set(nomes)),),
+        ):
+            nomes[r["conta"]] = r["nome"]
     for f in folhas:
         f["anteriores"] = [c for c in (f["anteriores"] or []) if c]
-        f["com_cargas"] = [c for c in (f["com_cargas"] or []) if c]
+        # Quem está com as cargas pendentes da folha (redistribuir tira delas): conta, nome e quantas.
+        com = [x.rsplit("|", 1) for x in (f["com"] or [])]
+        f["com"] = [{"conta": c, "nome": nomes.get(c, c), "pendentes": int(n)} for c, n in com]
         f["sugerida"] = None
-        if not f["a_atribuir"] or f["na_fila_de"]:
+        if not f["a_atribuir"] or f["na_fila_de"] or f["com"]:
             f["sugerida"] = f["na_fila_de"]
             continue
         equipe = equipes[f["cod_projeto"]]
@@ -248,18 +267,53 @@ def sugestao(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
     }
 
 
-def distribuir_uma(ex: Executor, uf: str, id_lote_etapa: int, responsavel: str) -> Dict:
+def distribuir_uma(ex: Executor, uf: str, id_lote_etapa: int, responsavel: str, puxar_agora: bool = True) -> Dict:
     """Dá a folha a `responsavel`: entra no fim da fila dele (se estava na fila de outra pessoa, sai de lá) e, se ele
-    está sem carga, a fila anda na hora. Volta `atribuida` (o que ele recebeu agora) ou nada (ficou na fila)."""
+    está sem carga, a fila anda na hora. Volta `atribuida` (o que ele recebeu agora) ou nada (ficou na fila).
+
+    Redistribuir é o mesmo gesto: se outras pessoas estão com cargas pendentes da folha, elas voltam a ficar sem
+    responsável e a folha segue para `responsavel` como qualquer outra (uma folha por pessoa: agora, se ele está sem
+    carga; senão, na fila). As concluídas ficam com quem fez. Volta em `liberados` quem perdeu cargas, para a fila
+    dessas pessoas andar (`puxar`); com `puxar_agora=False`, quem chama puxa depois de distribuir o lote todo, e a
+    troca de folhas entre duas pessoas não depende da ordem dos itens."""
+    _conferir(ex, uf, responsavel, id_lote_etapa)
     ex.executar(
         "DELETE FROM mapcartacomp.fila_folha WHERE id_lote_etapa = %s AND uf = %s AND atribuida_em IS NULL "
         "AND responsavel <> %s",
         (id_lote_etapa, uf, responsavel),
     )
+    liberados = sorted(
+        {
+            r["antes"]
+            for r in ex.todos(
+                "UPDATE mapcartacomp.carga_trabalho c SET responsavel = NULL FROM (SELECT id, responsavel AS antes "
+                "FROM mapcartacomp.carga_trabalho WHERE id_lote_etapa = %s AND uf = %s AND NOT concluido "
+                "AND responsavel IS NOT NULL AND responsavel <> %s FOR UPDATE) o WHERE c.id = o.id RETURNING o.antes",
+                (id_lote_etapa, uf, responsavel),
+            )
+        }
+    )
+    tem = ex.um(
+        "SELECT count(*) AS n FROM mapcartacomp.carga_trabalho WHERE id_lote_etapa = %s AND responsavel = %s "
+        "AND NOT concluido",
+        (id_lote_etapa, responsavel),
+    )["n"]
+    if tem:
+        # Já trabalha nesta folha: o resto dela é dele na hora, sem passar pela fila.
+        ex.executar(
+            "DELETE FROM mapcartacomp.fila_folha WHERE id_lote_etapa = %s AND atribuida_em IS NULL", (id_lote_etapa,)
+        )
+        r = dc.atribuir(ex, uf, responsavel, lote_etapas=[id_lote_etapa], so_disponiveis=True)
+        return {"atribuida": {"id_lote_etapa": id_lote_etapa, "atribuidas": r["atribuidas"]}, "liberados": liberados}
     ja = ex.um(
         "SELECT id, ordem FROM mapcartacomp.fila_folha WHERE id_lote_etapa = %s AND atribuida_em IS NULL",
         (id_lote_etapa,),
     )
     if ja:
-        return {**ja, "atribuida": puxar(ex, responsavel)}
-    return adicionar(ex, uf, responsavel, id_lote_etapa)
+        item = {**ja, "atribuida": puxar(ex, responsavel) if puxar_agora else None}
+    else:
+        item = adicionar(ex, uf, responsavel, id_lote_etapa, puxar_agora)
+    if puxar_agora:
+        for c in liberados:
+            puxar(ex, c)
+    return {**item, "liberados": liberados}

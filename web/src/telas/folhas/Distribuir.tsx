@@ -8,7 +8,8 @@ import { num, plural } from '@/lib/formato'
 import { enviar } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 
-type Destino = { tipo: 'agora' } | { tipo: 'fila'; posicao: number } | { tipo: 'ja' } | null
+type Destino = { tipo: 'agora' } | { tipo: 'fila'; posicao: number } | { tipo: 'ja' } | { tipo: 'fica' } | null
+type Folha = SugestaoDistribuicao['folhas'][number]
 
 const primeiro = (n: string | null | undefined) => (n ?? '').split(' ').slice(0, 2).join(' ')
 
@@ -20,6 +21,13 @@ function situacao(p: PessoaDistribuir) {
 // Distribuir (D-109): uma folha por pessoa, sempre. Quem está sem carga recebe a folha agora, e a etapa começa; quem
 // já tem, recebe na fila e pega quando terminar o que tem. O Feixe sugere (perfil da fase, quem tem menos nas mãos,
 // nunca quem fez a etapa anterior da folha); o supervisor confere e troca o que quiser.
+// Redistribuir (D-112): folha que já está com alguém aparece com "Deixar com Fulano"; escolher outra pessoa tira dela as
+// cargas pendentes (as concluídas ficam com quem fez) e a folha segue a mesma regra: agora, se a pessoa está sem carga;
+// senão, na fila.
+
+const comQuem = (f: Folha) => f.com.map((p) => primeiro(p.nome)).join(', ')
+// A escolha não muda nada: vazio, ou a única pessoa que já está com a folha.
+const semMudanca = (f: Folha, c: string | undefined) => !c || (f.com.length === 1 && f.com[0].conta === c) || c === f.na_fila_de
 export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito: boolean) => void }) {
   const avisar = useAvisar()
   const [dados, setDados] = useState<SugestaoDistribuicao | null>(null)
@@ -39,18 +47,27 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
   }, [lotes])
 
   const pessoa = useMemo(() => new Map((dados?.pessoas ?? []).map((p) => [p.conta, p])), [dados])
-  const distribuiveis = (dados?.folhas ?? []).filter((f) => f.a_atribuir > 0)
-  const nada = (dados?.folhas ?? []).filter((f) => !f.a_atribuir)
+  const distribuiveis = (dados?.folhas ?? []).filter((f) => f.a_atribuir > 0 || f.com.length > 0)
+  const nada = (dados?.folhas ?? []).filter((f) => !f.a_atribuir && !f.com.length)
+  const comAlguem = distribuiveis.filter((f) => f.com.length > 0).length
 
   // O que vai acontecer, na ordem da lista: a primeira folha de quem está livre é dele agora, as outras vão para a fila.
+  // Quem perde uma folha na redistribuição fica com menos pendentes (e pode ficar livre para receber outra).
   const destinos = useMemo(() => {
-    const livre = new Map((dados?.pessoas ?? []).map((p) => [p.conta, !p.pendentes && !p.na_fila]))
+    const pendentes = new Map((dados?.pessoas ?? []).map((p) => [p.conta, p.pendentes]))
+    for (const f of distribuiveis) {
+      const c = escolha[f.id_lote_etapa]
+      if (semMudanca(f, c)) continue
+      for (const p of f.com) if (p.conta !== c) pendentes.set(p.conta, (pendentes.get(p.conta) ?? 0) - p.pendentes)
+    }
+    const livre = new Map((dados?.pessoas ?? []).map((p) => [p.conta, !pendentes.get(p.conta) && !p.na_fila]))
     const fila = new Map((dados?.pessoas ?? []).map((p) => [p.conta, p.na_fila]))
     const d: Record<number, Destino> = {}
     for (const f of distribuiveis) {
       const c = escolha[f.id_lote_etapa]
-      if (!c) d[f.id_lote_etapa] = null
+      if (!c) d[f.id_lote_etapa] = f.com.length ? { tipo: 'fica' } : null
       else if (c === f.na_fila_de) d[f.id_lote_etapa] = { tipo: 'ja' }
+      else if (f.com.some((p) => p.conta === c)) d[f.id_lote_etapa] = f.com.length === 1 ? { tipo: 'fica' } : { tipo: 'agora' }
       else if (livre.get(c)) {
         d[f.id_lote_etapa] = { tipo: 'agora' }
         livre.set(c, false)
@@ -62,10 +79,11 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
     return d
   }, [dados, escolha, distribuiveis])
 
-  const itens = distribuiveis.filter((f) => escolha[f.id_lote_etapa] && escolha[f.id_lote_etapa] !== f.na_fila_de)
+  const itens = distribuiveis.filter((f) => !semMudanca(f, escolha[f.id_lote_etapa]))
+  const nTroca = itens.filter((f) => f.com.length > 0).length
   const nAgora = Object.values(destinos).filter((d) => d?.tipo === 'agora').length
   const nFila = Object.values(destinos).filter((d) => d?.tipo === 'fila').length
-  const sem = distribuiveis.filter((f) => !escolha[f.id_lote_etapa]).length
+  const sem = distribuiveis.filter((f) => !escolha[f.id_lote_etapa] && !f.com.length).length
 
   async function distribuir() {
     setOcupado(true)
@@ -91,6 +109,7 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
           <DialogTitle>Distribuir {distribuiveis.length > 1 ? `${num(distribuiveis.length)} folhas` : 'a folha'}</DialogTitle>
           <DialogDescription>
             Uma folha por pessoa. Quem está sem carga recebe agora e a etapa começa; quem já tem, recebe na fila e pega a folha quando terminar o que tem. A sugestão evita quem fez a etapa anterior da folha.
+            {comAlguem > 0 && ' Folha que já está com alguém fica com a pessoa; escolha outra para redistribuir: as cargas pendentes saem de quem estava (as concluídas continuam dela).'}
           </DialogDescription>
         </DialogHeader>
         {!dados && <p className="text-sm text-muted-foreground">Montando a sugestão…</p>}
@@ -114,16 +133,16 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
                       <td className="py-2 pr-2 pl-3">
                         <b className="tab">{f.folha_revisao}</b>
                         <span className="block text-xs text-muted-foreground">
-                          {f.etapa} · {plural(f.a_atribuir, 'carga', 'cargas')}
+                          {f.etapa} · {plural(f.a_atribuir + f.com.reduce((n, p) => n + p.pendentes, 0), 'carga', 'cargas')}
                         </span>
                       </td>
                       <td className="px-2 py-2">
                         <Select className="h-8 w-full min-w-[240px] text-[13px]" value={c ?? ''} onChange={(e) => setEscolha((x) => ({ ...x, [f.id_lote_etapa]: e.target.value }))} aria-label={`Quem recebe a ${f.folha_revisao}`}>
-                          <option value="">Não distribuir agora</option>
+                          <option value="">{f.com.length ? `Deixar com ${comQuem(f)}` : 'Não distribuir agora'}</option>
                           {dados.pessoas.map((p) => (
                             <option key={p.conta} value={p.conta}>
                               {primeiro(p.nome)} · {situacao(p)}
-                              {f.anteriores.includes(p.conta) ? ' · fez a etapa anterior' : ''}
+                              {f.com.some((x) => x.conta === p.conta) ? ' · está com a folha' : f.anteriores.includes(p.conta) ? ' · fez a etapa anterior' : ''}
                             </option>
                           ))}
                         </Select>
@@ -133,7 +152,13 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
                         {d?.tipo === 'agora' && 'agora'}
                         {d?.tipo === 'fila' && `na fila (${d.posicao}ª)`}
                         {d?.tipo === 'ja' && `já está na fila de ${primeiro(pessoa.get(c)?.nome)}`}
+                        {d?.tipo === 'fica' && <span className="text-muted-foreground">continua com {comQuem(f)}</span>}
                         {!d && <span className="text-muted-foreground">fica a atribuir</span>}
+                        {d && d.tipo !== 'fica' && f.com.some((p) => p.conta !== c) && (
+                          <span className="block text-xs text-muted-foreground">
+                            sai de {f.com.filter((p) => p.conta !== c).map((p) => `${primeiro(p.nome)} (${plural(p.pendentes, 'pendente', 'pendentes')})`).join(', ')}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   )
@@ -144,12 +169,12 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
         )}
         {nada.length > 0 && (
           <p className="text-xs text-muted-foreground">
-            Sem cargas a distribuir: {nada.map((f) => f.folha_revisao).join(', ')} ({nada.some((f) => f.cargas) ? 'já estão com alguém' : 'a etapa não tem cargas'}).
+            Sem cargas a distribuir: {nada.map((f) => f.folha_revisao).join(', ')} ({nada.some((f) => f.cargas) ? 'todas concluídas' : 'a etapa não tem cargas'}).
           </p>
         )}
         <DialogFooter className="items-center gap-3 sm:justify-between">
           <span className="text-[13px] text-muted-foreground">
-            {[nAgora && `${plural(nAgora, 'pessoa recebe', 'pessoas recebem')} agora`, nFila && `${plural(nFila, 'folha vai', 'folhas vão')} para a fila`, sem && `${plural(sem, 'fica', 'ficam')} a atribuir`].filter(Boolean).join(' · ')}
+            {[nTroca && `${plural(nTroca, 'folha muda', 'folhas mudam')} de mão`, nAgora && `${plural(nAgora, 'pessoa recebe', 'pessoas recebem')} agora`, nFila && `${plural(nFila, 'folha vai', 'folhas vão')} para a fila`, sem && `${plural(sem, 'fica', 'ficam')} a atribuir`].filter(Boolean).join(' · ')}
           </span>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => fechar(false)}>
