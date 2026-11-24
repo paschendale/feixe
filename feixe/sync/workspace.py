@@ -7,7 +7,9 @@ workspace é recriado, porque é cache: a outbox e o sync_log vão junto para o 
 pull. Mudança de UF (lotação) recria do mesmo jeito.
 
 Escrita: toda escrita local muda a linha e grava o item da outbox na mesma transação SQLite (`ExecutorLocal.atualizar`
-e `inserir`). O pull (C2) grava pelo `gravar_remoto`, que não passa pela outbox.
+e `inserir`). O pull (C2) grava pelo `gravar_remoto`, que não passa pela outbox. Só o plugin escreve: a transação liga
+o interruptor (`controle_escrita`) que os gatilhos de guarda consultam, e a escrita de qualquer outra conexão (o OGR
+do QGIS, outro programa) nas tabelas do espelho é recusada no próprio arquivo (C4, ver `esquema.py`).
 
 Concorrência. O arquivo é aberto ao mesmo tempo pelas threads do servidor HTTP (o painel), pela thread da
 sincronização (C2/C3) e pelo QGIS, que lê (e, no C4, edita) as camadas pelo OGR, com outra conexão e outra cópia do
@@ -451,9 +453,12 @@ class Workspace:
                 return
             conn = self.conn
             conn.execute("BEGIN IMMEDIATE")
+            # Interruptor dos gatilhos de guarda (esquema, C4): ligado só dentro desta transação; o ROLLBACK desfaz.
+            conn.execute("UPDATE controle_escrita SET plugin = 1")
             self._ex = ExecutorLocal(conn, self.usuario, self.uf, hora)
             try:
                 yield self._ex
+                conn.execute("UPDATE controle_escrita SET plugin = 0")
                 conn.execute("COMMIT")
             except BaseException:
                 conn.execute("ROLLBACK")
@@ -542,6 +547,7 @@ class Workspace:
                         "VALUES (?, 'geom', ?, ?, 0, 0)",
                         (t.nome, t.geom, geometria.SRID),
                     )
+            esquema.registrar_views(conn, criado)
             conn.executemany(
                 "INSERT INTO meta (chave, valor) VALUES (?, ?)",
                 [("ambiente", self.ambiente), ("usuario", self.usuario), ("uf", self.uf),

@@ -22,11 +22,13 @@ from __future__ import annotations
 import uuid
 from typing import Dict, List, Optional, Tuple
 
+from ..core.dados.local import SQL_ABERTAS, rotulo
 from .geometria import SRID
 
 # Versão do esquema do workspace. Subiu sem migração em MIGRACOES: o workspace é recriado (é cache), levando junto
-# a outbox e o sync_log, que são o que não se pode perder. 2: `chave` e `acao` na outbox (C3).
-VERSAO = 2
+# a outbox e o sync_log, que são o que não se pode perder. 2: `chave` e `acao` na outbox (C3). 3: o interruptor de
+# escrita e os gatilhos que só deixam o plugin mudar as tabelas, e as views das camadas da execução (C4).
+VERSAO = 3
 
 _AUDITORIA = [
     ("criado_em", "DATETIME"),
@@ -221,6 +223,105 @@ CONTROLE = [
 ]
 
 
+# --- só o plugin escreve (C4) ---------------------------------------------------------------------------------------
+# O QGIS abre as tabelas do workspace pelo OGR, com outra conexão. Uma escrita que viesse por ali (tabela de atributos,
+# calculadora de campos, outro programa) mudaria a linha sem item na outbox, e a mudança nunca chegaria à CCAR. As
+# camadas do Feixe não deixam isso acontecer (`core/edicao.py`: a edição sai do buffer do QGIS e vai pelo
+# `ExecutorLocal`), e estes gatilhos são a garantia no arquivo: toda escrita nas tabelas do espelho e nas referências
+# é recusada, a menos que venha de uma transação do plugin. O interruptor é uma linha em `controle_escrita`: a
+# `Workspace.transacao` liga logo depois do `BEGIN IMMEDIATE` e desliga antes do `COMMIT` (ou o `ROLLBACK` desfaz).
+# Como o SQLite tem um escritor por vez e ninguém vê o que não foi confirmado, a escrita de outra conexão só acontece
+# com o interruptor desligado. SQL puro: o gatilho roda também dentro do OGR, que não tem as funções do Python.
+
+RECUSA_FORA_DO_PLUGIN = (
+    "Feixe: o espaço de trabalho só muda pelas ações do Feixe (a mudança feita por fora não chegaria à CCAR). "
+    "Para concluir uma carga, use a barra do Feixe ou a camada Minhas cargas."
+)
+
+# Idempotentes (IF NOT EXISTS), como as views abaixo: a migração 2 -> 3 pode rodar num arquivo que já tem parte disso.
+INTERRUPTOR = [
+    "CREATE TABLE IF NOT EXISTS controle_escrita (plugin INTEGER NOT NULL)",
+    "INSERT INTO controle_escrita (plugin) SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM controle_escrita)",
+]
+
+
+def gatilhos_guarda() -> List[str]:
+    """Um gatilho por tabela e operação: fora de uma transação do plugin, a escrita é recusada (fail-closed: sem a
+    linha do interruptor, também recusa)."""
+    cmds = []
+    for t in TABELAS:
+        for op in ("INSERT", "UPDATE", "DELETE"):
+            cmds.append(
+                f"CREATE TRIGGER IF NOT EXISTS {t}_so_pelo_feixe_{op.lower()} BEFORE {op} ON {t} "
+                "WHEN (SELECT plugin FROM controle_escrita) IS NOT 1 "
+                f"BEGIN SELECT RAISE(ABORT, '{RECUSA_FORA_DO_PLUGIN}'); END"
+            )
+    return cmds
+
+
+# --- views das camadas da execução no QGIS (C4) ----------------------------------------------------------------------
+# A camada Minhas cargas é a própria `carga_trabalho` (o OGR não grava em view do GeoPackage: o UPDATE pelo gatilho
+# INSTEAD OF não conta linhas e ele dá a escrita por falha), filtrada pela pessoa e pelas passagens abertas; o que o
+# formulário e a dica mostram da folha (rótulo, tema, etapa, atividade, progresso da pessoa) vem de uma view de
+# atributos juntada pelo `id`. Minhas folhas é uma view com geometria, só leitura. A pessoa é a conta gravada em `meta`.
+# Sem funções de janela (`count() OVER`, SQLite 3.25): o SQLite do QGIS no Windows não está garantido.
+
+VW_CARGA_INFO = "vw_minhas_cargas_info"
+VW_MINHAS_FOLHAS = "vw_minhas_folhas"
+_EU = "(SELECT valor FROM meta WHERE chave = 'usuario')"
+
+VIEWS = [
+    f"CREATE VIEW IF NOT EXISTS {VW_CARGA_INFO} AS SELECT c.id AS id, le.id_lote AS id_lote, "
+    f"{rotulo()} AS folha_revisao, "
+    "t.nome AS tema, fe.nome AS etapa, a.nome AS atividade, le.situacao AS situacao_etapa, "
+    "p.n AS minhas_na_folha, p.feitas AS minhas_concluidas_na_folha "
+    "FROM carga_trabalho c JOIN lote_etapa le ON le.id = c.id_lote_etapa JOIN lote l ON l.id = le.id_lote "
+    "LEFT JOIN tema t ON t.id = l.id_tema LEFT JOIN fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+    "LEFT JOIN atividade a ON a.id = c.id_atividade "
+    "LEFT JOIN (SELECT id_lote_etapa, count(*) AS n, sum(CASE WHEN concluido THEN 1 ELSE 0 END) AS feitas "
+    f"FROM carga_trabalho WHERE responsavel = {_EU} GROUP BY id_lote_etapa) p ON p.id_lote_etapa = c.id_lote_etapa "
+    f"WHERE c.responsavel = {_EU}",
+    f"CREATE VIEW IF NOT EXISTS {VW_MINHAS_FOLHAS} AS SELECT l.fid AS fid, l.id AS id_lote, "
+    f"{rotulo()} AS folha_revisao, "
+    "t.nome AS tema, fe.nome AS etapa, le.situacao AS situacao, l.geom AS geom "
+    f"FROM lote l JOIN lote_etapa le ON le.id_lote = l.id AND le.situacao IN {SQL_ABERTAS} "
+    "LEFT JOIN tema t ON t.id = l.id_tema LEFT JOIN fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+    "WHERE EXISTS (SELECT 1 FROM carga_trabalho c WHERE c.id_lote_etapa = le.id "
+    f"AND c.responsavel = {_EU})",
+]
+
+# (nome, data_type do gpkg_contents, tipo da geometria ou None, descrição)
+VIEWS_GPKG = [
+    (VW_CARGA_INFO, "attributes", None, "Minhas cargas: folha, etapa, atividade e progresso (camada do Feixe)"),
+    (VW_MINHAS_FOLHAS, "features", "MULTIPOLYGON", "Folhas em que tenho cargas abertas (camada do Feixe)"),
+]
+
+
+def registrar_views(conn, criado: str) -> None:
+    """As views no `gpkg_contents` (e a de geometria no `gpkg_geometry_columns`), para o OGR abri-las como camadas."""
+    for nome, tipo, geom, descricao in VIEWS_GPKG:
+        if conn.execute("SELECT 1 FROM gpkg_contents WHERE table_name = ?", (nome,)).fetchone():
+            continue
+        conn.execute(
+            "INSERT INTO gpkg_contents (table_name, data_type, identifier, description, last_change, srs_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (nome, tipo, nome, descricao, criado, SRID if geom else None),
+        )
+        if geom:
+            conn.execute(
+                "INSERT INTO gpkg_geometry_columns (table_name, column_name, geometry_type_name, srs_id, z, m) "
+                "VALUES (?, 'geom', ?, ?, 0, 0)",
+                (nome, geom, SRID),
+            )
+
+
+def _v2_para_v3(conn) -> None:
+    """Interruptor de escrita, gatilhos de guarda e as views das camadas, num workspace que já existe."""
+    for cmd in INTERRUPTOR + gatilhos_guarda() + VIEWS:
+        conn.execute(cmd)
+    registrar_views(conn, conn.execute("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')").fetchone()[0])
+
+
 def _v1_para_v2(conn) -> None:
     """Outbox com `chave` (uuid do item, para a idempotência do push) e `acao` (a transação local que gravou o item).
     Itens que já estavam lá: chave nova, e a hora como ação (os itens de uma transação têm a mesma hora)."""
@@ -231,7 +332,7 @@ def _v1_para_v2(conn) -> None:
 
 
 # Migrações do esquema do workspace: versão de origem -> função(conexão) que leva à seguinte.
-MIGRACOES: Dict[int, object] = {1: _v1_para_v2}
+MIGRACOES: Dict[int, object] = {1: _v1_para_v2, 2: _v2_para_v3}
 
 
 # --- núcleo do GeoPackage 1.2 (requisitos 10 a 13 e 21 a 23) ----------------------------------------------------------
@@ -299,5 +400,5 @@ def ddl_completo() -> List[str]:
     """Todos os comandos para criar um workspace vazio (núcleo do GeoPackage, espelho, controle)."""
     cmds = list(GPKG_NUCLEO)
     cmds += [t.ddl() for t in TABELAS.values()]
-    cmds += INDICES + CONTROLE
+    cmds += INDICES + CONTROLE + INTERRUPTOR + gatilhos_guarda() + VIEWS
     return cmds

@@ -224,3 +224,107 @@ def test_e_um_geopackage_que_o_ogr_abre(ws):
     alertas = subprocess.run(["ogrinfo", "-ro", "-q", ws.caminho, "carga_trabalho"], capture_output=True,
                              text=True, check=True).stderr  # fmt: skip
     assert "Warning" not in alertas and "ERROR" not in alertas
+
+
+# --- C4: só o plugin escreve; views das camadas da execução ---------------------------------------------------------
+
+
+def _por_fora(ws):
+    """Outra conexão ao arquivo, como a do OGR quando o QGIS grava a edição de uma camada."""
+    conn = sqlite3.connect(ws.caminho, timeout=5, isolation_level=None)
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "UPDATE carga_trabalho SET concluido = 1 WHERE id = 1001",
+        "DELETE FROM carga_trabalho WHERE id = 1001",
+        "INSERT INTO carga_trabalho (uuid, concluido) VALUES ('x', 0)",
+        "UPDATE lote_etapa SET situacao = 'concluida' WHERE id = 11",
+        "UPDATE tema SET nome = 'x'",
+    ],
+)
+def test_escrita_por_fora_do_plugin_e_recusada_no_arquivo(ws, sql):
+    conn = _por_fora(ws)
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="só muda pelas ações do Feixe"):
+            conn.execute(sql)
+        assert conn.execute("SELECT plugin FROM controle_escrita").fetchone() == (0,)
+        assert conn.execute("SELECT count(*) FROM carga_trabalho").fetchone() == (7,)  # ler continua livre
+    finally:
+        conn.close()
+    with ws.leitura() as ex:
+        assert ex.pendentes() == [] and ex.um("SELECT concluido FROM carga_trabalho WHERE id = 1001")["concluido"] == 0
+
+
+def test_o_interruptor_so_vale_dentro_da_transacao_do_plugin(ws):
+    """O pull (`gravar_remoto`) e a execução (`atualizar`) gravam; depois do COMMIT, e de um ROLLBACK, a outra conexão
+    continua recusada."""
+    with ws.transacao() as ex:
+        ex.gravar_remoto("carga_trabalho", carga(1004, 11, USUARIO, -47.5, -15.8))
+        uuid = ex.um("SELECT uuid FROM carga_trabalho WHERE id = 1004")["uuid"]
+        ex.atualizar("carga_trabalho", uuid, {"concluido": True})
+    with pytest.raises(RuntimeError), ws.transacao() as ex:
+        ex.atualizar("carga_trabalho", uuid, {"concluido": False})
+        raise RuntimeError("falha no meio")
+    conn = _por_fora(ws)
+    try:
+        assert conn.execute("SELECT plugin FROM controle_escrita").fetchone() == (0,)
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE carga_trabalho SET concluido = 0 WHERE id = 1004")
+    finally:
+        conn.close()
+    with ws.leitura() as ex:
+        assert ex.um("SELECT concluido FROM carga_trabalho WHERE id = 1004")["concluido"] == 1
+        assert len(ex.pendentes()) == 1
+
+
+def test_views_das_camadas_da_execucao(ws):
+    with ws.transacao() as ex:
+        uuid = ex.um("SELECT uuid FROM carga_trabalho WHERE id = 1002")["uuid"]
+        ex.atualizar("carga_trabalho", uuid, {"concluido": True})
+    with ws.leitura() as ex:
+        info = {r["id"]: r for r in ex.todos(f"SELECT * FROM {esquema.VW_CARGA_INFO}")}
+        folhas = ex.todos(f"SELECT * FROM {esquema.VW_MINHAS_FOLHAS} ORDER BY id_lote")
+        registradas = {r["table_name"]: r["data_type"] for r in ex.todos("SELECT * FROM gpkg_contents")}
+    assert sorted(info) == [1001, 1002, 1003, 3001]  # só as minhas (1009 é de outra pessoa; 2001 e 2002, de ninguém)
+    assert info[1002] == {
+        "id": 1002, "id_lote": 1, "folha_revisao": "2534-1", "tema": "Hidrografia", "etapa": "Aquisição",
+        "atividade": "Aquisição BC100 - Hidrografia", "situacao_etapa": "em_andamento", "minhas_na_folha": 3,
+        "minhas_concluidas_na_folha": 1,
+    }  # fmt: skip
+    # Só as folhas com passagem aberta em que tenho carga: a 2536 está encerrada, a 2535 ainda não é minha.
+    assert [(f["id_lote"], f["folha_revisao"], f["situacao"]) for f in folhas] == [(1, "2534-1", "em_andamento")]
+    assert registradas[esquema.VW_CARGA_INFO] == "attributes" and registradas[esquema.VW_MINHAS_FOLHAS] == "features"
+
+
+def test_esquema_2_ganha_os_gatilhos_e_as_views_sem_recriar(ws):
+    with ws.transacao() as ex:
+        uuid = ex.um("SELECT uuid FROM carga_trabalho WHERE id = 1001")["uuid"]
+        ex.atualizar("carga_trabalho", uuid, {"concluido": True})
+    conn = ws.conn
+    conn.execute("BEGIN IMMEDIATE")
+    for nome, tipo in conn.execute(
+        "SELECT name, type FROM sqlite_master WHERE type IN ('trigger', 'view') OR name = 'controle_escrita'"
+    ).fetchall():
+        conn.execute(f"DROP {tipo.upper()} {nome}")
+    conn.execute("DELETE FROM gpkg_geometry_columns WHERE table_name LIKE 'vw_%'")
+    conn.execute("DELETE FROM gpkg_contents WHERE table_name LIKE 'vw_%'")
+    conn.execute("UPDATE meta SET valor = '2' WHERE chave = 'versao_esquema'")
+    conn.execute("COMMIT")
+    ws.fechar()
+    with Workspace.abrir("dev", USUARIO, "DF", path=ws.caminho) as w2:
+        with w2.leitura() as ex:
+            assert len(ex.pendentes()) == 1  # migrou, não recriou
+            assert ex.meta("versao_esquema") == str(esquema.VERSAO)
+            gatilhos = ex.um("SELECT count(*) AS n FROM sqlite_master WHERE type = 'trigger'")["n"]
+            assert gatilhos == 3 * len(esquema.TABELAS)
+            assert ex.um(f"SELECT count(*) AS n FROM {esquema.VW_CARGA_INFO}")["n"] == 4
+        conn = _por_fora(w2)
+        try:
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute("UPDATE carga_trabalho SET concluido = 0 WHERE id = 1001")
+        finally:
+            conn.close()
