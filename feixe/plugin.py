@@ -20,12 +20,15 @@ from .server.http import ServidorLocal
 from .server.rotas import camadas as rotas_camadas
 from .server.rotas import cargas as rotas_cargas
 from .server.sse import Broker
+from .sync import workspace as wsmod
+from .sync.sincronizar import Sincronizacao, hora_local
 from .ui.barra import BarraFeixe, DialogoCredenciais
 from .ui.ferramentas import FerramentaFolha, SemSelecao, selecao_wkt
 
 
 class _Sinais(QObject):
     estado_mudou = pyqtSignal(dict)
+    sincronizacao_mudou = pyqtSignal(dict)
 
 
 class FeixePlugin:
@@ -65,6 +68,16 @@ class FeixePlugin:
         self._passagem_atual = (None, None)  # (id_lote_etapa, id_lote) da carga atual
         self.sinais = _Sinais()
         self.estado = {"online": False, "usuario": None, "detalhe": "não verificado"}
+        # Sincronização (C2): push (C3) e pull do workspace da conta. Roda na thread de quem pede (rota, botão); o
+        # resultado volta à barra pela thread principal, via sinal, e ao painel pelo SSE.
+        self._ws = None
+        self.sinc = Sincronizacao(
+            abrir_workspace=self.workspace,
+            remota=lambda: db.transacao(self.amb, timeout_conexao=5),
+            alcancavel=lambda: db.alcancavel(self.amb),
+            ao_terminar=self._sincronizacao_terminou,
+        )
+        self.sincronizacao = {}
         self._timer = QTimer()
         self._timer.setInterval(60_000)
         self._timer.timeout.connect(self.verificar_rede)
@@ -81,7 +94,7 @@ class FeixePlugin:
         self.barra.conta.connect(self.pedir_credenciais)
         self.barra.camadas.connect(self.montar_camadas)
         self.barra.modo.connect(self.trocar_modo)
-        self.barra.sincronizar.connect(self.verificar_rede)
+        self.barra.sincronizar.connect(self.sincronizar_agora)
         self.barra.proxima.connect(self.proxima_carga)
         self.barra.pular.connect(self.pular_carga)
         self.barra.concluir.connect(self.concluir_carga)
@@ -95,6 +108,8 @@ class FeixePlugin:
         self.rotulo_status = QLabel("Feixe")
         self.iface.statusBarIface().addPermanentWidget(self.rotulo_status, 0)
         self.sinais.estado_mudou.connect(self._aplicar_estado)
+        self.sinais.sincronizacao_mudou.connect(self._aplicar_sincronizacao)
+        self._abrir_workspace_gravado()
         self.iniciar_servidor()
         self.verificar_rede()
         self._timer.start()
@@ -108,6 +123,7 @@ class FeixePlugin:
             self.servidor.parar()
             self.servidor = None
         db.esquecer()  # fecha as conexões guardadas no pool
+        self._fechar_workspace()
         if self.barra:
             for acao in self.barra.todas_acoes():
                 self.iface.unregisterMainWindowAction(acao)
@@ -130,6 +146,7 @@ class FeixePlugin:
                 self.zoom_para, xmin, ymin, xmax, ymax, srid
             ),
             transacao=lambda: db.transacao(self.amb),
+            sincronizar=self.sinc.sincronizar,
             publicar=self.broker.publicar,
             qgis=self.acao_qgis,
         )
@@ -167,6 +184,7 @@ class FeixePlugin:
             return
         if self.ctx:
             self.ctx.esquecer_eu()
+        self._fechar_workspace()  # outra conta, outro workspace
         r = dlg.resultado_teste or {}
         schema = "sim" if r.get("schema_feixe") else "não"
         self._publicar_estado(
@@ -194,7 +212,73 @@ class FeixePlugin:
             "qgis": Qgis.QGIS_VERSION,
             "clientes_sse": self.broker.conectados,
             **self.estado,
+            "sincronizacao": self.sinc.estado(),
         }
+
+    # --- workspace e sincronização (C2) ----------------------------------------------------------
+    def workspace(self):
+        """O workspace da conta conectada, aberto uma vez. A UF vem da lotação no SGBC (precisa do banco); offline,
+        da que ficou gravada no arquivo (`_abrir_workspace_gravado`)."""
+        cred = config.credenciais(self.amb)
+        if not cred:
+            raise RuntimeError("usuário e senha ainda não configurados")
+        if self._ws is not None and self._ws.usuario == cred[0]:
+            return self._ws
+        self._fechar_workspace()
+        uf = (self.ctx.eu() if self.ctx else {}).get("uf")
+        if not uf:
+            raise RuntimeError("a conta não tem UF de lotação no SGBC: sem ela não há escopo para sincronizar")
+        self._ws = wsmod.Workspace.abrir(self.amb.nome, cred[0], uf)
+        self.sinc.usar(self._ws)
+        return self._ws
+
+    def _abrir_workspace_gravado(self):
+        """Ao abrir o QGIS: se a conta já tem workspace, abre com a UF gravada nele, sem ir ao banco, para o estado
+        (pendências, última sincronização) aparecer mesmo offline."""
+        cred = config.credenciais(self.amb)
+        if not cred:
+            return
+        caminho = wsmod.caminho(self.amb.nome, cred[0])
+        uf = wsmod.uf_gravada(caminho)
+        if not uf:
+            return
+        try:
+            self._ws = wsmod.Workspace.abrir(self.amb.nome, cred[0], uf)
+            self.sinc.usar(self._ws)
+        except Exception as e:  # noqa: BLE001
+            log.erro(f"workspace: {e}")
+
+    def _fechar_workspace(self):
+        self.sinc.usar(None)
+        if self._ws is not None:
+            self._ws.fechar()
+            self._ws = None
+
+    def sincronizar_agora(self):
+        """Botão da barra: sincroniza numa thread (a rede pode demorar); o resultado volta pelo sinal."""
+        if config.credenciais(self.amb) is None:
+            self.pedir_credenciais()
+            return
+        if not self.servidor:
+            self.iniciar_servidor()
+
+        def rodar():
+            r = self.sinc.sincronizar()
+            if r["estado"] == "erro":
+                log.erro(f"sincronizar: {r.get('mensagem')}")
+
+        threading.Thread(target=rodar, name="feixe-sincronizar", daemon=True).start()
+
+    def _sincronizacao_terminou(self, est):
+        """Na thread que sincronizou: o painel fica sabendo pelo SSE e a barra pela thread principal."""
+        self.broker.publicar("sincronizacao", est)
+        self.sinais.sincronizacao_mudou.emit(est)
+
+    def _aplicar_sincronizacao(self, est):
+        self.sincronizacao = est
+        if est.get("online") is not None:
+            self.estado["online"] = est["online"]
+        self._publicar_estado({})
 
     def verificar_rede(self):
         """Checagem barata (TCP) em thread própria; o resultado volta pela thread principal via sinal."""
@@ -202,7 +286,10 @@ class FeixePlugin:
         def rodar():
             ok = db.alcancavel(self.amb)
             detalhe = f"{self.amb.descricao_banco} {'responde' if ok else 'não responde'}"
+            # Por enquanto o teste de rede só atualiza o estado; sincronizar sozinho em segundo plano é do C3.
+            self.sinc.marcar_rede(ok)
             self.sinais.estado_mudou.emit({"online": ok, "detalhe": detalhe})
+            self.sinais.sincronizacao_mudou.emit(self.sinc.estado())
 
         threading.Thread(target=rodar, name="feixe-rede", daemon=True).start()
 
@@ -211,8 +298,22 @@ class FeixePlugin:
         if self.barra:
             cred = config.credenciais(self.amb)
             estado = "sem_conta" if not cred else ("conectado" if self.estado["online"] else "fora")
-            self.barra.mostrar_estado(estado, cred[0] if cred else "")
+            self.barra.mostrar_sincronizacao(self._texto_sincronizacao())
+            pendentes = self.sincronizacao.get("pendentes") or 0
+            self.barra.mostrar_estado(estado, cred[0] if cred else "", pendentes=pendentes)
         self.broker.publicar("estado", self.estado)
+
+    def _texto_sincronizacao(self) -> str:
+        est = self.sincronizacao or {}
+        if est.get("em_andamento"):
+            return "Sincronizando…"
+        hora = hora_local(est.get("ultima_sincronizacao"))
+        texto = f"Sincronizado às {hora}" if hora else "Ainda não sincronizado"
+        if est.get("ultimo_estado") == "offline":
+            texto += " · a última tentativa ficou sem a CCAR"
+        elif est.get("ultimo_estado") == "erro":
+            texto += f" · a última tentativa falhou: {est.get('mensagem')}"
+        return texto
 
     def _aplicar_estado(self, novo: dict):
         self._publicar_estado(novo)

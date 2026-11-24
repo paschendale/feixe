@@ -151,6 +151,22 @@ def caminho(ambiente: str, usuario: str, raiz: Optional[str] = None) -> str:
     return os.path.join(raiz or raiz_padrao(), _pasta_segura(ambiente), _pasta_segura(usuario), "workspace.gpkg")
 
 
+def uf_gravada(path: str) -> Optional[str]:
+    """A UF gravada num workspace que já existe (None se não existe ou não é workspace), sem abrir para escrita: é
+    como o plugin abre o workspace sem ir ao banco (offline, a lotação no SGBC não está ao alcance)."""
+    if not os.path.isfile(path):
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=TIMEOUT_OCUPADO)
+        try:
+            r = conn.execute("SELECT valor FROM meta WHERE chave = 'uf'").fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+    return r[0] if r else None
+
+
 _travas: Dict[str, threading.RLock] = {}
 _travas_trava = threading.Lock()
 

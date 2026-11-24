@@ -29,7 +29,7 @@ class SemCredencial(Exception):
     pass
 
 
-def conninfo(amb: Ambiente, usuario: str = None, senha: str = None) -> str:
+def conninfo(amb: Ambiente, usuario: str = None, senha: str = None, timeout_conexao: int = 10) -> str:
     if usuario is None:
         cred = _credencial(amb)
         if not cred:
@@ -42,7 +42,7 @@ def conninfo(amb: Ambiente, usuario: str = None, senha: str = None) -> str:
         "user": usuario,
         "password": senha,
         "sslmode": amb.sslmode,
-        "connect_timeout": "10",
+        "connect_timeout": str(int(timeout_conexao)),
         "application_name": "feixe",
         # Conexão ociosa que a rede derrubou é percebida e fechada pelo libpq, em vez de travar na próxima consulta.
         "keepalives": "1",
@@ -198,12 +198,13 @@ def consultar(amb: Ambiente, sql: str, params=None) -> list:
 
 
 @contextmanager
-def transacao(amb: Ambiente, usuario: str = None, senha: str = None) -> Iterator[ExecutorPg]:
+def transacao(amb: Ambiente, usuario: str = None, senha: str = None, timeout_conexao: int = 10) -> Iterator[ExecutorPg]:
     """Transação numa conexão do pool, com a credencial do usuário: commit ao sair, rollback em qualquer erro.
 
     Uma conexão ociosa que a rede derrubou falha já na primeira consulta; nesse caso a requisição devolve o erro e a
-    conexão é descartada, e a próxima abre uma nova."""
-    info = conninfo(amb, usuario, senha)
+    conexão é descartada, e a próxima abre uma nova. `timeout_conexao` (segundos) mais curto para a sincronização,
+    que não pode deixar a pessoa esperando quando a CCAR não responde."""
+    info = conninfo(amb, usuario, senha, timeout_conexao)
     conn = _pool.pegar(info)
     try:
         with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
