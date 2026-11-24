@@ -10,6 +10,7 @@ quebra (rede caiu, banco reiniciou) é descartada. A credencial lida do Authenti
 from __future__ import annotations
 
 import contextlib
+import os
 import socket
 import threading
 import time
@@ -27,6 +28,24 @@ from .dados import ExecutorPg
 
 class SemCredencial(Exception):
     pass
+
+
+def ccar_simulada_fora(amb: Ambiente) -> bool:
+    """Só no ambiente de desenvolvimento: a CCAR inalcançável de mentira, para testar o offline sem derrubar o banco de
+    dev (que tem outros serviços no mesmo host). Liga com o arquivo `~/.feixe/dev/sem_ccar` (criar e apagar com o
+    QGIS aberto: vale na próxima conexão) ou com `FEIXE_DEV_SEM_CCAR=1` no ambiente do QGIS. Nunca em homologação nem
+    em produção: o nome do ambiente vem chumbado no build."""
+    if amb.nome != "dev":
+        return False
+    marca = os.path.join(os.path.expanduser("~"), ".feixe", "dev", "sem_ccar")
+    return os.environ.get("FEIXE_DEV_SEM_CCAR") == "1" or os.path.exists(marca)
+
+
+def _simular(amb: Ambiente) -> None:
+    if ccar_simulada_fora(amb):
+        raise psycopg2.OperationalError(
+            f'could not connect to server: CCAR simulada fora do ar (dev, ~/.feixe/dev/sem_ccar) at "{amb.host}"'
+        )
 
 
 def conninfo(amb: Ambiente, usuario: str = None, senha: str = None, timeout_conexao: int = 10) -> str:
@@ -142,6 +161,7 @@ def esquecer() -> None:
 
 
 def conectar(amb: Ambiente, usuario: str = None, senha: str = None):
+    _simular(amb)
     conn = psycopg2.connect(conninfo(amb, usuario, senha))
     conn.autocommit = False
     return conn
@@ -149,6 +169,8 @@ def conectar(amb: Ambiente, usuario: str = None, senha: str = None):
 
 def alcancavel(amb: Ambiente, timeout: float = 2.0) -> bool:
     """Teste barato de rede: o banco responde TCP? Decide online/offline sem autenticar."""
+    if ccar_simulada_fora(amb):
+        return False
     try:
         with socket.create_connection((amb.host, amb.porta), timeout=timeout):
             return True
@@ -204,6 +226,7 @@ def transacao(amb: Ambiente, usuario: str = None, senha: str = None, timeout_con
     Uma conexão ociosa que a rede derrubou falha já na primeira consulta; nesse caso a requisição devolve o erro e a
     conexão é descartada, e a próxima abre uma nova. `timeout_conexao` (segundos) mais curto para a sincronização,
     que não pode deixar a pessoa esperando quando a CCAR não responde."""
+    _simular(amb)
     info = conninfo(amb, usuario, senha, timeout_conexao)
     conn = _pool.pegar(info)
     try:
