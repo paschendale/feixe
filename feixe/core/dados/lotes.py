@@ -146,7 +146,8 @@ def criar_livre(
 # próxima etapa aberta e ainda não iniciada apareceria como "esperando" e gerar ou atribuir cargas iria para a etapa
 # concluída. O status nacional continua o da view.
 _CAMPOS_LOTE = (
-    "c.id_lote AS id, c.tipo, c.nome, c.folha_revisao, c.cod_projeto, p.nom_projeto AS projeto, c.id_tema, c.tema, "
+    "c.id_lote AS id, c.tipo, c.nome, coalesce(ab.folha_revisao, c.folha_revisao) AS folha_revisao, c.cod_projeto, "
+    "p.nom_projeto AS projeto, c.id_tema, c.tema, "
     "c.uf, c.status_nacional, coalesce(ab.etapa, c.etapa) AS etapa, coalesce(ab.fase, c.fase) AS fase, "
     "coalesce(ab.situacao, c.situacao) AS situacao, c.revisao_atual, "
     "CASE WHEN ab.id_lote_etapa IS NULL THEN c.cargas_total ELSE ab.cargas_total END AS cargas_total, "
@@ -159,7 +160,8 @@ _CAMPOS_LOTE = (
 )
 
 _ABERTA = (
-    "LEFT JOIN LATERAL (SELECT e.id_lote_etapa, e.etapa, e.fase, e.situacao, e.cargas_total, e.cargas_concluidas "
+    "LEFT JOIN LATERAL (SELECT e.id_lote_etapa, e.etapa, e.fase, e.situacao, e.cargas_total, e.cargas_concluidas, "
+    "e.folha_revisao "
     "FROM mapcartacomp.ctrl_lote_etapa e WHERE e.id_lote = c.id_lote AND e.situacao IN ('pendente', 'em_andamento') "
     "LIMIT 1) ab ON true"
 )

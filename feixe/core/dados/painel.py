@@ -68,6 +68,19 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
     for m in membros:
         por_chave[_chave(m["fase"], m["id_tema"], m["id_atividade"])]["lotes"].add(m["id_lote"])
 
+    # Folha na fila de alguém já tem destino: as cargas a atribuir dela contam como "na fila", não como sem dono.
+    fila = {
+        r["id_lote"]: r["nome"]
+        for r in ex.todos(
+            "SELECT le.id_lote, coalesce(u.nom_usuario::text, f.responsavel) AS nome FROM mapcartacomp.fila_folha f "
+            "JOIN mapcartacomp.lote_etapa le ON le.id = f.id_lote_etapa "
+            "LEFT JOIN mapcartctrl.t_usuario u ON u.nom_contausuario = f.responsavel "
+            f"WHERE f.atribuida_em IS NULL AND le.situacao IN {_ABERTAS} AND (%s::text IS NULL OR f.uf = %s)",
+            (uf, uf),
+        )
+    }
+    for g in grupos:
+        g["na_fila"] = 0
     lotes: Dict[int, Dict] = {}
     pessoas: Dict[str, Dict] = {}
     for c in _cargas(ex, uf):
@@ -81,9 +94,11 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
             if c["responsavel"]:
                 g["com_alguem"] += pendentes
                 g["pessoas"].add(c["responsavel"])
+            elif c["id_lote"] in fila:
+                g["na_fila"] += pendentes
             else:
                 g["a_atribuir"] += pendentes
-        lote = lotes.setdefault(c["id_lote"], {"responsaveis": {}, "a_atribuir": 0, "ultima": None})
+        lote = lotes.setdefault(c["id_lote"], {"responsaveis": {}, "a_atribuir": 0, "na_fila": 0, "ultima": None})
         lote["ultima"] = _mais_recente(lote["ultima"], c["ultima"])
         if c["responsavel"]:
             lote["responsaveis"][c["responsavel"]] = c["nome"]
@@ -98,6 +113,8 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
             if g and pendentes:
                 p["grupos"].add(g["chave"])
                 p["lotes"].add(c["id_lote"])
+        elif c["id_lote"] in fila:
+            lote["na_fila"] += pendentes
         else:
             lote["a_atribuir"] += pendentes
 
@@ -115,13 +132,21 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
     }
     detalhe_lotes = [
         {"id_lote": i, "responsaveis": sorted(d["responsaveis"].values()), "a_atribuir": d["a_atribuir"],
-         "ultima": d["ultima"], "iniciada_em": iniciadas.get(i)}
+         "na_fila": d["na_fila"], "fila_de": fila.get(i), "ultima": d["ultima"], "iniciada_em": iniciadas.get(i)}
         for i, d in lotes.items()
     ]  # fmt: skip
     for i, inicio in iniciadas.items():
         if i not in lotes:
             detalhe_lotes.append(
-                {"id_lote": i, "responsaveis": [], "a_atribuir": 0, "ultima": None, "iniciada_em": inicio}
+                {
+                    "id_lote": i,
+                    "responsaveis": [],
+                    "a_atribuir": 0,
+                    "na_fila": 0,
+                    "fila_de": fila.get(i),
+                    "ultima": None,
+                    "iniciada_em": inicio,
+                }
             )
     for p in pessoas.values():
         p["grupos"] = sorted(p["grupos"])

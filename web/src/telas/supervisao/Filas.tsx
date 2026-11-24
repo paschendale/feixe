@@ -162,7 +162,7 @@ export default function Filas() {
                       }}
                       aria-label={`Pôr folha na fila de ${x.nome}`}
                     >
-                      <option value="">{candidatas.length ? '+ Pôr uma folha na fila…' : 'Nenhuma folha com cargas a atribuir'}</option>
+                      <option value="">{candidatas.length ? '+ Pôr uma folha na fila…' : naFila.size ? 'Todas as folhas com cargas a atribuir já estão numa fila' : 'Nenhuma folha com cargas a atribuir'}</option>
                       {candidatas.map((c) => (
                         <option key={c.id_lote_etapa} value={c.id_lote_etapa}>
                           {c.rotulo} · {num(c.a_atribuir)} a atribuir

@@ -27,7 +27,13 @@ export function fraseSupervisao(p: PainelSupervisao, esperando: GrupoEsperando[]
   const temas = [...new Set(aAtribuir.map((g) => g.tema.toLowerCase()))]
   return (
     <>
-      {unidade}, <b>{plural(p.grupos.length, 'atividade está', 'atividades estão')}</b> em produção em <b>{plural(folhas, 'folha', 'folhas')}</b>.
+      {p.grupos.length ? (
+        <>
+          {unidade}, <b>{plural(p.grupos.length, 'atividade está', 'atividades estão')}</b> em produção em <b>{plural(folhas, 'folha', 'folhas')}</b>.
+        </>
+      ) : (
+        <>{unidade}, nenhuma folha está em produção.</>
+      )}
       {nEsperando > 0 && (
         <>
           {' '}
@@ -100,7 +106,7 @@ function PrecisaDeVoce({ p, esperando, lotes }: { p: PainelSupervisao; esperando
 
 export function CartaoAtividade({ g, link = true }: { g: GrupoAtividade; link?: boolean }) {
   const cq = ehCq(g)
-  const pendentes = g.com_alguem + g.a_atribuir
+  const pendentes = g.com_alguem + g.a_atribuir + g.na_fila
   return (
     <Bloco className="flex-[1_1_340px]">
       <div className="flex flex-col gap-0.5">
@@ -122,12 +128,14 @@ export function CartaoAtividade({ g, link = true }: { g: GrupoAtividade; link?: 
           partes={[
             { valor: g.concluidas, cor: COR.concluida, rotulo: cq ? 'avaliadas' : 'concluídas' },
             { valor: g.com_alguem, cor: COR.comAlguem, rotulo: cq ? 'com avaliador' : 'com alguém' },
+            { valor: g.na_fila, cor: '#B8C7DA', rotulo: 'na fila' },
           ]}
         />
         <Legenda
           itens={[
             ...(g.concluidas ? [{ cor: COR.concluida, rotulo: cq ? 'avaliadas' : 'concluídas' }] : []),
             ...(g.com_alguem ? [{ cor: COR.comAlguem, rotulo: cq ? 'com avaliador' : 'com alguém' }] : []),
+            ...(g.na_fila ? [{ cor: '#B8C7DA', rotulo: 'na fila' }] : []),
             ...(g.a_atribuir ? [{ cor: COR.vazio, rotulo: cq ? 'sem avaliador' : 'a atribuir' }] : []),
           ]}
         />
@@ -136,6 +144,11 @@ export function CartaoAtividade({ g, link = true }: { g: GrupoAtividade; link?: 
         <span>
           <b style={{ color: g.a_atribuir ? COR.alerta : undefined }}>{num(g.a_atribuir)}</b> {cq ? 'sem avaliador' : 'a atribuir'}
         </span>
+        {g.na_fila > 0 && (
+          <span>
+            <b>{num(g.na_fila)}</b> na fila
+          </span>
+        )}
         {cq && !g.concluidas ? (
           <span className="text-muted-foreground">avaliação no QGIS na fase D</span>
         ) : (

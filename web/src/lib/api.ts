@@ -260,7 +260,7 @@ export type EtapaFluxo = {
   conta_revisao: boolean
   fracao_critica: number | null
   passagens?: number
-  atividades: { id: number; nome: string }[]
+  atividades: { id: number; nome: string; geracao?: string }[]
 }
 
 export type FluxoCompleto = {
@@ -306,10 +306,11 @@ export type GrupoAtividade = {
   concluidas: number
   com_alguem: number
   a_atribuir: number
+  na_fila: number
   concluidas_7d: number
 }
 
-export type LotePainel = { id_lote: number; responsaveis: string[]; a_atribuir: number; ultima: string | null; iniciada_em: string | null }
+export type LotePainel = { id_lote: number; responsaveis: string[]; a_atribuir: number; na_fila: number; fila_de: string | null; ultima: string | null; iniciada_em: string | null }
 
 export type PessoaPainel = {
   conta: string

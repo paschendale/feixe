@@ -150,6 +150,18 @@ def registrar(r, ctx) -> None:
             _no_qgis(ctx, "cargas_mudaram", None)
         return 200, res
 
+    @r.rota("POST", "/api/cargas/descartar", exige=("supervisor",))
+    def _descartar(req):
+        from .lotes import uf_de
+
+        with ctx.tx() as ex:
+            res = dc.descartar(ex, uf_de(ctx.eu()), campo(req, "ids", lambda v: [int(x) for x in v]))
+        if res["tiradas"]:
+            ctx.publicar("carga", {"descartadas": res["tiradas"]})
+            ctx.publicar("lote", {"descartadas": res["lote_etapas"]})
+            _no_qgis(ctx, "cargas_geradas")
+        return 200, res
+
     @r.rota("POST", "/api/qgis/selecao_cargas", exige=("supervisor",))
     def _selecao(req):
         # Cargas selecionadas no QGIS (em qualquer camada do grupo Feixe que tenha as cargas).

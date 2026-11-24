@@ -264,6 +264,26 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
               {supervisor && aberta && lote.pessoas.some((p) => !p.conta && p.total > p.concluidas) && (
                 <Button onClick={() => distribuir([lote.id])}>Distribuir</Button>
               )}
+              {supervisor && aberta && (atual?.cargas_total ?? 0) > atual!.cargas_concluidas && (
+                <Button
+                  variant="outline"
+                  disabled={!conectado}
+                  title="Para as células sobre o mar ou fora da área a mapear: selecione no QGIS, numa camada de cargas do grupo Feixe, as que não devem existir"
+                  onClick={async () => {
+                    try {
+                      const sel = await enviar<{ ids: number[] }>('/api/qgis/selecao_cargas')
+                      if (!sel.ids.length) return avisar('Selecione no QGIS as cargas a tirar (camada de cargas do grupo Feixe).', 'erro')
+                      if (!window.confirm(`Tirar ${plural(sel.ids.length, 'carga selecionada', 'cargas selecionadas')} no QGIS? Elas deixam de existir; as concluídas ficam.`)) return
+                      const r = await enviar<{ tiradas: number; ficaram: number }>('/api/cargas/descartar', { ids: sel.ids })
+                      avisar(`${plural(r.tiradas, 'carga tirada', 'cargas tiradas')}${r.ficaram ? `; ${plural(r.ficaram, 'ficou', 'ficaram')} (concluída ou de outra etapa)` : ''}.`)
+                    } catch (e) {
+                      avisar((e as Error).message, 'erro')
+                    }
+                  }}
+                >
+                  Tirar cargas selecionadas no QGIS
+                </Button>
+              )}
             </div>
 
             {fluxo && (

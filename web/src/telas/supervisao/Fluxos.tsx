@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Bloco, COR, Carregando, Conteudo } from '@/components/painel'
-import type { Catalogo, FluxoCompleto, Lote } from '@/lib/api'
+import type { Catalogo, EtapaFluxo, FluxoCompleto, Lote } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { plural } from '@/lib/formato'
 import { href, navegar, useRota } from '@/lib/rotas'
@@ -20,6 +20,16 @@ const FASE: Record<string, string> = {
   correcao_inspecao: 'correção',
   correcao_topologica: 'topologia',
   envio_gcq: 'envio GCQ',
+}
+
+// O que acontece quando a etapa abre (D-109): cargas pela grade, amostras do CQ (fase D), cargas à mão ou nada a
+// distribuir (a etapa começa já em andamento).
+function aoAbrir(e: EtapaFluxo) {
+  const geram = e.atividades.filter((a) => a.geracao !== 'nenhuma')
+  if (geram.some((a) => a.geracao === 'grade')) return null
+  if (e.fase === 'cq') return { texto: 'amostras pelo plano de CQ (fase D)', alerta: false }
+  if (geram.length) return { texto: 'cargas não saem da grade: inicie pela gaveta', alerta: true }
+  return { texto: 'sem cargas: começa assim que abre, sem nada a distribuir', alerta: true }
 }
 
 // Supervisão › Fluxos: cada fluxo é a sequência de etapas de um tema na unidade; as folhas andam por ele quando o
@@ -95,6 +105,18 @@ export default function Fluxos() {
               {f.projeto} · {f.tema} · {f.ativo ? 'ativo' : 'inativo'}
             </span>
           </div>
+          {f.etapas.filter((e) => aoAbrir(e)?.alerta && ['aquisicao', 'revisao', 'correcao_inspecao', 'correcao_topologica'].includes(e.fase)).length > 0 && (
+            <div className="rounded-lg px-3.5 py-2.5 text-[13px]" style={{ background: COR.alertaFundo, color: '#5C3D00' }}>
+              {(() => {
+                const sem = f.etapas.filter((e) => aoAbrir(e)?.alerta && ['aquisicao', 'revisao', 'correcao_inspecao', 'correcao_topologica'].includes(e.fase))
+                return (
+                  <>
+                    {sem.map((e) => e.nome).join(', ')} {sem.length === 1 ? 'não gera' : 'não geram'} cargas pela grade: ao abrir, não há o que distribuir. Se a etapa tem trabalho a dividir entre a equipe, escolha no editor uma atividade com cargas pela grade.
+                  </>
+                )
+              })()}
+            </div>
+          )}
           {noFim > 0 && (
             <div className="rounded-lg px-3.5 py-2.5 text-[13px]" style={{ background: COR.alertaFundo, color: '#5C3D00' }}>
               {plural(noFim, 'folha terminou', 'folhas terminaram')} a última etapa e não {noFim === 1 ? 'tem' : 'têm'} próxima. Para a CCAR, {noFim === 1 ? 'segue' : 'seguem'} no status dessa etapa até se decidir como encerrar a folha.
@@ -113,6 +135,11 @@ export default function Fluxos() {
                     <span className="truncate text-[13px] text-muted-foreground" title={e.atividades.map((a) => a.nome).join('\n')}>
                       {e.atividades.map((a) => a.nome).join(', ') || 'sem atividade'}
                     </span>
+                    {aoAbrir(e) && (
+                      <span className="text-xs" style={{ color: aoAbrir(e)!.alerta ? COR.alerta : 'var(--muted-foreground)' }}>
+                        {aoAbrir(e)!.texto}
+                      </span>
+                    )}
                   </div>
                   <span className="hidden justify-self-start rounded-full bg-[#E9EDF2] px-2 py-0.5 text-xs md:inline">{FASE[e.fase] ?? e.fase_nome ?? e.fase}</span>
                   <span className="hidden text-[13px] text-muted-foreground md:inline">

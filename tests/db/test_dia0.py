@@ -163,3 +163,37 @@ def test_proxima_etapa_em_varias_folhas(amb):
     # A revisão não tem atividade: preparar a inicia.
     novas = [a["id_lote_etapa"] for a in r["abertas"]]
     assert sorted(i["id_lote_etapa"] for i in dc.preparar(ex, "DF", novas)["iniciadas"]) == sorted(novas)
+
+
+def test_achados_do_dia0_fila_rotulo_e_cargas_no_mar(amb):
+    from feixe.core.dados import lotes as dl
+    from feixe.core.dados import painel as dp
+
+    cen, ex = amb
+    lote, le = _livre(cen, "litoral", -44.5)
+    dc.preparar(ex, "DF", [le])
+    # Antes de começar, a folha já mostra a revisão da passagem aberta (não a 0 da revisão atual).
+    rotulo = ex.um("SELECT mapcartacomp.f_rotulo(tipo, nome, 1) AS r FROM mapcartacomp.lote WHERE id = %s", (lote,))[
+        "r"
+    ]
+    assert dl.um(ex, lote)["folha_revisao"] == rotulo
+
+    # Na fila de alguém (que ainda tem o que fazer): as cargas contam como "na fila", não como sem dono.
+    _, outra = _livre(cen, "ocupada", -44.5)
+    dc.preparar(ex, "DF", [outra])
+    dfi.distribuir_uma(ex, "DF", outra, "t_apm_a")
+    dfi.distribuir_uma(ex, "DF", le, "t_apm_a")
+    linha = next(x for x in dp.supervisao(ex, "DF")["lotes"] if x["id_lote"] == lote)
+    assert linha["a_atribuir"] == 0 and linha["na_fila"] > 0 and linha["fila_de"] == "Teste t_apm_a"
+
+    # Tirar as cargas sobre o mar: só as não concluídas, de etapa aberta.
+    ids = [
+        r["id"]
+        for r in ex.todos("SELECT id FROM mapcartacomp.carga_trabalho WHERE id_lote_etapa = %s ORDER BY id", (le,))
+    ]
+    ex.executar(
+        "UPDATE mapcartacomp.carga_trabalho SET concluido = true, responsavel = 't_apm_b' WHERE id = %s", (ids[0],)
+    )
+    r = dc.descartar(ex, "DF", ids[:3])
+    assert (r["tiradas"], r["ficaram"], r["lote_etapas"]) == (2, 1, [le])
+    assert dc.descartar(ex, "GO", ids[3:4])["tiradas"] == 0

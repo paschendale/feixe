@@ -217,7 +217,7 @@ export default function Folhas() {
             {itens.length === 0 && (
               <tr>
                 <td colSpan={7} className="p-4 text-muted-foreground">
-                  Nenhuma folha com esses filtros.
+                  {todos.length ? 'Nenhuma folha com esses filtros.' : supervisor ? 'A unidade ainda não tem folhas no Feixe: use "Novas folhas" acima.' : 'A unidade ainda não tem folhas no Feixe.'}
                 </td>
               </tr>
             )}
@@ -251,6 +251,7 @@ export default function Folhas() {
                           {num(l.cargas_concluidas ?? 0)}/{num(l.cargas_total)}
                         </span>
                         {!!x?.a_atribuir && <span style={{ color: COR.alerta }}>· {num(x.a_atribuir)} {grupo?.fase === 'cq' ? 'sem avaliador' : 'a atribuir'}</span>}
+                        {!!x?.na_fila && <span className="text-muted-foreground">· na fila de {(x.fila_de ?? '').split(' ')[0]}</span>}
                       </div>
                     ) : (
                       <span className="text-muted-foreground">sem cargas</span>

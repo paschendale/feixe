@@ -50,6 +50,7 @@ _JUNCOES = (
     "JOIN mapcartacomp.atividade at ON at.id = c.id_atividade "
 )
 ABERTAS = ("pendente", "em_andamento")
+_SQL_ABERTAS = "('pendente', 'em_andamento')"
 JANELA_DESFAZER_HORAS = 24
 
 
@@ -347,6 +348,25 @@ def _iniciar(ex: Executor, ids_lote_etapa: List[int], observacao: str) -> List[i
             (observacao, [novo_uuid() for _ in feitas], feitas),
         )
     return feitas
+
+
+def descartar(ex: Executor, uf: str, ids: List[int]) -> Dict:
+    """Tira cargas que não deviam existir (as células sobre o mar das folhas do litoral: a grade cobre a folha inteira e
+    o banco não tem o contorno da terra). Só cargas não concluídas, de passagens abertas da UF; as outras ficam e voltam
+    em `ficaram`. Decisão do supervisor, a partir da seleção no QGIS."""
+    if not ids:
+        raise ErroDados("selecione no QGIS as cargas a tirar", 400)
+    tiradas = ex.todos(
+        "DELETE FROM mapcartacomp.carga_trabalho c USING mapcartacomp.lote_etapa le "
+        "WHERE le.id = c.id_lote_etapa AND c.id = ANY(%s) AND c.uf = %s AND NOT c.concluido "
+        f"AND le.situacao IN {_SQL_ABERTAS} RETURNING c.id, c.id_lote_etapa",
+        (list(ids), uf),
+    )
+    return {
+        "tiradas": len(tiradas),
+        "ficaram": len(set(ids)) - len(tiradas),
+        "lote_etapas": sorted({t["id_lote_etapa"] for t in tiradas}),
+    }
 
 
 # --- Equipe e atribuição (B5) ----------------------------------------------------------------------------------------
