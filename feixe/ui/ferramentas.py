@@ -34,6 +34,7 @@ class FerramentaFolha(QgsMapTool):
         self._ao_clicar = ao_clicar
         self._ao_retangulo = ao_retangulo
         self._inicio = None
+        self._botao = Qt.LeftButton
         self._retangulo = False
         self._arrastou = False
         self._banda = None
@@ -48,14 +49,18 @@ class FerramentaFolha(QgsMapTool):
             self._banda.reset(QgsWkbTypes.PolygonGeometry)
 
     def canvasPressEvent(self, e):  # noqa: N802
-        if e.button() != Qt.LeftButton:
+        # No Mac, Ctrl é Qt.MetaModifier (Qt.ControlModifier é a tecla Command) e o sistema entrega Ctrl e clique
+        # como botão direito: os dois valem como "Ctrl e arrastar".
+        ctrl_mac = e.button() == Qt.RightButton and bool(e.modifiers() & Qt.MetaModifier)
+        if e.button() != Qt.LeftButton and not ctrl_mac:
             return
+        self._botao = e.button()
         self._inicio = e.pos()
-        self._retangulo = bool(e.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier))
+        self._retangulo = ctrl_mac or bool(e.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier | Qt.MetaModifier))
         self._arrastou = False
 
     def canvasMoveEvent(self, e):  # noqa: N802
-        if self._inicio is None or not (e.buttons() & Qt.LeftButton):
+        if self._inicio is None or not (e.buttons() & self._botao):
             return
         if not self._arrastou and (e.pos() - self._inicio).manhattanLength() < self.ARRASTO_MINIMO:
             return
@@ -72,7 +77,7 @@ class FerramentaFolha(QgsMapTool):
         self._banda.setToGeometry(QgsGeometry.fromRect(QgsRectangle(conv(self._inicio), conv(e.pos()))), None)
 
     def canvasReleaseEvent(self, e):  # noqa: N802
-        if e.button() != Qt.LeftButton or self._inicio is None:
+        if e.button() != self._botao or self._inicio is None:
             return
         inicio, self._inicio = self._inicio, None
         if self._arrastou and not self._retangulo:

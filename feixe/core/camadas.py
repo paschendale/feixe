@@ -567,6 +567,16 @@ def remover_malha() -> None:
         QgsProject.instance().removeMapLayer(camada.id())
 
 
+def _valor(v):
+    """Atributo de feição como valor Python: no QGIS 3.22 a 3.28, atributo nulo volta como QVariant nulo, que não vira
+    JSON nem compara com None."""
+    from qgis.PyQt.QtCore import QVariant
+
+    if isinstance(v, QVariant):
+        return None if v.isNull() else v.value()
+    return v
+
+
 def _estado(id_folha: int, no_feixe: Dict[int, str], escolhidas: set) -> str:
     if id_folha in escolhidas:
         return ESCOLHIDA
@@ -655,7 +665,7 @@ def marcar_malha(no_feixe: Dict[int, str], escolhidas: List[int]) -> None:
     mudancas = {}
     for f in camada.getFeatures():
         novo = {i_estado: _estado(f["id"], no_feixe, marcadas), i_rotulo: no_feixe.get(f["id"])}
-        if f["estado"] != novo[i_estado] or f["rotulo"] != novo[i_rotulo]:
+        if _valor(f["estado"]) != novo[i_estado] or _valor(f["rotulo"]) != novo[i_rotulo]:
             mudancas[f.id()] = novo
     if mudancas:
         camada.dataProvider().changeAttributeValues(mudancas)
@@ -672,7 +682,7 @@ def folhas_da_malha(geometria, so_cobertas: bool = False) -> List[Dict]:
         return []
     pedido = QgsFeatureRequest().setFilterRect(geometria.boundingBox())
     return [
-        {"id": f["id"], "cd_mi": f["cd_mi"], "nm_carta": f["nm_carta"], "estado": f["estado"], "rotulo": f["rotulo"]}
+        {k: _valor(f[k]) for k in ("id", "cd_mi", "nm_carta", "estado", "rotulo")}
         for f in camada.getFeatures(pedido)
         if f.geometry().intersects(geometria)
         and (not so_cobertas or f.geometry().intersection(geometria).area() > 1e-9)
