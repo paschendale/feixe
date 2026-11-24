@@ -140,7 +140,17 @@ export function NovaFolha({ aberto, fechar: fecharDialogo, fluxoInicial = null }
             No QGIS: clique numa folha para escolher ou tirar; <b>Ctrl ou Shift e arraste</b> para escolher todas as folhas de um retângulo. Em azul, as escolhidas; hachuradas, as que já estão no Feixe{fluxo ? ' neste tema' : ' na sua unidade'}.
           </p>
         )}
-        <div className="flex min-h-9 flex-wrap gap-2">
+        {escolhidas.length > 0 && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">
+              {escolhidas.length === 1 ? '1 folha escolhida' : `${escolhidas.length} folhas escolhidas`}
+            </span>
+            <Button variant="ghost" size="sm" onClick={() => setEscolhidas([])}>
+              Tirar todas
+            </Button>
+          </div>
+        )}
+        <div className="flex max-h-48 min-h-9 flex-wrap content-start gap-2 overflow-y-auto">
           {escolhidas.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma folha escolhida.</p>}
           {escolhidas.map((f) => (
             <span key={f.id} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-ibge pr-1.5 pl-3 text-sm text-white">
