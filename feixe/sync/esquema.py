@@ -19,13 +19,14 @@ Referências pequenas (tema, fase, atividade, etapa do fluxo) são só leitura e
 
 from __future__ import annotations
 
+import uuid
 from typing import Dict, List, Optional, Tuple
 
 from .geometria import SRID
 
 # Versão do esquema do workspace. Subiu sem migração em MIGRACOES: o workspace é recriado (é cache), levando junto
-# a outbox e o sync_log, que são o que não se pode perder.
-VERSAO = 1
+# a outbox e o sync_log, que são o que não se pode perder. 2: `chave` e `acao` na outbox (C3).
+VERSAO = 2
 
 _AUDITORIA = [
     ("criado_em", "DATETIME"),
@@ -199,7 +200,9 @@ CONTROLE = [
     "    hora TEXT NOT NULL,\n"  # hora da ação, UTC: é ela que disputa com o atualizado_em do servidor
     "    versao_base TEXT,\n"  # atualizado_em remoto da linha quando foi alterada (nulo num insert)
     "    tentativas INTEGER NOT NULL DEFAULT 0,\n"
-    "    erro TEXT\n"
+    "    erro TEXT,\n"
+    "    chave TEXT,\n"  # uuid do item: vai no sync_log da CCAR, para o push repetido não aplicar duas vezes (C3)
+    "    acao TEXT\n"  # uuid da transação local: os itens de uma ação (o puxar da fila) vão juntos (C3)
     ")",
     "CREATE INDEX outbox_linha_idx ON outbox (tabela, uuid)",
     # Mesmos campos que mapcartacomp.sync_log (005), com id local.
@@ -217,8 +220,18 @@ CONTROLE = [
     "CREATE INDEX sync_log_em_idx ON sync_log (em)",
 ]
 
-# Migrações do esquema do workspace: versão de origem -> função(conexão) que leva à seguinte. Vazio na versão 1.
-MIGRACOES: Dict[int, object] = {}
+
+def _v1_para_v2(conn) -> None:
+    """Outbox com `chave` (uuid do item, para a idempotência do push) e `acao` (a transação local que gravou o item).
+    Itens que já estavam lá: chave nova, e a hora como ação (os itens de uma transação têm a mesma hora)."""
+    conn.execute("ALTER TABLE outbox ADD COLUMN chave TEXT")
+    conn.execute("ALTER TABLE outbox ADD COLUMN acao TEXT")
+    for (id_item,) in conn.execute("SELECT id FROM outbox").fetchall():
+        conn.execute("UPDATE outbox SET chave = ?, acao = hora WHERE id = ?", (str(uuid.uuid4()), id_item))
+
+
+# Migrações do esquema do workspace: versão de origem -> função(conexão) que leva à seguinte.
+MIGRACOES: Dict[int, object] = {1: _v1_para_v2}
 
 
 # --- núcleo do GeoPackage 1.2 (requisitos 10 a 13 e 21 a 23) ----------------------------------------------------------

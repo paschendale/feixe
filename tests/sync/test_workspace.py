@@ -96,6 +96,29 @@ def test_esquema_velho_ou_outra_uf_recria_levando_outbox_e_sync_log(ws, motivo):
     assert os.path.exists(ws.caminho + ".anterior")
 
 
+def test_esquema_1_migra_a_outbox_com_chave_e_acao(ws):
+    """Workspace da versão 1 (outbox sem `chave` e `acao`): a migração acrescenta as colunas sem perder itens."""
+    with ws.transacao() as ex:
+        uuid = ex.um("SELECT uuid FROM carga_trabalho WHERE id = 1001")["uuid"]
+        ex.atualizar("carga_trabalho", uuid, {"concluido": True})
+    conn = ws.conn
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute(
+        "CREATE TABLE outbox_v1 AS SELECT id, tabela, uuid, operacao, campos, hora, versao_base, tentativas, erro "
+        "FROM outbox"
+    )
+    conn.execute("DROP TABLE outbox")
+    conn.execute("ALTER TABLE outbox_v1 RENAME TO outbox")
+    conn.execute("UPDATE meta SET valor = '1' WHERE chave = 'versao_esquema'")
+    conn.execute("COMMIT")
+    ws.fechar()
+    with Workspace.abrir("dev", USUARIO, "DF", path=ws.caminho) as w2, w2.leitura() as ex:
+        (item,) = ex.pendentes()
+        assert item["uuid"] == uuid and item["chave"] and item["acao"] == item["hora"]
+        assert ex.um("SELECT count(*) AS n FROM carga_trabalho")["n"] > 0  # migrou, não recriou
+        assert ex.meta("versao_esquema") == str(esquema.VERSAO)
+
+
 def test_gravar_uma_carga_poe_a_linha_na_outbox(ws):
     with ws.transacao() as ex:
         antes = ex.um("SELECT uuid, versao_base, sujo FROM carga_trabalho WHERE id = 1001")

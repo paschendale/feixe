@@ -4,7 +4,8 @@
 - `esquema`: as tabelas do workspace e o núcleo do GeoPackage;
 - `geometria`: WKB e blob do GeoPackage em Python puro;
 - `pull`: o escopo da pessoa da CCAR para o workspace, por comparação de versões (C2);
-- `sincronizar`: push (C3) e pull de uma conta, uma de cada vez, e o estado para a barra e o painel (C2).
+- `push`: a outbox para a CCAR, com a última escrita vencendo, as regras de novo no servidor e o sync_log (C3);
+- `sincronizar`: push e pull de uma conta, uma de cada vez, e o estado para a barra e o painel (C2, C3).
 
 As funções da execução sobre o workspace ficam em `core/dados/local/`, ao lado das da CCAR.
 """

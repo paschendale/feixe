@@ -210,13 +210,15 @@ class ExecutorLocal(Executor):
     """Executor sobre o workspace, dentro de uma transação aberta. Parâmetros com `?` (SQLite).
 
     Além de `todos`/`um`/`executar`, sabe quem é o usuário (`usuario`, o `current_user` da CCAR), a UF e a hora da
-    ação (`agora`, uma só por transação: todos os itens da outbox de uma ação têm a mesma hora)."""
+    ação (`agora`, uma só por transação: todos os itens da outbox de uma ação têm a mesma hora). `acao` identifica a
+    transação nos itens da outbox: o push (C3) trata os itens de uma ação juntos (o puxar da fila é uma unidade)."""
 
     def __init__(self, conn: sqlite3.Connection, usuario: str, uf: str, hora: Optional[dt.datetime] = None):
         self.conn = conn
         self.usuario = usuario
         self.uf = uf
         self.agora = hora or agora()
+        self.acao = novo_uuid()
 
     @property
     def agora_iso(self) -> str:
@@ -271,9 +273,10 @@ class ExecutorLocal(Executor):
 
     def _outbox(self, tabela, uuid, operacao, campos, versao_base) -> None:
         self.executar(
-            "INSERT INTO outbox (tabela, uuid, operacao, campos, hora, versao_base) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO outbox (tabela, uuid, operacao, campos, hora, versao_base, chave, acao) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (tabela, uuid, operacao, json.dumps(campos, default=_json_padrao, ensure_ascii=False),
-             iso_exato(self.agora), versao_base),
+             iso_exato(self.agora), versao_base, novo_uuid(), self.acao),
         )  # fmt: skip
 
     # --- escrita vinda da CCAR (pull, C2), sem outbox ---

@@ -13,8 +13,10 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.sync_log (
     detalhe jsonb
 );
 
-COMMENT ON COLUMN mapcartacomp.sync_log.resultado IS 'Valores previstos: aplicado, conflito_vencido, conflito_perdido, erro.';
-COMMENT ON COLUMN mapcartacomp.sync_log.detalhe IS 'Valor descartado num conflito, ou o erro.';
+COMMENT ON COLUMN mapcartacomp.sync_log.resultado IS
+    'Valores previstos: aplicado, conflito_vencido, conflito_perdido, recusado (regra de negócio no servidor), erro.';
+COMMENT ON COLUMN mapcartacomp.sync_log.detalhe IS
+    'Chaves dos itens da outbox (itens), valores local e do servidor com quem e quando, o lado descartado, o motivo da recusa ou o erro.';
 
 CREATE INDEX IF NOT EXISTS sync_log_em_idx ON mapcartacomp.sync_log (uf, em);
 CREATE INDEX IF NOT EXISTS sync_log_uuid_idx ON mapcartacomp.sync_log (uuid);

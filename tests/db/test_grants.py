@@ -173,3 +173,70 @@ def test_avaliacao_recalcula_plano(mundo):
     assert cur.rowcount == 1
     assert _um(cur, "SELECT resultado FROM mapcartacomp.cq_plano WHERE id = %s", (plano,)) == "aprovado"
     assert _um(cur, "SELECT concluido FROM mapcartacomp.carga_trabalho WHERE id = %s", (carga,)) is True
+
+
+def test_push_grava_tudo_com_os_grants_gerados(mundo, tmp_path):
+    """C3: o push da conta de execução (concluir, o puxar da fila com a passagem iniciada e a linha do histórico, e o
+    sync_log) roda só com os GRANTs gerados. A leitura do SGBC (mapcartctrl) é concedida pelo próprio SGBC às contas;
+    aqui ela é dada ao grupo de teste dentro da transação, como já é para as consultas de papéis."""
+    import contextlib
+
+    import psycopg2.extras
+    from feixe.core.dados import ExecutorPg
+    from feixe.core.dados.local import cargas as lc
+    from feixe.sync import pull, push
+    from feixe.sync.workspace import Workspace
+
+    from tests.db.test_atribuir import _conta
+
+    cur, d = mundo
+    conta = "feixe_teste_df"
+    _conta(cur, conta)
+    cur.execute("GRANT USAGE ON SCHEMA mapcartctrl TO feixe_teste_grupo")
+    cur.execute(
+        "GRANT SELECT ON mapcartctrl.t_usuario, mapcartctrl.t_prd_perfil_usuarioprojeto, mapcartctrl.t_projeto "
+        "TO feixe_teste_grupo"
+    )
+    etapa_b = _um(
+        cur,
+        "INSERT INTO mapcartacomp.fluxo_etapa (id_fluxo, ordem, fase, nome) VALUES (%s, 3, 'aquisicao', 'Aquisição 2') "
+        "RETURNING id",
+        (d["DF"]["fluxo"],),
+    )
+    cur.execute(
+        "INSERT INTO mapcartacomp.fluxo_etapa_atividade (id_fluxo_etapa, id_atividade) VALUES (%s, %s)",
+        (etapa_b, d["ativ"]),
+    )
+    le_b = _um(
+        cur,
+        "INSERT INTO mapcartacomp.lote_etapa (uuid, id_lote, id_fluxo_etapa, situacao) VALUES (%s, %s, %s, 'pendente') "
+        "RETURNING id",
+        (str(uuid.uuid4()), d["DF"]["lote"], etapa_b),
+    )
+    livre = _um(
+        cur,
+        "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_atividade, geom) "
+        "SELECT %s, %s, id_atividade, geom FROM mapcartacomp.carga_trabalho WHERE id = %s RETURNING id",
+        (str(uuid.uuid4()), le_b, d["DF"]["carga"]),
+    )
+    cur.execute(
+        "INSERT INTO mapcartacomp.fila_folha (uuid, id_lote_etapa, responsavel, ordem) VALUES (%s, %s, %s, 1)",
+        (str(uuid.uuid4()), le_b, conta),
+    )
+    _como(cur, conta)
+    dcur = cur.connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    @contextlib.contextmanager
+    def remota():
+        yield ExecutorPg(dcur)
+
+    with Workspace.abrir("dev", conta, "DF", raiz=str(tmp_path)) as w:
+        pull.puxar(w, ExecutorPg(dcur))
+        with w.transacao() as ex:
+            assert lc.concluir(ex, d["DF"]["carga"])["fila"]["atribuidas"] == 1
+        r = push.enviar(w, remota)
+    assert r["resultados"]["aplicado"] == r["enviados"] == 5 and not r["avisos"]
+    assert _um(cur, "SELECT responsavel FROM mapcartacomp.carga_trabalho WHERE id = %s", (livre,)) == conta
+    assert _um(cur, "SELECT situacao FROM mapcartacomp.lote_etapa WHERE id = %s", (le_b,)) == "em_andamento"
+    assert _um(cur, "SELECT count(*) FROM mapcartacomp.lote_etapa_hist WHERE id_lote_etapa = %s", (le_b,)) == 1
+    assert _um(cur, "SELECT count(*) FROM mapcartacomp.sync_log WHERE usuario = %s", (conta,)) == 5
