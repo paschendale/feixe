@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import threading
@@ -12,7 +13,7 @@ from qgis.PyQt.QtGui import QDesktopServices
 from qgis.PyQt.QtWidgets import QLabel, QMessageBox
 
 from .core import ambiente as ambmod
-from .core import camadas, config, db, dispatch, log
+from .core import camadas, config, db, dispatch, edicao, log
 from .core.dados import ErroDados
 from .core.versao import raiz_plugin, versao_plugin
 from .server.api import Contexto, ErroApi, criar_roteador
@@ -84,6 +85,8 @@ class FeixePlugin:
         )
         self.trabalhador = Trabalhador(self._sincronizar_fundo)
         self.sincronizacao = {}
+        # Camadas Minhas cargas do workspace com a edição ligada à outbox (C4): id -> (camada, funções ligadas).
+        self._edicao = {}
         self._timer = QTimer()
         self._timer.setInterval(60_000)
         self._timer.timeout.connect(self.verificar_rede)
@@ -115,6 +118,10 @@ class FeixePlugin:
         self.iface.statusBarIface().addPermanentWidget(self.rotulo_status, 0)
         self.sinais.estado_mudou.connect(self._aplicar_estado)
         self.sinais.sincronizacao_mudou.connect(self._aplicar_sincronizacao)
+        # Edição pela tabela de atributos e pelo formulário (C4): toda camada Minhas cargas do workspace que entra no
+        # projeto (ao montar, ou ao abrir um projeto salvo com o grupo Feixe) passa a gravar pela outbox.
+        QgsProject.instance().layersAdded.connect(self._ligar_edicao)
+        self._ligar_edicao(list(QgsProject.instance().mapLayers().values()))
         self._abrir_workspace_gravado()
         self.iniciar_servidor()
         self.trabalhador.iniciar()
@@ -125,6 +132,9 @@ class FeixePlugin:
 
     def unload(self):
         self._timer.stop()
+        with contextlib.suppress(TypeError):  # o initGui parou antes de ligar (ambiente inválido)
+            QgsProject.instance().layersAdded.disconnect(self._ligar_edicao)
+        self._desligar_edicao()
         self.trabalhador.parar()
         self.fim_folhas()
         if self.servidor:
@@ -550,6 +560,62 @@ class FeixePlugin:
         na supervisão (na CCAR), todas releem."""
         camadas.recarregar_cargas(so_workspace)
         self.mostrar_progresso(progresso)
+
+    # --- edição pela tabela de atributos e pelo formulário (C4) ---------------------------------------------------
+    def _ligar_edicao(self, novas):
+        for camada in novas:
+            if not camadas.editavel_pelo_feixe(camada) or camada.id() in self._edicao:
+                continue
+            ligada = lambda *_, c=camada: self._antes_de_gravar(c)  # noqa: E731 - com ou sem o stopEditing do sinal
+            # Fora da edição a camada volta a acompanhar o workspace (em edição, as recargas passam por ela).
+            parou = lambda: QTimer.singleShot(0, lambda: camadas.recarregar_cargas(so_workspace=True))  # noqa: E731
+            camada.beforeCommitChanges.connect(ligada)
+            camada.editingStopped.connect(parou)
+            id_camada = camada.id()
+            camada.willBeDeleted.connect(lambda i=id_camada: self._edicao.pop(i, None))
+            self._edicao[id_camada] = (camada, ligada, parou)
+
+    def _desligar_edicao(self):
+        for camada, ligada, parou in list(self._edicao.values()):
+            with contextlib.suppress(TypeError, RuntimeError):  # a camada já foi apagada
+                camada.beforeCommitChanges.disconnect(ligada)
+                camada.editingStopped.disconnect(parou)
+        self._edicao.clear()
+
+    def _antes_de_gravar(self, camada):
+        """O QGIS vai gravar a edição de Minhas cargas: a mudança sai do buffer (o OGR não grava nada) e vai pelo
+        caminho da barra, com as regras e a outbox (`core/edicao.py`)."""
+        desejadas, outras = edicao.ler(camada)
+        if not edicao.esvaziar(camada):
+            log.erro("edição de Minhas cargas: o buffer não esvaziou; o workspace vai recusar a gravação do OGR")
+        if outras:
+            self.iface.messageBar().pushMessage(
+                "Feixe",
+                "Em Minhas cargas só a situação (Concluída) muda pelo QGIS; as outras mudanças foram desfeitas.",
+                Qgis.Info,
+                8,
+            )
+        r = None
+        if desejadas and self._pronto():
+            r = self._executar(rotas_cargas.editar, desejadas)
+        if r is not None:
+            feito, avisos = rotas_cargas.mensagens_edicao(r)
+            if feito:
+                self.iface.messageBar().pushMessage("Feixe", " ".join(feito), Qgis.Success, 5)
+            for aviso in avisos:
+                self.iface.messageBar().pushMessage("Feixe", aviso, Qgis.Warning, 10)
+        # Depois do commit (a camada ainda está no meio dele): as camadas do workspace mostram o que ficou valendo.
+        QTimer.singleShot(0, lambda: self._depois_de_gravar(camada, r))
+
+    def _depois_de_gravar(self, camada, r):
+        camadas.recarregar_cargas(so_workspace=True)
+        if camada.isEditable():
+            # "Salvar edição" sem sair da edição: o buffer está vazio e a camada pode reler a situação; a junção (a
+            # folha e o progresso) acerta quando a edição termina.
+            camada.dataProvider().reloadData()
+            camada.triggerRepaint()
+        if r and r.get("progresso"):
+            self.mostrar_progresso(r["progresso"])
 
     def mostrar_progresso(self, progresso):
         if self.rotulo_status and progresso:

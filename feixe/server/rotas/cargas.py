@@ -7,7 +7,7 @@ dividir, descartar, equipe): na CCAR, como antes."""
 from __future__ import annotations
 
 import contextlib
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 from ...core.dados import ErroDados
 from ...core.dados import cargas as dc
@@ -52,6 +52,63 @@ def desfazer(ctx, id_carga: int) -> Dict:
     with ctx.local() as ex:
         r = lc.desfazer(ex, id_carga)
     return _mudou(ctx, r)
+
+
+def editar(ctx, mudancas: Dict[int, bool]) -> Dict:
+    """A edição de `concluido` pela camada Minhas cargas (tabela de atributos, formulário), já tirada do buffer do QGIS
+    (C4, `core/edicao.py`): cada carga vai pelo mesmo caminho da barra (`concluir` ou `desfazer`, com as regras do D-94
+    e a fila), na sua transação, para a recusa de uma não impedir as outras. Quem chama recarrega as camadas: aqui não
+    se toca no QGIS (a camada ainda está no meio do commit). Volta o que foi feito e as recusas, com o motivo."""
+    ctx.exigir_pronto()
+    feitas, recusadas, fila, progresso = [], [], None, None
+    for id_carga, concluido in mudancas.items():
+        folha = None
+        try:
+            with ctx.local() as ex:
+                atual = lc.uma(ex, id_carga)
+                if atual is None:
+                    raise ErroDados("carga não encontrada", 404)
+                folha = atual["folha_revisao"]
+                if bool(atual["concluido"]) == bool(concluido):
+                    continue
+                r = lc.concluir(ex, id_carga) if concluido else lc.desfazer(ex, id_carga)
+        except ErroDados as e:
+            recusadas.append({"id": id_carga, "folha_revisao": folha, "motivo": e.mensagem})
+            continue
+        _publicar(ctx, r)
+        feitas.append({"id": id_carga, "concluido": bool(concluido), "folha_revisao": folha})
+        progresso = r["progresso"]
+        fila = r.get("fila") or fila
+    return {"feitas": feitas, "recusadas": recusadas, "progresso": progresso, "fila": fila}
+
+
+def mensagens_edicao(r: Dict) -> Tuple[List[str], List[str]]:
+    """O resultado de `editar` em textos para a barra de mensagens do QGIS: (feito, avisos de recusa)."""
+    ok, avisos = [], []
+    feitas = r.get("feitas") or []
+    p = r.get("progresso")
+    concluidas = [f for f in feitas if f["concluido"]]
+    desfeitas = [f for f in feitas if not f["concluido"]]
+    sufixo = f" · {p['folha_revisao']} · {p['concluidas']}/{p['total']}" if p else ""
+    if len(feitas) == 1:
+        ok.append(("Carga concluída" if concluidas else "Conclusão desfeita") + sufixo)
+    elif feitas:
+        partes = []
+        if concluidas:
+            partes.append(f"{len(concluidas)} cargas concluídas")
+        if desfeitas:
+            partes.append(f"{len(desfeitas)} conclusões desfeitas")
+        ok.append(" e ".join(partes) + sufixo)
+    f = r.get("fila")
+    if f:
+        ok.append(
+            f"A próxima folha da sua fila é a {f['folha_revisao']} ({f['atribuidas']} cargas), já atribuída a você."
+        )
+    for x in r.get("recusadas") or []:
+        folha = f" da {x['folha_revisao']}" if x.get("folha_revisao") else ""
+        motivo = x["motivo"][:1].upper() + x["motivo"][1:]
+        avisos.append(f"Carga {x['id']}{folha}: {motivo}. A mudança foi desfeita.")
+    return ok, avisos
 
 
 def uma(ctx, id_carga: int) -> Optional[Dict]:

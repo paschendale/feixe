@@ -216,3 +216,70 @@ def test_gerar_varias_passagens_com_recusa_de_uma(montar, monkeypatch):
     assert r.despachar("POST", "/api/cargas/gerar", {}, {"lote_etapas": []})[0] == 400
     r, _ = montar(["apm"])
     assert r.despachar("POST", "/api/cargas/gerar", {}, {"lote_etapas": [1]})[0] == 403
+
+
+# --- C4: edição pela camada Minhas cargas (tabela de atributos, formulário) -----------------------------------------
+
+
+def _ctx_edicao(ws, eventos=None, acordar=None):
+    ctx = Contexto(
+        workspace=lambda: ws,
+        publicar=lambda e, d: (eventos if eventos is not None else []).append((e, d)),
+        acordar=(acordar if acordar is not None else []).append,
+    )
+    ctx._eu = {"papeis": ["apm"], "uf": "DF", "perfis": []}
+    return ctx
+
+
+def test_editar_pela_camada_passa_pelas_regras_e_pela_outbox(ws):
+    from feixe.server.rotas import cargas as rc
+
+    eventos, acordar = [], []
+    r = rc.editar(_ctx_edicao(ws, eventos, acordar), {1001: True, 1002: False, 3001: True, 1009: True, 999: True})
+    assert r["feitas"] == [{"id": 1001, "concluido": True, "folha_revisao": "2534-1"}]  # 1002 já estava pendente
+    assert {x["id"]: x["motivo"] for x in r["recusadas"]} == {
+        3001: "a etapa desta folha já foi encerrada pelo supervisor",
+        1009: "esta carga não está atribuída a você",
+        999: "carga não encontrada",
+    }
+    assert r["progresso"]["concluidas"] == 1 and r["fila"] is None
+    (item,) = _outbox(ws)
+    assert item["campos"]["concluido"] is True and item["campos"]["concluido_em"]  # a hora vai explícita
+    assert [e for e, _ in eventos] == ["carga"] and acordar  # o painel fica sabendo; a sincronização acorda
+    ok, avisos = rc.mensagens_edicao(r)
+    assert ok == ["Carga concluída · 2534-1 · 1/3"]
+    assert avisos[0] == (
+        "Carga 3001 da 2536-1: A etapa desta folha já foi encerrada pelo supervisor. A mudança foi desfeita."
+    )
+
+
+def test_editar_a_ultima_pendente_puxa_a_fila_e_desfazer_tem_janela(ws):
+    import datetime as dt
+
+    from feixe.server.rotas import cargas as rc
+
+    r = rc.editar(_ctx_edicao(ws), {1001: True, 1002: True, 1003: True})
+    assert len(r["feitas"]) == 3 and r["fila"]["folha_revisao"] == "2535-0" and r["fila"]["atribuidas"] == 2
+    ok, _ = rc.mensagens_edicao(r)
+    assert ok[0] == "3 cargas concluídas · 2534-1 · 3/3" and "2535-0 (2 cargas)" in ok[1]
+    antiga = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=30)
+    with ws.transacao() as ex:
+        u = ex.um("SELECT uuid FROM carga_trabalho WHERE id = 1001")["uuid"]
+        ex.atualizar("carga_trabalho", u, {"concluido_em": antiga})
+    r = rc.editar(_ctx_edicao(ws), {1001: False, 1002: False})
+    assert [f["id"] for f in r["feitas"]] == [1002]
+    assert r["recusadas"] == [
+        {"id": 1001, "folha_revisao": "2534-1", "motivo": "só dá para desfazer até 24 horas depois de concluir"}
+    ]
+    assert rc.mensagens_edicao(r)[0] == ["Conclusão desfeita · 2534-1 · 2/3"]
+
+
+def test_editar_com_o_workspace_preparando_e_recusado(ws):
+    from feixe.server.api import ErroApi
+    from feixe.server.rotas import cargas as rc
+
+    with ws.transacao() as ex:
+        ex.executar("DELETE FROM meta WHERE chave = 'ultima_sincronizacao'")
+    with pytest.raises(ErroApi) as e:
+        rc.editar(_ctx_edicao(ws), {1001: True})
+    assert e.value.status == 409 and _outbox(ws) == []
