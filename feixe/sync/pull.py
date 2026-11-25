@@ -69,11 +69,6 @@ def escopo_cargas_pessoa(alias: str) -> str:
     )
 
 
-def escopo_cargas_uf(alias: str) -> str:
-    """Toda a carga_trabalho da UF: só para medir (S-03), não é escopo de ninguém."""
-    return f"{alias}.uf = %(uf)s"
-
-
 def escopos(cargas: Callable[[str], str] = escopo_cargas_pessoa) -> Dict[str, str]:
     """WHERE de cada tabela do espelho, sobre o alias `t`."""
     return {

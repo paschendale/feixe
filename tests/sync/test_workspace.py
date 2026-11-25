@@ -147,7 +147,7 @@ def test_escrita_que_falha_nao_deixa_linha_nem_outbox(ws):
         assert ex.pendentes() == []
 
 
-def test_inserir_linha_local_sem_id_e_confirmar_no_push(ws):
+def test_inserir_linha_local_sem_id(ws):
     with ws.transacao() as ex:
         u = ex.inserir("cq_inspecao", {"id_lote": 1, "id_carga_trabalho": 1001, "elemento": "Omissão",
                                        "geom": wkb_ponto(-47.9, -15.8),
@@ -157,12 +157,6 @@ def test_inserir_linha_local_sem_id_e_confirmar_no_push(ws):
         (item,) = ex.pendentes()
         assert item["operacao"] == "insert" and item["campos"]["elemento"] == "Omissão"
         assert item["campos"]["geom"].startswith("0101000000")  # WKB em hexadecimal
-        # O C3 confirma: a linha ganha o id da CCAR e a versão do servidor, e fica limpa.
-        ex.confirmar(item["id"], "aplicado", id_remoto=77, versao_remota=VERSAO)
-        assert ex.um("SELECT id, sujo, versao_base FROM cq_inspecao WHERE uuid = ?", (u,)) == {
-            "id": 77, "sujo": 0, "versao_base": "2026-11-20T12:00:00.123456Z"}  # fmt: skip
-        assert ex.pendentes() == []
-        assert ex.um("SELECT resultado FROM sync_log")["resultado"] == "aplicado"
 
 
 def test_gravar_remoto_atualiza_pela_chave_sem_outbox(ws):

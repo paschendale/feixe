@@ -6,18 +6,6 @@ from typing import Dict, Iterable, List, Optional
 
 from . import ErroDados, Executor, novo_uuid
 
-
-def temas_com_lotes(ex: Executor, uf: Optional[str]) -> List[Dict]:
-    """Temas que têm lote na UF (todas as UFs se nula), com quantos lotes, em ordem de nome."""
-    sql = (
-        "SELECT t.id, t.nome, count(*) AS lotes FROM mapcartacomp.tema t "
-        "JOIN mapcartacomp.lote l ON l.id_tema = t.id"
-        + (" WHERE l.uf = %s" if uf else "")
-        + " GROUP BY t.id, t.nome ORDER BY t.nome"
-    )
-    return ex.todos(sql, (uf,) if uf else ())
-
-
 # --- Criar e listar lotes (B3) ---------------------------------------------------------------------------------------
 
 _ARTICULACAO = "mapcartctrl.v_articulacao_scn_100000"

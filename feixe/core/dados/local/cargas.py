@@ -189,20 +189,8 @@ def proxima(
     return _carga(min(candidatas, key=chave))
 
 
-def _fuso(nome: str) -> dt.tzinfo:
-    """O fuso de quem olha (IANA). O Python do QGIS no Windows pode não ter a base de fusos (`tzdata`): aí vale o fuso
-    da própria estação, que é o de quem está diante dela."""
-    try:
-        from zoneinfo import ZoneInfo
-
-        return ZoneInfo(nome)
-    except Exception:  # noqa: BLE001
-        return dt.datetime.now().astimezone().tzinfo
-
-
-def execucao(ex, fuso: str, dias: int = 14) -> Dict:
-    """Minhas conclusões por dia no fuso de quem olha: as barras do Início e de Execução."""
-    tz = _fuso(fuso)
+def execucao(ex, tz: dt.tzinfo, dias: int = 14) -> Dict:
+    """Minhas conclusões por dia no fuso de quem olha (`core.dados.fuso`): as barras do Início e de Execução."""
     desde = (ex.agora - dt.timedelta(days=dias + 1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     linhas = ex.todos(
         "SELECT concluido_em FROM carga_trabalho WHERE responsavel = ? AND concluido AND concluido_em > ?",

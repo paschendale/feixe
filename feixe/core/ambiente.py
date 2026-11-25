@@ -29,10 +29,6 @@ class Ambiente:
     sslmode: str = "prefer"
 
     @property
-    def producao(self) -> bool:
-        return self.nome == "producao"
-
-    @property
     def descricao_banco(self) -> str:
         return f"{self.host}:{self.porta}/{self.banco}"
 

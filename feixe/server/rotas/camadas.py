@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from ...core.dados import grupos
 from ...core.dados.local import grupos as grupos_local
-from ..api import SEM_CCAR, ErroApi, sem_conexao
-
-TODOS = ("gerente", "supervisor", "avaliador", "apm", "consulta")
+from ..api import SEM_CCAR, TODOS, ErroApi, sem_conexao
 
 SUPERVISAO_SEM_CCAR = (
     "A supervisão precisa da conexão com a CCAR, que não está respondendo: o grupo Feixe veio só com a Execução. "

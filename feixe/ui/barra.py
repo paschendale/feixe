@@ -171,8 +171,6 @@ class BarraFeixe(QToolBar):
         self.addAction(self.acao_proxima)
         self.addAction(self.acao_pular)
         self.addAction(self.acao_concluir)
-        self._ancora_acoes = self.addSeparator()
-        self._ancora_acoes.setVisible(False)
         self.mostrar_estado("sem_conta")
 
     # --- montagem -------------------------------------------------------------------------------
@@ -216,10 +214,6 @@ class BarraFeixe(QToolBar):
         """Marca no menu o modo ligado (None: grupo Feixe ausente)."""
         for k, a in self.acoes_modo.items():
             a.setChecked(k == chave)
-
-    def adicionar_acao(self, acao: QAction) -> None:
-        """Ação de alta frequência nova (fases seguintes), depois de concluir carga."""
-        self.insertAction(self._ancora_acoes, acao)
 
     # --- estado ---------------------------------------------------------------------------------
     def mostrar_estado(self, estado: str, conta: str = "", detalhe: Optional[str] = None, pendentes: int = 0) -> None:

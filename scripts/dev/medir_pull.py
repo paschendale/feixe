@@ -134,7 +134,8 @@ def main():
                 "GROUP BY 1 ORDER BY count(*) DESC LIMIT 1"
             )["responsavel"]
         medir("a_pessoa", temp, vezes, usuario=quem)
-        medir("b_uf", temp, vezes, usuario=quem, onde=pull.escopos(pull.escopo_cargas_uf))
+        # Toda a carga_trabalho da UF: só para medir (S-03), não é escopo de ninguém.
+        medir("b_uf", temp, vezes, usuario=quem, onde=pull.escopos(lambda a: f"{a}.uf = %(uf)s"))
         if db:
             ponta_a_ponta(temp)
     finally:

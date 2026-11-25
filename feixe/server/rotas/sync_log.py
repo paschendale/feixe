@@ -9,17 +9,9 @@ from typing import Optional
 
 from ...core.dados import sync_log as sl
 from ...core.dados.local import sync_log as lsl
-from ...core.dados.local.cargas import _fuso
-from ..api import ErroApi, inteiro
+from ..api import ErroApi, fuso_de, inteiro
 from .cargas import EXECUTORES
 from .lotes import uf_de
-
-
-def fuso_de(req) -> dt.tzinfo:
-    nome = req.query.get("fuso") or "America/Sao_Paulo"
-    if len(nome) > 64 or not all(ch.isalnum() or ch in "/_+-" for ch in nome):
-        raise ErroApi(400, "fuso inválido")
-    return _fuso(nome)
 
 
 def _dia(texto: Optional[str], tz: dt.tzinfo, nome: str) -> Optional[dt.datetime]:

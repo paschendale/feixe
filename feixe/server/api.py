@@ -6,13 +6,14 @@ Isso mantém o servidor testável fora do QGIS.
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 import threading
 from contextlib import contextmanager, suppress
 from typing import Any, Callable, ContextManager, Dict, Iterable, List, Optional, Tuple
 
 from ..core import papeis
-from ..core.dados import ErroDados, Executor
+from ..core.dados import ErroDados, Executor, fuso
 
 
 class ErroApi(Exception):
@@ -54,6 +55,18 @@ def inteiro(valor: Any, nome: str = "id") -> int:
         return int(valor)
     except (TypeError, ValueError):
         raise ErroApi(400, f"{nome} inválido") from None
+
+
+# Qualquer papel do Feixe: as rotas que todos podem chamar.
+TODOS = papeis.PRECEDENCIA
+
+
+def fuso_de(req: Requisicao) -> dt.tzinfo:
+    """O fuso de quem olha (`?fuso=`, IANA; sem ele, o de Brasília), validado antes de chegar à base de fusos."""
+    nome = req.query.get("fuso") or "America/Sao_Paulo"
+    if len(nome) > 64 or not all(ch.isalnum() or ch in "/_+-" for ch in nome):
+        raise ErroApi(400, "fuso inválido")
+    return fuso(nome)
 
 
 Rota = Tuple[str, "re.Pattern[str]", Callable[[Requisicao], Tuple[int, Any]]]

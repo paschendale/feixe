@@ -61,10 +61,6 @@ class Tabela:
     def chaves(self) -> List[str]:
         return [c.strip() for c in self.chave.split(",")]
 
-    @property
-    def colunas_dominio(self) -> List[str]:
-        return [c for c, _ in self.dominio] + (["geom"] if self.geom else [])
-
     def ddl(self) -> str:
         cols: List[str] = []
         if self.sincroniza:
@@ -176,8 +172,6 @@ TABELAS: Dict[str, Tabela] = {
     ]
 }
 # fmt: on
-
-ESPELHO = [n for n, t in TABELAS.items() if t.sincroniza]
 
 # Índices do que a execução filtra e junta.
 INDICES = [

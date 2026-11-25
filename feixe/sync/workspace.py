@@ -353,32 +353,6 @@ class ExecutorLocal(Executor):
              None if detalhe is None else json.dumps(detalhe, default=_json_padrao, ensure_ascii=False)),
         )  # fmt: skip
 
-    def confirmar(
-        self, id_item: int, resultado: str, id_remoto: Optional[int] = None, versao_remota: Any = None,
-        detalhe: Any = None,
-    ) -> None:  # fmt: skip
-        """O push (C3) terminou um item: sai da outbox, entra no sync_log; a linha recebe o `id` da CCAR (primeiro
-        push de linha criada offline) e a nova versão base, e só fica limpa quando não sobra item dela na outbox."""
-        item = self.um("SELECT tabela, uuid, operacao FROM outbox WHERE id = ?", (id_item,))
-        if item is None:
-            return
-        self.executar("DELETE FROM outbox WHERE id = ?", (id_item,))
-        self.registrar_log(item["tabela"], item["uuid"], item["operacao"], resultado, detalhe)
-        sets, params = [], []
-        if id_remoto is not None:
-            sets.append("id = ?")
-            params.append(id_remoto)
-        if versao_remota is not None:
-            sets.append("versao_base = ?")
-            params.append(iso_exato(versao_remota))
-        resta = self.um(
-            "SELECT 1 AS x FROM outbox WHERE tabela = ? AND uuid = ? LIMIT 1", (item["tabela"], item["uuid"])
-        )
-        if not resta:
-            sets.append("sujo = 0")
-        if sets:
-            self.executar(f"UPDATE {item['tabela']} SET {', '.join(sets)} WHERE uuid = ?", (*params, item["uuid"]))
-
 
 def _espelho(tabela: str) -> esquema.Tabela:
     t = esquema.TABELAS.get(tabela)

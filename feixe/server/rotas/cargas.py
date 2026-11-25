@@ -13,6 +13,7 @@ from ...core.dados import ErroDados
 from ...core.dados import cargas as dc
 from ...core.dados.local import cargas as lc
 from ..api import ErroApi, campo, inteiro
+from .lotes import uf_de
 
 # Quem pode ter carga atribuída. Consulta só olha.
 EXECUTORES = ("apm", "avaliador", "supervisor")
@@ -164,22 +165,16 @@ def registrar(r, ctx) -> None:
     @r.rota("POST", "/api/lotes/preparar", exige=("supervisor",))
     def _preparar(req):
         # Para a folha que ficou sem cargas (a geração falhou, ou a etapa ganhou atividade depois de aberta).
-        from .lotes import uf_de
-
         return 200, preparar(ctx, uf_de(ctx.eu()), campo(req, "lote_etapas", lambda v: [int(x) for x in v]))
 
     @r.rota("GET", "/api/equipe", exige=("supervisor",))
     def _equipe(req):
-        from .lotes import uf_de
-
         projeto = req.query.get("projeto")
         with ctx.tx() as ex:
             return 200, {"itens": dc.equipe(ex, uf_de(ctx.eu()), inteiro(projeto, "projeto") if projeto else None)}
 
     @r.rota("POST", "/api/cargas/descartar", exige=("supervisor",))
     def _descartar(req):
-        from .lotes import uf_de
-
         with ctx.tx() as ex:
             res = dc.descartar(ex, uf_de(ctx.eu()), campo(req, "ids", lambda v: [int(x) for x in v]))
         if res["tiradas"]:
