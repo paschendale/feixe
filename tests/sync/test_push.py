@@ -244,39 +244,44 @@ def test_aplicado(ccar, cen, ws1):
 
 
 def test_conflito_vencido_pela_hora_da_acao(ccar, cen, ws1, ws2):
-    """As duas estações concluem a mesma carga; a 2 envia primeiro. A ação da 1 é mais nova que a da 2 (embora mais
-    velha que o envio da 2): vence, e o valor do servidor vai para o detalhe com a hora da ação que o gravou."""
+    """A 2 conclui e envia primeiro; a 1 desfaz depois (concluiu e desfez offline). A ação da 1 é mais nova que a da
+    2 (embora mais velha que o envio da 2): vence, e o valor do servidor vai para o detalhe com a hora da ação que o
+    gravou."""
     _puxar(ccar, ws1)
     _puxar(ccar, ws2)
     h2, h1 = _antes(10), _antes(5)
     with ws2.transacao(h2) as ex:
         lc.concluir(ex, cen.minhas[0])
     _enviar(ccar, ws2)
-    with ws1.transacao(h1) as ex:
+    with ws1.transacao(_antes(6)) as ex:
         lc.concluir(ex, cen.minhas[0])
+    with ws1.transacao(h1) as ex:
+        lc.desfazer(ex, cen.minhas[0])
     chaves = _chaves(ws1)
     r = _enviar(ccar, ws1)
     assert r["resultados"]["conflito_vencido"] == 1
     srv = cen.linha("carga_trabalho", cen.minhas[0])
-    assert abs((srv["concluido_em"] - h1).total_seconds()) < 120
+    assert srv["concluido"] is False and srv["concluido_em"] is None
     log = cen.logs(srv["uuid"])[-1]
     d = log["detalhe"]
     assert log["resultado"] == "conflito_vencido" and d["descartado"] == "servidor"
     assert d["servidor"]["origem_em"] == "acao" and d["servidor"]["por"] == EU
     assert abs((dt.datetime.fromisoformat(d["servidor"]["em"].replace("Z", "+00:00")) - h2).total_seconds()) < 120
-    assert d["servidor"]["valores"]["concluido"] is True and d["local"]["valores"]["concluido"] is True
+    assert d["servidor"]["valores"]["concluido"] is True and d["local"]["valores"]["concluido"] is False
     assert _local(ws1, "carga_trabalho", cen.minhas[0])["versao_base"] == iso_exato(srv["atualizado_em"])
     _registrado(cen, ws1, chaves)
 
 
 def test_conflito_perdido(ccar, cen, ws1, ws2):
-    """A estação 1 concluiu antes, offline; a 2 concluiu depois e enviou primeiro. A 1 perde: o workspace dela fica
-    com a conclusão da 2 e a dela vai para o detalhe."""
+    """A estação 1 concluiu e desfez antes, offline; a 2 concluiu depois e enviou primeiro. A 1 perde: o workspace
+    dela fica com a conclusão da 2 e o desfazer vai para o detalhe."""
     _puxar(ccar, ws1)
     _puxar(ccar, ws2)
     h1, h2 = _antes(10), _antes(5)
-    with ws1.transacao(h1) as ex:
+    with ws1.transacao(_antes(11)) as ex:
         lc.concluir(ex, cen.minhas[1])
+    with ws1.transacao(h1) as ex:
+        lc.desfazer(ex, cen.minhas[1])
     with ws2.transacao(h2) as ex:
         lc.concluir(ex, cen.minhas[1])
     _enviar(ccar, ws2)
@@ -287,11 +292,38 @@ def test_conflito_perdido(ccar, cen, ws1, ws2):
     srv = cen.linha("carga_trabalho", cen.minhas[1])
     assert srv["concluido_em"] == depois_da_2["concluido_em"] and srv["atualizado_em"] == depois_da_2["atualizado_em"]
     c = _local(ws1, "carga_trabalho", cen.minhas[1])
-    assert c["sujo"] == 0 and c["concluido_em"].startswith(iso_exato(srv["concluido_em"])[:19])
+    assert c["sujo"] == 0 and c["concluido"] == 1 and c["concluido_em"].startswith(iso_exato(srv["concluido_em"])[:19])
     log = cen.logs(srv["uuid"])[-1]
     assert log["resultado"] == "conflito_perdido" and log["detalhe"]["descartado"] == "local"
-    assert log["detalhe"]["local"]["valores"]["concluido_em"].startswith(h1.strftime("%Y-%m-%dT%H:%M"))
+    assert log["detalhe"]["local"]["valores"]["concluido"] is False
     _registrado(cen, ws1, chaves)
+
+
+@pytest.mark.parametrize("primeiro", ["a_mais_antiga", "a_mais_nova"])
+def test_mesma_carga_concluida_nas_duas_estacoes_fica_a_mais_antiga(ccar, cen, ws1, ws2, primeiro):
+    """D-133: concluir a mesma carga nas duas pontas não é disputa de última escrita. Fica a conclusão mais antiga,
+    em qualquer ordem de envio, sem conflito na tela; o workspace que perdeu a hora fica com a da CCAR."""
+    _puxar(ccar, ws1)
+    _puxar(ccar, ws2)
+    antiga, nova = _antes(30), _antes(5)
+    with ws1.transacao(antiga) as ex:
+        lc.concluir(ex, cen.minhas[0])
+    with ws2.transacao(nova) as ex:
+        lc.concluir(ex, cen.minhas[0])
+    ordem = [ws1, ws2] if primeiro == "a_mais_antiga" else [ws2, ws1]
+    for ws in ordem:
+        r = _enviar(ccar, ws)
+        assert r["resultados"].get("conflito_vencido", 0) == 0 and r["resultados"].get("conflito_perdido", 0) == 0
+        assert r["avisos"] == []
+    srv = cen.linha("carga_trabalho", cen.minhas[0])
+    assert srv["concluido"] is True and abs((srv["concluido_em"] - antiga).total_seconds()) < 120
+    for ws in (ws1, ws2):
+        _puxar(ccar, ws)  # a sincronização puxa depois de enviar: quem enviou primeiro recebe a hora corrigida
+        c = _local(ws, "carga_trabalho", cen.minhas[0])
+        assert c["sujo"] == 0 and c["concluido_em"].startswith(iso_exato(srv["concluido_em"])[:19])
+    assert {log["resultado"] for log in cen.logs(srv["uuid"])} == {"aplicado"}
+    d = cen.logs(srv["uuid"])[-1]["detalhe"]
+    assert "fica a conclusão mais antiga" in (d.get("nota") or d.get("sem_efeito") or "")
 
 
 def test_idempotente_quando_a_resposta_se_perde(ccar, cen, ws1, monkeypatch):
