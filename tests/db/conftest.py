@@ -9,6 +9,12 @@ import os
 
 import pytest
 
+try:
+    import psycopg2 as _psycopg2  # noqa: F401
+except ImportError:
+    # Sem psycopg2 (CI), os módulos que importam psycopg2.extras no topo nem são coletados.
+    collect_ignore_glob = ["test_*.py"]
+
 RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
