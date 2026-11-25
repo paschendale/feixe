@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { COR, Carregando, Conteudo, Fichas } from '@/components/painel'
-import type { Pessoa, ResultadoAtribuicao } from '@/lib/api'
+import type { Pessoa, ResultadoPassar } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { lista, num, parado, plural, quando } from '@/lib/formato'
 import { href, navegar, useRota } from '@/lib/rotas'
@@ -30,11 +30,21 @@ export default function Equipe() {
   const ativa = rota.query.get('grupo') ?? 'todas'
 
   async function aplicar() {
-    if (!passar || !lotes.dados) return
-    const abertas = lotes.dados.itens.filter((l) => l.situacao === 'pendente' || l.situacao === 'em_andamento').map((l) => l.id_lote_etapa_atual)
+    if (!passar || !equipe) return
+    const para = passar.para === '-' ? null : passar.para
+    const nome = equipe.itens.find((y) => y.conta === para)?.nome.split(' ')[0]
     try {
-      const r = await enviar<ResultadoAtribuicao>('/api/cargas/atribuir', { lote_etapas: abertas, de: passar.de, responsavel: passar.para === '-' ? null : passar.para })
-      avisar(`${num(r.atribuidas)} cargas passadas.`)
+      const r = await enviar<ResultadoPassar>('/api/equipe/passar', { de: passar.de, para })
+      if (!para) avisar(`${plural(r.liberadas, 'carga ficou', 'cargas ficaram')} a atribuir.`)
+      else
+        avisar(
+          [
+            r.agora > 0 && `${plural(r.agora, 'carga passou', 'cargas passaram')} para ${nome} agora`,
+            r.na_fila.length > 0 && `${lista(r.na_fila.map((f) => f.folha_revisao))} ${r.na_fila.length === 1 ? 'entrou' : 'entraram'} na fila de ${nome}`,
+          ]
+            .filter(Boolean)
+            .join('; ') + '.',
+        )
       setPassar(null)
     } catch (e) {
       avisar((e as Error).message, 'erro')

@@ -129,7 +129,8 @@ def test_uma_folha_por_pessoa_e_a_revisao_as_cegas(amb):
     # Trocar a pessoa da folha que está na fila tira da fila antiga; quem está livre recebe na hora.
     _conta(cen.cur, "t_apm_d")
     assert dfi.distribuir_uma(ex, "DF", quarta["id_lote_etapa"], "t_apm_d")["atribuida"]
-    assert dfi.listar(ex, "DF")["itens"] == []
+    nossas = {f["id_lote_etapa"] for f in s["folhas"]}
+    assert [i for i in dfi.listar(ex, "DF")["itens"] if i["id_lote_etapa"] in nossas] == []
 
     # Na etapa seguinte da mesma folha, quem fez a anterior não é sugerido, se há outra pessoa.
     lote, le = lotes[0]
