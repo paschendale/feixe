@@ -587,44 +587,6 @@ def _renovar_juncoes(camada: QgsVectorLayer, renovadas: set) -> None:
         camada.addJoin(j)
 
 
-# --- Prévia das cargas geradas pela grade (B4) ------------------------------------------------------------------------
-NOME_PREVIA = "Prévia de cargas"
-
-
-def remover_previa() -> None:
-    projeto = QgsProject.instance()
-    projeto.removeMapLayers([c.id() for c in projeto.mapLayersByName(NOME_PREVIA)])
-
-
-def mostrar_previa(celulas: List[Dict]) -> QgsVectorLayer:
-    """Camada temporária (memória) com as células que seriam gravadas, no topo do projeto. Substitui a anterior."""
-    from qgis.core import QgsFeature, QgsField, QgsGeometry
-    from qgis.PyQt.QtCore import QVariant
-
-    remover_previa()
-    camada = QgsVectorLayer("MultiPolygon?crs=EPSG:4674", NOME_PREVIA, "memory")
-    camada.dataProvider().addAttributes([QgsField("geocodigo", QVariant.String), QgsField("folha", QVariant.String)])
-    camada.updateFields()
-    feicoes = []
-    for c in celulas:
-        f = QgsFeature(camada.fields())
-        f.setGeometry(QgsGeometry.fromWkt(c["wkt"]))
-        f.setAttributes([c["geocodigo"], c.get("folha")])
-        feicoes.append(f)
-    camada.dataProvider().addFeatures(feicoes)
-    camada.updateExtents()
-    camada.setRenderer(
-        QgsSingleSymbolRenderer(
-            QgsFillSymbol.createSimple(
-                {"color": "255,0,0,30", "outline_color": "220,30,30,255", "outline_width": "0.5"}
-            )
-        )
-    )
-    QgsProject.instance().addMapLayer(camada, False)
-    QgsProject.instance().layerTreeRoot().insertLayer(0, camada)
-    return camada
-
-
 def cargas_selecionadas() -> Dict:
     """Ids das cargas selecionadas nas camadas de cargas do grupo Feixe."""
     grupo = QgsProject.instance().layerTreeRoot().findGroup(GRUPO)
@@ -635,7 +597,7 @@ def cargas_selecionadas() -> Dict:
             continue
         papel = camada.customProperty(_PAPEL)
         if papel not in ("minhas_cargas", "cargas_responsavel", "cargas_a_atribuir"):
-            continue  # não é camada de cargas (Folhas, Minhas folhas, prévia)
+            continue  # não é camada de cargas (Folhas, Minhas folhas)
         ids.update(int(f["id"]) for f in camada.getSelectedFeatures())
         camadas_.append(camada.name())
     return {"ids": sorted(ids), "camadas": camadas_}

@@ -88,14 +88,12 @@ def registrar(r, ctx) -> None:
             )
         return 200, {"itens": itens}
 
-    @r.rota("GET", "/api/folhas/no_ponto", exige=("supervisor", "gerente"))
-    def _no_ponto(req):
-        try:
-            x, y = float(req.query["x"]), float(req.query["y"])
-        except (KeyError, ValueError):
-            raise ErroApi(400, "informe x e y (graus, SIRGAS 2000)") from None
+    @r.rota("GET", "/api/folhas", exige=("supervisor", "gerente"))
+    def _folhas(req):
+        # A busca de folhas da Nova folha, na articulação 1:100.000 do SGBC.
+        limite = min(inteiro(req.query.get("limite", "100"), "limite"), 1000)
         with ctx.tx() as ex:
-            return 200, {"folha": dl.folha_no_ponto(ex, x, y)}
+            return 200, {"itens": dl.buscar_folhas(ex, req.query.get("q", "").strip(), limite)}
 
     def _no_feixe(req):
         id_fluxo = campo(req, "id_fluxo", int, padrao=None)

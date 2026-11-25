@@ -20,70 +20,6 @@ _SQL_ABERTAS = "('pendente', 'em_andamento')"
 # --- Gerar cargas pela grade estatística (B4) ------------------------------------------------------------------------
 
 
-def _passagem_para_gerar(ex: Executor, id_lote_etapa: int, uf: Optional[str]) -> Dict:
-    p = ex.um(
-        "SELECT le.id, le.situacao, le.uf, le.id_fluxo_etapa, l.tipo, "
-        "mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, fe.nome AS etapa, "
-        "coalesce(l.geom, ST_Multi(a.geom)) AS geom FROM mapcartacomp.lote_etapa le "
-        "JOIN mapcartacomp.lote l ON l.id = le.id_lote JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
-        "LEFT JOIN mapcartctrl.t_articulacao_scn a ON a.id_articulacao_scn = l.id_articulacao_scn WHERE le.id = %s",
-        (id_lote_etapa,),
-    )
-    if not p or (uf and p["uf"] != uf):
-        raise ErroDados("passagem não encontrada", 404)
-    if p["situacao"] not in ABERTAS:
-        raise ErroDados(f"{p['folha_revisao']}: a etapa {p['etapa']} já foi encerrada")
-    grade = ex.todos(
-        "SELECT a.id, a.nome, a.grade_nivel FROM mapcartacomp.fluxo_etapa_atividade fea "
-        "JOIN mapcartacomp.atividade a ON a.id = fea.id_atividade "
-        "WHERE fea.id_fluxo_etapa = %s AND a.geracao = 'grade' AND a.ativo",
-        (p["id_fluxo_etapa"],),
-    )
-    if len(grade) != 1 or not grade[0]["grade_nivel"]:
-        raise ErroDados(
-            f"{p['folha_revisao']}: a etapa {p['etapa']} precisa de exatamente uma atividade com cargas pela grade "
-            f"estatística e nível definido (tem {len(grade)})"
-        )
-    p["atividade"] = grade[0]
-    if ex.um(
-        "SELECT 1 FROM mapcartacomp.carga_trabalho WHERE id_lote_etapa = %s AND id_atividade = %s LIMIT 1",
-        (id_lote_etapa, grade[0]["id"]),
-    ):
-        raise ErroDados(f"{p['folha_revisao']}: esta etapa já tem cargas de {grade[0]['nome']}")
-    return p
-
-
-def gerar_pela_grade(ex: Executor, id_lote_etapa: int, previa: bool, uf: Optional[str] = None) -> Dict:
-    """Cargas da passagem: células da grade estatística no nível da atividade, com centroide no lote, inteiras e com
-    geocódigo (D-73). Prévia devolve as células (geocódigo e WKT) sem gravar; gravar cria as cargas disponíveis."""
-    p = _passagem_para_gerar(ex, id_lote_etapa, uf)
-    a = p["atividade"]
-    celulas = ex.todos(
-        "SELECT geocodigo, ST_AsText(geom) AS wkt FROM mapcartacomp.f_grade_celulas(%s, %s)",
-        (p["geom"], a["grade_nivel"]),
-    )
-    if not celulas:
-        raise ErroDados(f"{p['folha_revisao']}: nenhuma célula da grade tem o centroide dentro do lote")
-    resumo = {
-        "id_lote_etapa": id_lote_etapa,
-        "folha_revisao": p["folha_revisao"],
-        "etapa": p["etapa"],
-        "atividade": a["nome"],
-        "grade_nivel": a["grade_nivel"],
-        "celulas": len(celulas),
-    }
-    if previa:
-        return {**resumo, "gravadas": 0, "previa": celulas}
-    geocodigos = [c["geocodigo"] for c in celulas]
-    gravadas = ex.executar(
-        "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_atividade, geocodigo, geom) "
-        "SELECT u.id, %s, %s, c.geocodigo, c.geom FROM mapcartacomp.f_grade_celulas(%s, %s) c "
-        "JOIN unnest(%s::text[], %s::uuid[]) AS u (geocodigo, id) ON u.geocodigo = c.geocodigo",
-        (id_lote_etapa, a["id"], p["geom"], a["grade_nivel"], geocodigos, [novo_uuid() for _ in geocodigos]),
-    )
-    return {**resumo, "gravadas": gravadas}
-
-
 def preparar(ex: Executor, uf: str, ids_lote_etapa: List[int]) -> Dict:
     """O que a passagem recém-aberta precisa sem decisão de ninguém (D-109): as cargas pela grade, se a etapa tem uma
     atividade pela grade; se a etapa não tem atividade que gere cargas (nenhuma, ou só de geração "nenhuma", como o
@@ -297,31 +233,3 @@ def atribuir(
         _iniciar(ex, [r["id"] for r in tocadas], "Iniciada ao distribuir as cargas")
     return {"atribuidas": feitas["atribuidas"], "ja_estavam": feitas["alvo"] - feitas["atribuidas"],
             "fora": pedidas - feitas["alvo"]}  # fmt: skip
-
-
-def dividir(ex: Executor, uf: str, id_lote_etapa: int, pessoas: List[str], previa: bool = True) -> Dict:
-    """Sugestão de balanceamento (B5): as cargas disponíveis da passagem divididas entre as pessoas em blocos contíguos
-    (de norte a sul, de oeste a leste), o mais iguais possível. Com previa, só devolve quantas fica com cada uma."""
-    if not pessoas:
-        raise ErroDados("escolha pelo menos uma pessoa", 400)
-    ids = [
-        r["id"]
-        for r in ex.todos(
-            "SELECT c.id FROM mapcartacomp.carga_trabalho c JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa "
-            "WHERE c.id_lote_etapa = %s AND c.uf = %s AND c.responsavel IS NULL AND NOT c.concluido "
-            "AND le.situacao IN ('pendente', 'em_andamento') "
-            "ORDER BY round(ST_Y(ST_Centroid(c.geom))::numeric, 3) DESC, ST_X(ST_Centroid(c.geom)), c.id",
-            (id_lote_etapa, uf),
-        )
-    ]
-    base, sobra = divmod(len(ids), len(pessoas))
-    plano, i = [], 0
-    for k, conta in enumerate(pessoas):
-        n = base + (1 if k < sobra else 0)
-        plano.append({"conta": conta, "cargas": n, "ids": ids[i : i + n]})
-        i += n
-    if not previa:
-        for p in plano:
-            if p["ids"]:
-                atribuir(ex, uf, p["conta"], ids=p["ids"], so_disponiveis=True)
-    return {"disponiveis": len(ids), "plano": [{"conta": p["conta"], "cargas": p["cargas"]} for p in plano]}

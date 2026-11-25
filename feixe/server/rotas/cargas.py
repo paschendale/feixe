@@ -1,8 +1,8 @@
 """B2: minhas cargas. As funções de módulo servem às rotas e aos botões da barra do Feixe (mesmo caminho).
 
 Execução (minhas cargas, resumo, próxima, concluir, desfazer, zoom): sobre o workspace local (C3, D-111), online ou
-offline, com `core/dados/local`; cada escrita acorda a sincronização em segundo plano. Supervisão (gerar, atribuir,
-dividir, descartar, equipe): na CCAR, como antes."""
+offline, com `core/dados/local`; cada escrita acorda a sincronização em segundo plano. Supervisão (preparar, descartar,
+equipe): na CCAR, como antes. Concluir é da barra do Feixe (e da camada Minhas cargas), não do painel."""
 
 from __future__ import annotations
 
@@ -141,29 +141,6 @@ def proxima(ctx, referencia: Optional[int] = None, excluir=None, id_lote: Option
     return {"carga": carga, "progresso": progresso}
 
 
-def gerar(ctx, ids_lote_etapa, previa: bool, uf: Optional[str]) -> Dict:
-    """Gera (ou só mostra) as cargas de várias passagens. Cada passagem vai na sua transação: a recusa de uma não
-    impede as outras, e volta em `erros`. Na prévia, as células aparecem no QGIS numa camada temporária."""
-    resultados, erros, celulas = [], [], []
-    for id_le in ids_lote_etapa:
-        try:
-            with ctx.tx() as ex:
-                r = dc.gerar_pela_grade(ex, id_le, previa, uf)
-        except ErroDados as e:
-            erros.append({"id_lote_etapa": id_le, "erro": e.mensagem})
-            continue
-        for c in r.pop("previa", []):
-            celulas.append({**c, "folha": r["folha_revisao"]})
-        resultados.append(r)
-    if previa and celulas:
-        _no_qgis(ctx, "previa_cargas", celulas)
-    if not previa and resultados:
-        ctx.publicar("carga", {"geradas": [r["id_lote_etapa"] for r in resultados]})
-        ctx.publicar("lote", {"cargas_geradas": [r["id_lote_etapa"] for r in resultados]})
-        _no_qgis(ctx, "cargas_geradas")
-    return {"resultados": resultados, "erros": erros}
-
-
 def preparar(ctx, uf: str, ids_lote_etapa) -> Dict:
     """Depois de abrir passagens (folha nova, próxima etapa): gera as cargas pela grade e inicia as etapas sem
     atividade, numa transação à parte, para a folha aberta não depender disso (D-109). Uma falha volta em `erro`."""
@@ -199,36 +176,6 @@ def registrar(r, ctx) -> None:
         with ctx.tx() as ex:
             return 200, {"itens": dc.equipe(ex, uf_de(ctx.eu()), inteiro(projeto, "projeto") if projeto else None)}
 
-    @r.rota("POST", "/api/cargas/atribuir", exige=("supervisor",))
-    def _atribuir(req):
-        from .lotes import uf_de
-
-        lista = lambda v: [int(x) for x in v]  # noqa: E731
-        with ctx.tx() as ex:
-            res = dc.atribuir(
-                ex, uf_de(ctx.eu()), campo(req, "responsavel", str, padrao=None), campo(req, "ids", lista, padrao=None),
-                campo(req, "lote_etapas", lista, padrao=None), campo(req, "so_disponiveis", bool, padrao=False),
-                campo(req, "de", str, padrao=None),
-            )  # fmt: skip
-        if res["atribuidas"]:
-            ctx.publicar("carga", {"atribuidas": res["atribuidas"]})
-            ctx.publicar("lote", {"atribuidas": res["atribuidas"]})
-            _no_qgis(ctx, "cargas_mudaram", None)
-        return 200, res
-
-    @r.rota("POST", "/api/cargas/dividir", exige=("supervisor",))
-    def _dividir(req):
-        from .lotes import uf_de
-
-        previa = campo(req, "previa", bool, padrao=True)
-        with ctx.tx() as ex:
-            res = dc.dividir(ex, uf_de(ctx.eu()), campo(req, "id_lote_etapa", int), campo(req, "pessoas", list), previa)
-        if not previa:
-            ctx.publicar("carga", {"divididas": res["disponiveis"]})
-            ctx.publicar("lote", {"divididas": res["disponiveis"]})
-            _no_qgis(ctx, "cargas_mudaram", None)
-        return 200, res
-
     @r.rota("POST", "/api/cargas/descartar", exige=("supervisor",))
     def _descartar(req):
         from .lotes import uf_de
@@ -245,15 +192,6 @@ def registrar(r, ctx) -> None:
     def _selecao(req):
         # Cargas selecionadas no QGIS (em qualquer camada do grupo Feixe que tenha as cargas).
         return 200, ctx.qgis("selecao_cargas")
-
-    @r.rota("POST", "/api/cargas/gerar", exige=("supervisor",))
-    def _gerar(req):
-        from .lotes import uf_de
-
-        ids = campo(req, "lote_etapas", lambda v: [int(x) for x in v])
-        if not ids:
-            raise ErroApi(400, "escolha pelo menos uma passagem")
-        return 200, gerar(ctx, ids, campo(req, "previa", bool, padrao=True), uf_de(ctx.eu()))
 
     @r.rota("GET", "/api/cargas", exige=EXECUTORES)
     def _lista(req):
@@ -281,10 +219,6 @@ def registrar(r, ctx) -> None:
         return 200, proxima(
             ctx, campo(req, "referencia", int, padrao=None), id_lote=campo(req, "id_lote", int, padrao=None)
         )
-
-    @r.rota("POST", "/api/cargas/{id}/concluir", exige=EXECUTORES)
-    def _concluir(req):
-        return 200, concluir(ctx, inteiro(req.params["id"]))
 
     @r.rota("POST", "/api/cargas/{id}/desfazer", exige=EXECUTORES)
     def _desfazer(req):

@@ -1,4 +1,4 @@
-"""Painel no navegador (D-103): Início por papel, "Esperando você" e abrir a próxima etapa em várias folhas."""
+"""Painel no navegador (D-103): Início por papel, "Esperando você" e a próxima etapa em várias folhas (D-109)."""
 
 from __future__ import annotations
 
@@ -10,14 +10,6 @@ from ...core.dados.local import cargas as lc
 from ..api import ErroApi, campo
 from .cargas import EXECUTORES, preparar
 from .lotes import uf_de
-
-
-def abrir_proximas(ctx, uf: str, ids: List[int], observacao: str) -> Dict:
-    """Abre a etapa sugerida em várias folhas numa transação (o mesmo gesto da gaveta, repetido; nada anda sem o
-    supervisor pedir). As recusadas voltam em `erros` e não impedem as outras."""
-    with ctx.tx() as ex:
-        r = df.abrir_proximas(ex, uf, ids, observacao)
-    return _abertas(ctx, uf, r)
 
 
 def _abertas(ctx, uf: str, r: Dict) -> Dict:
@@ -55,16 +47,6 @@ def registrar(r, ctx) -> None:
             return 200, {"por_dia": [], "preparando": True}
         with ctx.leitura() as ex:
             return 200, lc.execucao(ex, fuso)
-
-    @r.rota("POST", "/api/lotes/proxima_etapa", exige=("supervisor",))
-    def _proximas(req):
-        ids = campo(req, "lotes", lambda v: [int(x) for x in v])
-        if not ids:
-            raise ErroApi(400, "escolha pelo menos uma folha")
-        obs = campo(req, "observacao", str, padrao="")
-        if not obs.strip():
-            raise ErroApi(400, "escreva a observação: ela vai para o histórico de cada folha")
-        return 200, abrir_proximas(ctx, uf_de(ctx.eu()), ids, obs)
 
     @r.rota("POST", "/api/lotes/avancar", exige=("supervisor",))
     def _avancar(req):

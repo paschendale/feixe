@@ -65,6 +65,16 @@ def _livre(cen, nome, x0, situacao="pendente", fase="aquisicao"):
     return lote, cen.cur.fetchone()[0]
 
 
+def _celulas(ex, le):
+    """Quantas células da grade de 5 km têm o centroide no lote da passagem."""
+    return ex.um(
+        "SELECT count(*) AS n FROM mapcartacomp.lote_etapa le JOIN mapcartacomp.lote l ON l.id = le.id_lote "
+        "LEFT JOIN mapcartctrl.t_articulacao_scn a ON a.id_articulacao_scn = l.id_articulacao_scn "
+        "CROSS JOIN LATERAL mapcartacomp.f_grade_celulas(coalesce(l.geom, ST_Multi(a.geom)), 5000) c WHERE le.id = %s",
+        (le,),
+    )["n"]
+
+
 def _situacao(ex, le):
     return ex.um("SELECT situacao FROM mapcartacomp.lote_etapa WHERE id = %s", (le,))["situacao"]
 
@@ -82,7 +92,7 @@ def test_preparar_gera_em_lote_inicia_sem_atividade_e_avisa_o_cq(amb):
     _, livre = _livre(cen, "livre", -44.5)
     _, revisao = _livre(cen, "revisão", -44.5, fase="revisao")
     _, cq = _livre(cen, "cq", -44.5, fase="cq")
-    esperado = {le: dc.gerar_pela_grade(ex, le, True)["celulas"] for le in (folha, livre)}
+    esperado = {le: _celulas(ex, le) for le in (folha, livre)}
 
     r = dc.preparar(ex, "DF", [folha, livre, revisao, cq])
     assert {g["id_lote_etapa"]: g["gravadas"] for g in r["geradas"]} == esperado

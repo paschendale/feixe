@@ -464,12 +464,10 @@ def b3(amb, usuario, senha):
 
 @secao("b4")
 def b4(amb, usuario, senha):
-    """Gerar cargas pela grade: prévia numa camada temporária do QGIS, gravar, e recusar gravar de novo."""
-    from feixe.core import camadas
+    """Cargas pela grade ao preparar a passagem (D-109): uma por célula, e preparar de novo não duplica."""
     from feixe.core.dados import lotes as dl
     from feixe.server.api import Contexto
     from feixe.server.rotas import cargas as rc
-    from qgis.core import QgsProject
 
     with db.transacao(amb, usuario, senha) as ex:
         fluxo = ex.um("SELECT id FROM mapcartacomp.fluxo WHERE uf = 'DF' AND nome = 'DF Hidrografia'")["id"]
@@ -482,31 +480,24 @@ def b4(amb, usuario, senha):
         lote = dl.criar_folhas(ex, "DF", fluxo, [folha])["criados"][0]["id_lote"]
         le = ex.um("SELECT id FROM mapcartacomp.lote_etapa WHERE id_lote = %s", (lote,))["id"]
     try:
+        recargas = []
         ctx = Contexto(
             transacao=lambda: db.transacao(amb, usuario, senha),
-            qgis=lambda nome, *a: {
-                "previa_cargas": lambda c: camadas.mostrar_previa(c),
-                "cargas_geradas": lambda: camadas.remover_previa(),
-            }[nome](*a),
+            qgis=lambda nome, *a: recargas.append(nome),
         )
-        r = rc.gerar(ctx, [le], True, "DF")
-        n = r["resultados"][0]["celulas"]
-        previa = QgsProject.instance().mapLayersByName(camadas.NOME_PREVIA)
-        assert len(previa) == 1 and previa[0].featureCount() == n and previa[0].isValid(), previa
-        ok(f"prévia de {n} células numa camada temporária do QGIS; nada gravado")
-        r = rc.gerar(ctx, [le], False, "DF")
-        assert r["resultados"][0]["gravadas"] == n and not QgsProject.instance().mapLayersByName(camadas.NOME_PREVIA)
+        r = rc.preparar(ctx, "DF", [le])
+        n = r["geradas"][0]["gravadas"]
         with db.transacao(amb, usuario, senha) as ex:
             k = ex.um(
-                "SELECT count(DISTINCT geocodigo) AS n FROM mapcartacomp.carga_trabalho WHERE id_lote_etapa = %s", (le,)
+                "SELECT count(*) AS n, count(DISTINCT geocodigo) AS g FROM mapcartacomp.carga_trabalho "
+                "WHERE id_lote_etapa = %s",
+                (le,),
             )
-        assert k["n"] == n, k
-        ok(f"{n} cargas gravadas, uma por célula, e a prévia some do QGIS")
-        r = rc.gerar(ctx, [le], False, "DF")
-        assert not r["resultados"] and "já tem cargas" in r["erros"][0]["erro"], r
-        ok("gravar de novo é recusado com mensagem")
+        assert n > 0 and k["n"] == k["g"] == n and recargas == ["cargas_geradas"], (k, recargas)
+        ok(f"{n} cargas gravadas, uma por célula, e as camadas do QGIS recarregam")
+        assert rc.preparar(ctx, "DF", [le])["geradas"] == []
+        ok("preparar de novo não duplica")
     finally:
-        QgsProject.instance().clear()
         with db.transacao(amb, usuario, senha) as ex:
             ex.executar("DELETE FROM mapcartacomp.lote WHERE id = %s", (lote,))
 

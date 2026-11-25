@@ -54,7 +54,6 @@ class FeixePlugin:
             "ferramenta_folhas": self.ligar_ferramenta_folhas,
             "marcar_folhas": self.marcar_folhas,
             "fim_folhas": self.fim_folhas,
-            "previa_cargas": self.previa_cargas,
             "selecao_cargas": camadas.cargas_selecionadas,
             "cargas_geradas": self.cargas_geradas,
             "selecao_wkt": self.selecao_wkt,
@@ -709,13 +708,7 @@ class FeixePlugin:
         partes = [f"{len(novas)} folha(s) escolhida(s)"] + ([f"{len(ja)} já no Feixe, deixadas de fora"] if ja else [])
         self.iface.messageBar().pushMessage("Feixe", "; ".join(partes) + ".", Qgis.Info, 4)
 
-    def previa_cargas(self, celulas):
-        camada = camadas.mostrar_previa(celulas)
-        ext = camada.extent()
-        self.zoom_para(ext.xMinimum(), ext.yMinimum(), ext.xMaximum(), ext.yMaximum(), 4674)
-
     def cargas_geradas(self):
-        camadas.remover_previa()
         camadas.recarregar_cargas()
 
     def selecao_wkt(self):

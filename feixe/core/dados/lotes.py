@@ -237,6 +237,23 @@ def folhas_no_feixe(ex: Executor, uf: str, id_fluxo: Optional[int] = None) -> Di
     return {r["id"]: r["temas"] for r in linhas}
 
 
+def buscar_folhas(ex: Executor, filtro: str, limite: int) -> List[Dict]:
+    """Folhas 1:100.000 pelo MI, nome ou nomenclatura: MI exato primeiro, depois os que começam pelo texto (2534 antes
+    de 1253 e 0253), depois o resto. Sem filtro, em ordem de MI."""
+    sql = (
+        "SELECT id_articulacao_scn AS id, cd_mi, nm_carta, nm_nomenclatura_scn AS nomenclatura, "
+        "ST_XMin(geom) AS xmin, ST_YMin(geom) AS ymin, ST_XMax(geom) AS xmax, ST_YMax(geom) AS ymax "
+        f"FROM {_ARTICULACAO} "
+    )
+    if not filtro:
+        return ex.todos(sql + "ORDER BY cd_mi LIMIT %s", (limite,))
+    sql += (
+        "WHERE cd_mi ILIKE %s OR nm_carta ILIKE %s OR nm_nomenclatura_scn ILIKE %s "
+        "ORDER BY cd_mi = %s DESC, cd_mi ILIKE %s DESC, nm_nomenclatura_scn ILIKE %s DESC, cd_mi LIMIT %s"
+    )
+    return ex.todos(sql, (f"%{filtro}%", f"%{filtro}%", f"%{filtro}%", filtro, f"{filtro}%", f"{filtro}%", limite))
+
+
 def folha_no_ponto(ex: Executor, x: float, y: float) -> Optional[Dict]:
     """Folha 1:100.000 que contém o ponto (SIRGAS 2000 geográfico): o clique no mapa do QGIS."""
     return ex.um(

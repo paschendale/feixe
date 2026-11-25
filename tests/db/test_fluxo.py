@@ -129,7 +129,7 @@ def test_regras_do_andar(amb):
     assert "GCQ" in _recusa(ex, df.acao, "DF", aq, "gcq", OBS, "aprovada").mensagem
 
 
-def test_editar_copiar_modelo_e_prontas(amb):
+def test_editar_copiar_e_modelo(amb):
     cen, ex = amb
     fluxo = df.criar(ex, "DF", 5, cen.tema, "DF editar", [_etapa("aquisicao", conta=True, repetivel=False)])
     lote, _ = _folha(ex, "DF", fluxo)
@@ -152,10 +152,3 @@ def test_editar_copiar_modelo_e_prontas(amb):
     assert [x["fase"] for x in modelo["etapas"]] == [m["fase"] for m in df.MODELO_CCAR]
     aq_mod = next(x for x in modelo["etapas"] if x["fase"] == "aquisicao")
     assert [a["id"] for a in aq_mod["atividades"]] == [cen.ativ["aquisicao"]]
-    # Prontas para avançar: etapa em andamento com 100% das cargas.
-    le = _aberta(ex, lote)
-    df.acao(ex, "DF", le, "iniciar", OBS)
-    cen.carga(le, concluido=True, atividade=cen.ativ["aquisicao"], x=-43.8)
-    assert lote in [p["id_lote"] for p in df.prontas(ex, "DF")]
-    cen.carga(le, atividade=cen.ativ["aquisicao"], x=-43.7)
-    assert lote not in [p["id_lote"] for p in df.prontas(ex, "DF")]

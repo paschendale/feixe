@@ -508,17 +508,6 @@ def sugerir(ex: Executor, lote: Dict) -> Optional[Dict]:
     )
 
 
-def prontas(ex: Executor, uf: str) -> List[Dict]:
-    """Prontas para avançar: etapa em andamento com todas as cargas concluídas (o plano de CQ fechado entra no D4)."""
-    return ex.todos(
-        "SELECT c.id_lote, c.folha_revisao, c.tema, c.etapa, c.cargas_total, c.cargas_concluidas, "
-        "l.id_lote_etapa_atual FROM mapcartacomp.ctrl_lote c JOIN mapcartacomp.lote l ON l.id = c.id_lote "
-        "WHERE c.uf = %s AND c.situacao = 'em_andamento' AND c.cargas_total > 0 "
-        "AND c.cargas_concluidas = c.cargas_total ORDER BY c.tema, c.nome",
-        (uf,),
-    )
-
-
 def historico(ex: Executor, id_lote: int) -> List[Dict]:
     return ex.todos(
         "SELECT h.em, h.acao, h.observacao, h.por, coalesce(u.nom_usuario::text, h.por) AS por_nome, fe.nome AS etapa, "

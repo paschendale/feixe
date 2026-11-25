@@ -107,7 +107,7 @@ class Roteador:
         self._depois = depois  # (método, status) depois de cada requisição: o contexto acorda a sincronização
 
     def rota(self, metodo: str, padrao: str, exige: Optional[Iterable[str]] = None):
-        """Decorador: @r.rota("GET", "/api/folhas/{id}/zoom"). `exige`: papéis aceitos (qualquer um deles)."""
+        """Decorador: @r.rota("POST", "/api/lotes/{id}/zoom"). `exige`: papéis aceitos (qualquer um deles)."""
         regex = re.compile("^" + re.sub(r"{(\w+)}", r"(?P<\1>[^/]+)", padrao) + "$")
         aceitos = tuple(exige or ())
 
@@ -320,48 +320,8 @@ def criar_roteador(ctx: Contexto) -> Roteador:
         # Quem está conectado e com que papel: só pelo SGBC (mapcartctrl) e por usuario_feixe, nunca por roles.
         return 200, ctx.eu()
 
-    @r.rota("GET", "/api/folhas")
-    def _folhas(req):
-        if ctx.consultar is None:
-            raise ErroApi(503, "banco indisponível")
-        limite = min(int(req.query.get("limite", "100")), 1000)
-        filtro = req.query.get("q", "").strip()
-        sql = (
-            "SELECT id_articulacao_scn AS id, cd_mi, nm_carta, nm_nomenclatura_scn AS nomenclatura, "
-            "ST_XMin(geom) AS xmin, ST_YMin(geom) AS ymin, ST_XMax(geom) AS xmax, ST_YMax(geom) AS ymax "
-            "FROM mapcartctrl.v_articulacao_scn_100000 "
-        )
-        params: tuple = ()
-        if filtro:
-            # MI exato primeiro, depois os que começam pelo texto (2534 antes de 1253 e 0253), depois o resto.
-            sql += (
-                "WHERE cd_mi ILIKE %s OR nm_carta ILIKE %s OR nm_nomenclatura_scn ILIKE %s "
-                "ORDER BY cd_mi = %s DESC, cd_mi ILIKE %s DESC, nm_nomenclatura_scn ILIKE %s DESC, cd_mi LIMIT %s"
-            )
-            params = (f"%{filtro}%", f"%{filtro}%", f"%{filtro}%", filtro, f"{filtro}%", f"{filtro}%")
-        else:
-            sql += "ORDER BY cd_mi LIMIT %s"
-        return 200, {"itens": ctx.consultar(sql, params + (limite,))}
-
-    @r.rota("POST", "/api/folhas/{id}/zoom")
-    def _zoom(req):
-        if ctx.consultar is None or ctx.zoom_para is None:
-            raise ErroApi(503, "QGIS ou banco indisponível")
-        linhas = ctx.consultar(
-            "SELECT ST_XMin(geom) AS xmin, ST_YMin(geom) AS ymin, ST_XMax(geom) AS xmax, ST_YMax(geom) AS ymax "
-            "FROM mapcartctrl.v_articulacao_scn_100000 WHERE id_articulacao_scn = %s",
-            (int(req.params["id"]),),
-        )
-        if not linhas:
-            raise ErroApi(404, "folha não encontrada")
-        b = linhas[0]
-        ctx.zoom_para(b["xmin"], b["ymin"], b["xmax"], b["ymax"], 4674)
-        return 200, {"ok": True}
-
     @r.rota("POST", "/api/sincronizar")
     def _sync(req):
-        if ctx.sincronizar is None:
-            raise ErroApi(501, "sincronização ainda não implementada")
         return 200, ctx.sincronizar()
 
     from . import rotas
