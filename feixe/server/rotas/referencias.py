@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from ...core.dados import referencias as dr
-from ..api import ErroApi, inteiro
+from ..api import TODOS, ErroApi, inteiro
 
-TODOS = ("gerente", "supervisor", "avaliador", "apm", "consulta")
 _ATIVIDADE = {
     "cod_projeto": int,
     "id_tema": int,

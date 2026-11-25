@@ -28,6 +28,43 @@ export function Conteudo({ largura = 1240, className, children }: { largura?: nu
   )
 }
 
+// Larguras fixas das colunas de uma tabela `table-fixed`: o conteúdo (um filtro, um rótulo novo, uma ação) nunca
+// recalcula as colunas. Número = px; texto = qualquer largura CSS ('24%'); undefined = divide o que sobra.
+export function Colunas({ larguras }: { larguras: (number | string | undefined)[] }) {
+  return (
+    <colgroup>
+      {larguras.map((l, i) => (
+        <col key={i} style={l === undefined ? undefined : { width: l }} />
+      ))}
+    </colgroup>
+  )
+}
+
+// Rótulo que troca de texto (ex.: "Distribuir" → "Distribuindo…") sem mudar de largura: os dois ocupam a mesma
+// célula do grid e o botão fica com a largura do maior.
+export function RotuloEstavel({ ocupado, rotulo, rotuloOcupado }: { ocupado: boolean; rotulo: ReactNode; rotuloOcupado: ReactNode }) {
+  return (
+    <span className="inline-grid">
+      <span className={cn('col-start-1 row-start-1', ocupado && 'invisible')}>{rotulo}</span>
+      <span aria-hidden={!ocupado} className={cn('col-start-1 row-start-1', !ocupado && 'invisible')}>
+        {rotuloOcupado}
+      </span>
+    </span>
+  )
+}
+
+// Texto que fica em negrito quando ativo sem empurrar os vizinhos: a versão em negrito, invisível, reserva a largura.
+export function RotuloNegrito({ children, ativo }: { children: ReactNode; ativo: boolean }) {
+  return (
+    <span className="inline-grid">
+      <span aria-hidden className="invisible col-start-1 row-start-1 font-semibold">
+        {children}
+      </span>
+      <span className={cn('col-start-1 row-start-1', ativo && 'font-semibold')}>{children}</span>
+    </span>
+  )
+}
+
 export type Aba = { id: string; rotulo: ReactNode; href?: string; contagem?: number; desabilitada?: boolean }
 
 // Faixa branca com o título do módulo e as abas.
@@ -52,10 +89,10 @@ export function CabecalhoModulo({ titulo, sub, abas, ativa }: { titulo: string; 
                 aria-current={a.id === ativa ? 'page' : undefined}
                 className={cn(
                   'inline-flex items-center gap-2 border-b-2 px-3.5 py-2.5',
-                  a.id === ativa ? 'border-ibge font-semibold text-ibge' : 'border-transparent text-[#3D4B5C] hover:text-ibge',
+                  a.id === ativa ? 'border-ibge text-ibge' : 'border-transparent text-texto-2 hover:text-ibge',
                 )}
               >
-                {a.rotulo}
+                <RotuloNegrito ativo={a.id === ativa}>{a.rotulo}</RotuloNegrito>
                 {!!a.contagem && (
                   <span className="rounded-full px-2 text-xs font-semibold" style={{ background: COR.alertaFundo, color: COR.alerta }}>
                     {a.contagem.toLocaleString('pt-BR')}
@@ -143,7 +180,7 @@ export function Fichas({ fichas, ativa, escolher, rotulo }: { fichas: Ficha[]; a
             onClick={() => escolher(f.id)}
             className={cn(
               'inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5',
-              on ? 'border-ibge bg-ibge text-white' : f.todas ? 'border-dashed border-input text-[#3D4B5C] hover:bg-accent' : 'border-input bg-card hover:bg-accent',
+              on ? 'border-ibge bg-ibge text-white' : f.todas ? 'border-dashed border-input text-texto-2 hover:bg-accent' : 'border-input bg-card hover:bg-accent',
             )}
           >
             {f.rotulo}

@@ -12,7 +12,7 @@ export function token(): string {
   return sessionStorage.getItem(CHAVE) ?? ''
 }
 
-export class ErroApi extends Error {
+class ErroApi extends Error {
   status: number
   constructor(status: number, mensagem: string) {
     super(mensagem)
@@ -42,6 +42,18 @@ export type Status = {
   online: boolean
   usuario: string | null
   detalhe: string
+  sincronizacao?: EstadoSincronizacao
+}
+
+// Estado da sincronização do workspace com a CCAR (C3): vem em /api/status e no evento SSE `sincronizacao`.
+export type EstadoSincronizacao = {
+  online: boolean | null
+  em_andamento: boolean
+  ultima_sincronizacao: string | null
+  ultima_tentativa: string | null
+  ultimo_estado: 'ok' | 'offline' | 'erro' | null
+  mensagem: string | null
+  pendentes: number | null
 }
 
 export type Folha = {
@@ -108,6 +120,8 @@ export type ResumoCargas = {
   pendentes: number
   folhas_pendentes: number
   passagens: Passagem[]
+  // Workspace ainda sem o primeiro pull (C3): a lista vazia não quer dizer "sem cargas".
+  preparando?: boolean
 }
 
 export type StatusNacional = 'PLANEJADA' | 'EM_PRODUCAO' | 'EM_CQ' | 'ENTREGUE_GCQ' | 'CONCLUIDA' | 'DEVOLVIDA'
@@ -288,7 +302,13 @@ export type EstadoLote = {
 export type Historico = { em: string; acao: string; observacao: string | null; por: string; por_nome: string; etapa: string; instancia: number }
 
 export type Pessoa = { conta: string; nome: string; perfis: string; pendentes: number; folhas: number; ultima: string | null }
-export type ResultadoAtribuicao = { atribuidas: number; ja_estavam: number; fora: number }
+// Equipe › Passar pendentes: cargas que foram na hora, as que ficaram a atribuir e as folhas que entraram na fila.
+export type ResultadoPassar = {
+  agora: number
+  liberadas: number
+  na_fila: { id_lote_etapa: number; folha_revisao: string; cargas: number }[]
+  recebida: { id_lote_etapa: number; folha_revisao: string; atribuidas: number } | null
+}
 
 // --- Painel (D-103): Início por papel e abas da Supervisão ---
 
@@ -364,3 +384,54 @@ export type ItemFila = {
 export type AtribuidaFila = { id: number; responsavel: string; nome: string; atribuida_em: string; atribuidas: number; folha_revisao: string; id_lote: number }
 
 export type Filas = { itens: ItemFila[]; recentes: AtribuidaFila[] }
+
+// --- Conflitos de sincronização (C5) ---
+
+export type ResultadoSync = 'conflito_vencido' | 'conflito_perdido' | 'recusado'
+export type QuemSync = { conta: string; nome: string } | null
+export type ValorSync = { campo: string; rotulo: string; local: string; servidor: string; igual: boolean }
+
+export type ItemSyncLog = {
+  id: number
+  em: string
+  resultado: ResultadoSync
+  tabela: string
+  tipo: string
+  uuid: string | null
+  enviado_por: QuemSync
+  alvo: {
+    existe: boolean
+    id_carga: number | null
+    geocodigo: string | null
+    id_lote: number | null
+    id_lote_etapa: number | null
+    folha: string | null
+    tema: string | null
+    etapa: string | null
+    atividade: string | null
+    responsavel_atual: QuemSync
+    concluido_atual: boolean | null
+  }
+  local: { por: QuemSync; em: string | null; acao: string }
+  servidor: { por: QuemSync; em: string | null; origem_em: string | null; acao: string } | null
+  valores: ValorSync[]
+  vencedor: 'local' | 'servidor'
+  descartado: 'local' | 'servidor' | null
+  motivo: string | null
+  juntados: number
+  frase: string
+}
+
+export type ListaSyncLog = { itens: ItemSyncLog[]; total: number; pagina: number; por_pagina: number; desde: string; ate: string }
+export type ContagemSyncLog = { conflitos: number; recusas: number; total: number; dias: number }
+
+export type MeuSyncLog = {
+  id: number
+  em: string
+  resultado: 'conflito_perdido' | 'recusado'
+  tipo: string
+  alvo: { id: number | null; geocodigo: string | null; id_lote: number | null; id_lote_etapa: number | null; folha: string | null; etapa: string | null; atividade: string | null }
+  valores: ValorSync[]
+  motivo: string | null
+  frase: string
+}

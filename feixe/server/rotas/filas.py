@@ -43,6 +43,18 @@ def registrar(r, ctx) -> None:
         ctx.publicar("fila", {"removido": True})
         return 200, {"ok": True}
 
+    @r.rota("POST", "/api/equipe/passar", exige=("supervisor",))
+    def _passar(req):
+        # Equipe › Passar pendentes: folha a folha, com a regra de uma folha por pessoa (o resto entra na fila).
+        with ctx.tx() as ex:
+            res = dfi.passar_pendentes(ex, uf_de(ctx.eu()), campo(req, "de", str), campo(req, "para", str, padrao=None))
+        ctx.publicar("fila", {"passadas": len(res["na_fila"])})
+        ctx.publicar("carga", {"passadas": res["agora"] + res["liberadas"]})
+        ctx.publicar("lote", {"passadas": res["agora"] + res["liberadas"]})
+        with contextlib.suppress(ErroApi):
+            ctx.qgis("cargas_mudaram", None)
+        return 200, res
+
     @r.rota("POST", "/api/distribuir/sugestao", exige=("supervisor",))
     def _sugestao(req):
         with ctx.tx() as ex:

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
-import { useSessao } from '@/lib/sessao'
+import { useEvento } from '@/lib/sse'
 
 // Cache das leituras por caminho (D-104). Cada ida ao plugin custa idas e voltas até a CCAR, então:
 // - pedidos iguais em andamento (várias telas, o mesmo evento SSE) viram uma chamada só;
@@ -23,13 +23,15 @@ function buscar<T>(caminho: string): Promise<T> {
   return p
 }
 
-// Busca um recurso da API e recarrega quando chega um dos eventos SSE indicados (ex.: ['carga']).
-// `caminho` nulo = não buscar ainda.
-export function useApi<T>(caminho: string | null, eventos: string[] = []) {
+// Busca um recurso da API e recarrega quando chega um dos eventos SSE indicados (ex.: ['carga']). Eventos em rajada
+// (o plugin publica fila, carga e lote juntos) viram uma recarga só; de `sincronizacao`, só conta o fim da rodada.
+// `caminho` nulo = não buscar ainda. Com `manterAnterior`, trocar de caminho (um filtro) mantém os dados velhos na
+// tela até os novos chegarem, em vez de esvaziar a lista (a tela usa `carregando` para esmaecer).
+export function useApi<T>(caminho: string | null, eventos: string[] = [], { manterAnterior = false } = {}) {
   const [dados, setDados] = useState<T | null>(() => (caminho ? ((ultimo.get(caminho) as T) ?? null) : null))
   const [erro, setErro] = useState<string | null>(null)
   const [carregando, setCarregando] = useState(false)
-  const { ultimo: evento } = useSessao()
+  const espera = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const pedido = useRef(0)
   const caminhoAnterior = useRef(caminho)
 
@@ -38,7 +40,7 @@ export function useApi<T>(caminho: string | null, eventos: string[] = []) {
     const meu = ++pedido.current
     // Outro recurso (ex.: outra folha): não mostrar os dados do anterior enquanto o novo chega.
     if (ultimo.has(caminho)) setDados(ultimo.get(caminho) as T)
-    else if (caminhoAnterior.current !== caminho) setDados(null)
+    else if (caminhoAnterior.current !== caminho && !manterAnterior) setDados(null)
     caminhoAnterior.current = caminho
     setCarregando(true)
     try {
@@ -52,16 +54,18 @@ export function useApi<T>(caminho: string | null, eventos: string[] = []) {
     } finally {
       if (meu === pedido.current) setCarregando(false)
     }
-  }, [caminho])
+  }, [caminho, manterAnterior])
 
   useEffect(() => {
     recarregar()
   }, [recarregar])
 
-  useEffect(() => {
-    if (evento && eventos.includes(evento.evento)) recarregar()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [evento])
+  useEvento(eventos, (e) => {
+    if (e.evento === 'sincronizacao' && e.dados.em_andamento) return
+    clearTimeout(espera.current)
+    espera.current = setTimeout(recarregar, 150)
+  })
+  useEffect(() => () => clearTimeout(espera.current), [])
 
   return { dados, erro, carregando, recarregar }
 }

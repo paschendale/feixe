@@ -1,18 +1,18 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Barra, Bloco, COR, CabecalhoModulo, Carregando, Conteudo, Fichas } from '@/components/painel'
+import { Barra, Bloco, COR, CabecalhoModulo, Carregando, Colunas, Conteudo, Fichas, RotuloNegrito } from '@/components/painel'
 import type { Carga, Passagem, Progresso, ResumoCargas } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
-import { diaMes, diasAtras, num, pc, plural } from '@/lib/formato'
+import { diaMes, diasAtras, hora, num, pc, plural } from '@/lib/formato'
 import { href, navegar, useRota } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
-import { ABERTAS, Continuar, Producao, pendentesDe, usePorDia } from './comum'
+import { ABERTAS, Continuar, Preparando, Producao, pendentesDe, usePorDia } from './comum'
+import { MeusConflitos } from './MeusConflitos'
 
 const JANELA_DESFAZER_MS = 24 * 3600 * 1000
 const chaveDe = (p: Passagem) => `${p.tema} · ${p.etapa}`
-const hora = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '')
 const recente = (c: Carga) => !!c.concluido_em && Date.now() - new Date(c.concluido_em).getTime() < JANELA_DESFAZER_MS
 
 function useAcoes() {
@@ -69,14 +69,17 @@ function Cargas({ p }: { p: Passagem }) {
             role="tab"
             aria-selected={aba === id}
             onClick={() => setAba(id)}
-            className={cn('border-b-2 px-3.5 py-2.5', aba === id ? 'border-ibge font-semibold text-ibge' : 'border-transparent text-[#3D4B5C] hover:text-ibge')}
+            className={cn('border-b-2 px-3.5 py-2.5', aba === id ? 'border-ibge text-ibge' : 'border-transparent text-texto-2 hover:text-ibge')}
           >
-            {rotulo} · {num(n)}
+            <RotuloNegrito ativo={aba === id}>
+              {rotulo} · {num(n)}
+            </RotuloNegrito>
           </button>
         ))}
       </div>
       <div className="overflow-x-auto rounded-[10px] border bg-card">
-        <table className="w-full border-collapse text-sm">
+        <table className="w-full table-fixed border-collapse text-sm">
+          <Colunas larguras={[200, ...(variasAtividades ? ['26%'] : []), undefined, 240]} />
           <thead>
             <tr className="text-left text-xs text-muted-foreground">
               <th className="border-b py-3 pr-2 pl-4 font-medium">Carga</th>
@@ -88,32 +91,33 @@ function Cargas({ p }: { p: Passagem }) {
           <tbody>
             {lista.length === 0 && (
               <tr>
-                <td colSpan={variasAtividades ? 4 : 3} className="p-4 text-muted-foreground">
+                <td colSpan={variasAtividades ? 4 : 3} className="px-4 py-2.5 text-muted-foreground">
                   {aba === 'pendentes' ? 'Nenhuma pendente: sua parte nesta folha terminou.' : aba === 'hoje' ? 'Nenhuma concluída hoje.' : 'Nenhuma concluída ainda.'}
                 </td>
               </tr>
             )}
             {lista.slice(0, 300).map((c) => (
-              <tr key={c.id} className="border-b border-[#EEF1F4] last:border-0">
+              <tr key={c.id} className="border-b border-linha last:border-0">
                 <td className="tab py-2.5 pr-2 pl-4 font-mono text-[13px]">{c.geocodigo ?? `nº ${c.id}`}</td>
-                {variasAtividades && <td className="px-2 py-2.5 text-muted-foreground">{c.atividade}</td>}
+                {variasAtividades && (
+                  <td className="truncate px-2 py-2.5 text-muted-foreground" title={c.atividade}>
+                    {c.atividade}
+                  </td>
+                )}
                 <td className="px-2 py-2.5">{c.concluido ? <span className="text-muted-foreground">concluída {diaMes(c.concluido_em)} {hora(c.concluido_em)}</span> : 'pendente'}</td>
-                <td className="py-2.5 pr-4 pl-2 text-right whitespace-nowrap">
-                  {!c.concluido && aberta && (
-                    <Button size="sm" variant="outline" disabled={!conectado || acoes.ocupado === c.id} onClick={() => acoes.trabalhar(c)}>
-                      Trabalhar nesta
-                    </Button>
-                  )}
-                  {c.concluido && (
-                    <Button size="sm" variant="ghost" disabled={!conectado || acoes.ocupado === c.id} onClick={() => acoes.trabalhar(c)}>
-                      Ver no QGIS
-                    </Button>
-                  )}
-                  {c.concluido && aberta && recente(c) && (
-                    <Button size="sm" variant="ghost" disabled={acoes.ocupado === c.id} onClick={() => acoes.desfazer(c)}>
-                      Desfazer
-                    </Button>
-                  )}
+                <td className="py-2 pr-4 pl-2">
+                  <span className="flex justify-end gap-1.5">
+                    {c.concluido && aberta && recente(c) && (
+                      <Button size="sm" variant="ghost" disabled={acoes.ocupado === c.id} onClick={() => acoes.desfazer(c)}>
+                        Desfazer
+                      </Button>
+                    )}
+                    {(c.concluido || aberta) && (
+                      <Button size="sm" variant="outline" className="w-[124px]" disabled={!conectado || acoes.ocupado === c.id} onClick={() => acoes.trabalhar(c)}>
+                        {c.concluido ? 'Ver no QGIS' : 'Trabalhar nesta'}
+                      </Button>
+                    )}
+                  </span>
                 </td>
               </tr>
             ))}
@@ -154,13 +158,11 @@ export default function Execucao() {
     { id: 'cargas', rotulo: 'Minhas cargas', href: href('execucao') },
     { id: 'amostras', rotulo: 'Minhas amostras · fase D', desabilitada: true },
   ]
-  if (!dados)
+  if (!dados || dados.preparando)
     return (
       <>
         <CabecalhoModulo titulo="Execução" abas={abasModulo} ativa="cargas" />
-        <Conteudo largura={1240}>
-          <Carregando erro={erro} />
-        </Conteudo>
+        <Conteudo largura={1240}>{dados?.preparando ? <Preparando /> : <Carregando erro={erro} />}</Conteudo>
       </>
     )
 
@@ -178,6 +180,7 @@ export default function Execucao() {
     <>
       <CabecalhoModulo titulo="Execução" abas={abasModulo} ativa="cargas" />
       <Conteudo largura={1240}>
+        <MeusConflitos />
         {chaves.length === 0 ? (
           <Bloco className="text-muted-foreground">Nenhuma carga atribuída a você em folhas abertas. O supervisor atribui as cargas.</Bloco>
         ) : (

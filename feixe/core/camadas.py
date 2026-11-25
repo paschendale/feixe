@@ -1,21 +1,24 @@
 """Camadas do Feixe no projeto aberto do QGIS: o grupo "Feixe", organizado por tarefa (D-101).
 
-Na fase B as camadas leem direto do banco da CCAR, com a mesma credencial do Authentication Manager (authcfg); na fase
-C passam a ler do workspace local. Roda na thread principal (mexe no projeto e na árvore de camadas).
+A execução lê o workspace local (C4, D-111): as camadas de quem executa abrem o GeoPackage pelo OGR, funcionam
+offline e mostram na hora o que a pessoa fez (a conclusão local, antes do push). A supervisão lê a CCAR, com a mesma
+credencial do Authentication Manager (authcfg). Roda na thread principal (mexe no projeto e na árvore de camadas).
 
 Dois subgrupos, um por modo de trabalho; só um fica ligado (a barra troca o modo, sem recarregar):
 
-Execução (todos):
-- Minhas cargas: `vw_carga_trabalho` (cargas da conta conectada, current_user, só de passagens abertas), feita para
-  ficar ligada o dia todo
-  sobre a imagem (D-101): a carga atual (a da barra: próxima, concluir, zoom do painel) só com contorno duplo
-  magenta com halo branco, para ver a imagem inteira dentro dela; pendentes com hachura espaçada azul-clara;
-  concluídas há até 3 dias com hachura verde mais densa; concluídas antes, hachura cruzada cinza-clara. Cores claras
-  e saturadas porque a imagem por baixo é escura (vegetação, solo, água). Só `concluido` é editável: concluir pela
-  tabela de atributos grava no banco, e as regras preenchem `concluido_em`.
-- Minhas folhas: moldura e rótulo das folhas em que a pessoa tem cargas de passagens abertas.
+Execução (todos), do workspace:
+- Minhas cargas: a tabela `carga_trabalho` do workspace, filtrada pela conta do workspace e pelas passagens abertas,
+  com a folha, a etapa, a atividade e o progresso da pessoa vindos da view `vw_minhas_cargas_info` (junção pelo `id`,
+  em memória, renovada a cada recarga). Feita para ficar ligada o dia todo sobre a imagem (D-101): a carga atual (a
+  da barra: próxima, concluir, zoom do painel) só com contorno duplo magenta com halo branco, para ver a imagem
+  inteira dentro dela; pendentes com hachura espaçada azul-clara; concluídas há até 3 dias com hachura verde mais
+  densa; concluídas antes, hachura cruzada cinza-clara. Cores claras e saturadas porque a imagem por baixo é escura
+  (vegetação, solo, água). Só `concluido` é editável, e a edição não vai pelo OGR: sai do buffer do QGIS no commit e
+  passa pelas regras da execução e pela outbox (`core/edicao.py`).
+- Minhas folhas: a view `vw_minhas_folhas` (só leitura), moldura e rótulo das folhas em que a pessoa tem cargas de
+  passagens abertas.
 
-Supervisão (só supervisor), das passagens abertas dos lotes da UF:
+Supervisão (só supervisor, e só com a CCAR respondendo), das passagens abertas dos lotes da UF:
 - Cargas por responsável: uma cor bem distinta por pessoa, estável entre uma montagem e outra.
 - Cargas a atribuir: sem responsável, esperando o supervisor; sem as amostras de CQ (fase D).
 - Folhas: subgrupo com uma camada por tema ("Folhas · Hidrografia"...), de `ctrl_lote` da UF, rotulada
@@ -32,6 +35,7 @@ from typing import Dict, List, Optional
 from qgis.core import (
     QgsDataSourceUri,
     QgsExpressionContextUtils,
+    QgsFeatureRequest,
     QgsFillSymbol,
     QgsLayerTreeGroup,
     QgsLinePatternFillSymbolLayer,
@@ -44,6 +48,7 @@ from qgis.core import (
     QgsTextBufferSettings,
     QgsTextFormat,
     QgsVectorLayer,
+    QgsVectorLayerJoinInfo,
     QgsVectorLayerSimpleLabeling,
     QgsWkbTypes,
 )
@@ -52,6 +57,7 @@ from qgis.PyQt.QtGui import QColor
 
 from .ambiente import Ambiente
 from .dados.cargas import SQL_PASSAGENS_ATUAIS
+from .dados.local import SQL_ABERTAS
 
 GRUPO = "Feixe"
 PASTA_ESTILOS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "estilos")
@@ -101,11 +107,81 @@ def _camada(amb, authcfg, nome, tabela, chave, filtro="", estilo=None) -> QgsVec
     return camada
 
 
-def _so_concluido_editavel(camada: QgsVectorLayer) -> None:
-    cfg = camada.editFormConfig()
-    for i, campo in enumerate(camada.fields()):
-        cfg.setReadOnly(i, campo.name() != "concluido")
-    camada.setEditFormConfig(cfg)
+# --- camadas do workspace (C4) ----------------------------------------------------------------------------------------
+VW_CARGA_INFO, VW_MINHAS_FOLHAS = "vw_minhas_cargas_info", "vw_minhas_folhas"  # as views de sync/esquema.py
+_EU = "(SELECT valor FROM meta WHERE chave = 'usuario')"  # a conta do workspace, sem citar nada no filtro
+# Colunas técnicas do espelho, fora da tabela de atributos (o formulário já mostra só o que a pessoa usa).
+_OCULTAS = {
+    "fid", "uuid", "id_lote_etapa", "id_atividade", "id_cq_plano", "uf", "responsavel", "geocodigo", "criado_em",
+    "criado_por", "atualizado_em", "atualizado_por", "xmin", "ymin", "xmax", "ymax", "cx", "cy", "versao_base", "sujo",
+    "id_lote", "situacao_etapa", "minhas_na_folha", "minhas_concluidas_na_folha",
+}  # fmt: skip
+
+
+def _camada_gpkg(gpkg: str, tabela: str, nome: str, filtro: str = "") -> QgsVectorLayer:
+    camada = QgsVectorLayer(f"{gpkg}|layername={tabela}", nome, "ogr")
+    if filtro and camada.isValid():
+        camada.setSubsetString(filtro)
+    if not camada.isValid():
+        raise RuntimeError(f"camada '{nome}' do espaço de trabalho inválida: {camada.dataProvider().error().message()}")
+    return camada
+
+
+def do_workspace(camada) -> bool:
+    return isinstance(camada, QgsVectorLayer) and camada.providerType() == "ogr"
+
+
+def editavel_pelo_feixe(camada) -> bool:
+    """Minhas cargas do workspace: a edição dela vai pela outbox (`core/edicao.py`)."""
+    return do_workspace(camada) and camada.customProperty(_PAPEL) == "minhas_cargas"
+
+
+def _filtro_minhas(atividades: Optional[List[int]] = None) -> str:
+    """Minhas cargas de passagens abertas (e das atividades do subgrupo), sobre o workspace."""
+    extra = f" AND id_atividade IN ({_em(atividades)})" if atividades else ""
+    return (
+        f"responsavel = {_EU} AND id_lote_etapa IN (SELECT id FROM lote_etapa WHERE situacao IN {SQL_ABERTAS}){extra}"
+    )
+
+
+def _filtro_minhas_folhas(atividades: Optional[List[int]] = None) -> str:
+    """A view já tem só as folhas com cargas minhas abertas; com subgrupos, só as da atividade."""
+    if not atividades:
+        return ""
+    return (
+        "id_lote IN (SELECT le.id_lote FROM carga_trabalho c JOIN lote_etapa le ON le.id = c.id_lote_etapa "
+        f"WHERE c.responsavel = {_EU} AND le.situacao IN {SQL_ABERTAS} AND c.id_atividade IN ({_em(atividades)}))"
+    )
+
+
+def _juntar_info(camada: QgsVectorLayer, info: QgsVectorLayer) -> None:
+    """Folha, etapa, atividade e progresso da pessoa na folha, da view, em memória (uma leitura da view por recarga;
+    sem o cache, cada feição faria uma consulta e a tabela de atributos levaria dezenas de segundos)."""
+    j = QgsVectorLayerJoinInfo()
+    j.setJoinLayer(info)
+    j.setJoinFieldName("id")
+    j.setTargetFieldName("id")
+    j.setPrefix("")
+    j.setUsingMemoryCache(True)
+    j.setEditable(False)
+    camada.addJoin(j)
+
+
+def _esconder_colunas(camada: QgsVectorLayer) -> None:
+    cfg = camada.attributeTableConfig()
+    colunas = cfg.columns()
+    for c in colunas:
+        c.hidden = c.name in _OCULTAS
+    cfg.setColumns(colunas)
+    camada.setAttributeTableConfig(cfg)
+
+
+def _contar(camada: QgsVectorLayer) -> int:
+    """Feições que a camada mostra. Na do workspace com filtro o `featureCount` do OGR não serve (conta a tabela)."""
+    if not do_workspace(camada):
+        return camada.featureCount()
+    pedido = QgsFeatureRequest().setNoAttributes().setFlags(QgsFeatureRequest.NoGeometry)
+    return sum(1 for _ in camada.getFeatures(pedido))
 
 
 def cores_distintas(n: int) -> List[QColor]:
@@ -121,7 +197,7 @@ def cores_distintas(n: int) -> List[QColor]:
 
 # --- Minhas cargas: estilo e carga atual (D-101) ----------------------------------------------------------------------
 VAR_ATUAL = "feixe_carga_atual"  # variável do projeto com o id da carga atual; o estilo lê dela
-_ATUAL = f'coalesce("id_carga_trabalho" = to_int(@{VAR_ATUAL}), false)'
+_ATUAL = f'coalesce("id" = to_int(@{VAR_ATUAL}), false)'
 
 
 def _contorno(cor: str, largura: float, opacidade: float = 1.0) -> QgsSimpleFillSymbolLayer:
@@ -205,28 +281,12 @@ def carga_atual() -> Optional[int]:
 
 EXECUCAO, SUPERVISAO = "Execução", "Supervisão"
 _PAPEL = "feixe/papel"  # propriedade da camada (e do subgrupo) que diz o que ela é, sem depender do nome
+PAPEL_INFO = "minhas_cargas_info"  # a view juntada a Minhas cargas, no projeto e fora da árvore
 MODOS = {"execucao": EXECUCAO, "supervisao": SUPERVISAO}  # modo de trabalho -> subgrupo do grupo Feixe
 
 
 def _em(ids: List[int]) -> str:
     return ", ".join(str(int(i)) for i in ids) or "NULL"
-
-
-def _so_minhas_abertas(atividades: Optional[List[int]] = None) -> str:
-    """Cargas minhas de passagens abertas (e das atividades do subgrupo): o encerrado sai do mapa de quem executa."""
-    extra = f" AND c.id_atividade IN ({_em(atividades)})" if atividades else ""
-    return (
-        "id_carga_trabalho IN (SELECT c.id FROM mapcartacomp.carga_trabalho c WHERE c.responsavel = current_user "
-        f"AND c.id_lote_etapa IN ({SQL_PASSAGENS_ATUAIS}){extra})"
-    )
-
-
-def _so_minhas_folhas(atividades: Optional[List[int]] = None) -> str:
-    extra = f" AND c.id_atividade IN ({_em(atividades)})" if atividades else ""
-    return (
-        "id_lote IN (SELECT le.id_lote FROM mapcartacomp.carga_trabalho c JOIN mapcartacomp.lote_etapa le "
-        f"ON le.id = c.id_lote_etapa WHERE c.responsavel = current_user AND le.id IN ({SQL_PASSAGENS_ATUAIS}){extra})"
-    )
 
 
 def _folhas_do_grupo(uf: Optional[str], atividades: List[int]) -> str:
@@ -326,32 +386,36 @@ def montar(
     authcfg: str,
     eu: Dict,
     responsaveis: List[Dict],
-    grupos_supervisao: List[Dict],
+    grupos_supervisao: Optional[List[Dict]],
     grupos_execucao: List[Dict],
+    gpkg: str,
 ) -> Dict:
     """(Re)monta o grupo Feixe no topo do projeto, por tarefa (D-101) e por atividade em produção (D-102).
 
-    - Execução: Minhas cargas e Minhas folhas, só das passagens abertas; com mais de uma atividade, um subgrupo por
-      atividade.
-    - Supervisão (só supervisor): um subgrupo por atividade em produção na UF (as de CQ de um tema juntas), cada um
-      com Folhas, Cargas por responsável (concluídas desmarcadas; estilo alternativo por situação) e Cargas a
-      atribuir. Só o subgrupo com mais folhas vem ligado.
+    - Execução, do workspace `gpkg` (C4): Minhas cargas e Minhas folhas, só das passagens abertas; com mais de uma
+      atividade, um subgrupo por atividade. Funciona sem a CCAR.
+    - Supervisão (só supervisor), da CCAR: um subgrupo por atividade em produção na UF (as de CQ de um tema juntas),
+      cada um com Folhas, Cargas por responsável (concluídas desmarcadas; estilo alternativo por situação) e Cargas a
+      atribuir. Só o subgrupo com mais folhas vem ligado. `grupos_supervisao` None = a CCAR não respondeu: o grupo
+      vem sem a Supervisão.
 
-    `grupos_*` vêm de `dados.grupos`; `responsaveis` de `dados.grupos.responsaveis` (por atividade). O modo inicial é
-    o do papel. Devolve o modo, os subgrupos e o nome e a contagem de feições de cada camada.
+    `grupos_*` vêm de `dados.grupos` (a execução, de `dados.local.grupos`); `responsaveis` de
+    `dados.grupos.responsaveis` (por atividade). O modo inicial é o do papel. Devolve o modo, os subgrupos e o nome e
+    a contagem de feições de cada camada.
     """
     from . import formularios
 
-    if not authcfg:
-        raise RuntimeError("usuário e senha ainda não configurados")
     uf = eu.get("uf")
-    supervisor = "supervisor" in (eu.get("papeis") or [])
+    supervisor = "supervisor" in (eu.get("papeis") or []) and grupos_supervisao is not None
+    if supervisor and not authcfg:
+        raise RuntimeError("usuário e senha ainda não configurados")
     projeto = QgsProject.instance()
     raiz = projeto.layerTreeRoot()
     antigo = raiz.findGroup(GRUPO)
     if antigo is not None:
         projeto.removeMapLayers([c.layerId() for c in antigo.findLayers()])
         raiz.removeChildNode(antigo)
+    projeto.removeMapLayers([c.id() for c in _auxiliares()])
     grupo: QgsLayerTreeGroup = raiz.insertGroup(0, GRUPO)
     carregadas = []
 
@@ -361,18 +425,23 @@ def montar(
         sub.addLayer(camada).setItemVisibilityChecked(visivel)
         carregadas.append(camada)
 
+    # A view de folha e progresso, juntada a cada Minhas cargas: no projeto (para a junção sobreviver a salvar e
+    # abrir o projeto), fora da árvore.
+    info = _camada_gpkg(gpkg, VW_CARGA_INFO, "Feixe · minhas cargas (folha e progresso)")
+    info.setCustomProperty(_PAPEL, PAPEL_INFO)
+    projeto.addMapLayer(info, False)
+
     execucao = grupo.addGroup(EXECUCAO)
     for g in grupos_execucao or [None]:
         sub = execucao if len(grupos_execucao) <= 1 else execucao.addGroup(g["rotulo"])
         atividades = g["atividades"] if g and len(grupos_execucao) > 1 else None
-        minhas = _camada(
-            amb, authcfg, "Minhas cargas", "vw_carga_trabalho", "id_carga_trabalho", _so_minhas_abertas(atividades)
-        )
+        minhas = _camada_gpkg(gpkg, "carga_trabalho", "Minhas cargas", _filtro_minhas(atividades))
+        _juntar_info(minhas, info)
         estilo_minhas(minhas)
-        _so_concluido_editavel(minhas)
         formularios.minhas_cargas(minhas)
+        _esconder_colunas(minhas)
         por(sub, minhas, "minhas_cargas")
-        folhas = _camada(amb, authcfg, "Minhas folhas", "ctrl_lote", "id_lote", _so_minhas_folhas(atividades))
+        folhas = _camada_gpkg(gpkg, VW_MINHAS_FOLHAS, "Minhas folhas", _filtro_minhas_folhas(atividades))
         _estilo_minhas_folhas(folhas)
         formularios.minhas_folhas(folhas, minhas.id())
         por(sub, folhas, "minhas_folhas")
@@ -416,8 +485,13 @@ def montar(
         "modo": escolhido,
         "grupos": {"execucao": [g["rotulo"] for g in grupos_execucao],
                    "supervisao": [g["rotulo"] for g in grupos_supervisao] if supervisor else []},
-        "camadas": [{"nome": c.name(), "feicoes": c.featureCount()} for c in carregadas],
+        "camadas": [{"nome": c.name(), "feicoes": _contar(c)} for c in carregadas],
     }  # fmt: skip
+
+
+def _auxiliares() -> List[QgsVectorLayer]:
+    """Camadas do Feixe fora da árvore (a view juntada a Minhas cargas)."""
+    return [c for c in QgsProject.instance().mapLayers().values() if c.customProperty(_PAPEL) == PAPEL_INFO]
 
 
 def modo_atual() -> Optional[str]:
@@ -468,7 +542,7 @@ def camada_minhas() -> Optional[QgsVectorLayer]:
 
 def camada_com_carga(id_carga: int) -> Optional[QgsVectorLayer]:
     for camada in camadas_minhas():
-        if next(camada.getFeatures(f'"id_carga_trabalho" = {int(id_carga)}'), None) is not None:
+        if next(camada.getFeatures(f'"id" = {int(id_carga)}'), None) is not None:
             return camada
     return None
 
@@ -477,58 +551,40 @@ def carga_selecionada() -> Optional[int]:
     """Id da primeira carga selecionada em Minhas cargas, ou None (a escolha à mão vale mais que a atual)."""
     for camada in camadas_minhas():
         for f in camada.getSelectedFeatures():
-            return int(f["id_carga_trabalho"])
+            return int(f["id"])
     return None
 
 
-def recarregar_cargas() -> None:
-    """As camadas do grupo Feixe releem o banco (depois de concluir ou desfazer por fora da tabela de atributos)."""
+def recarregar_cargas(so_workspace: bool = False) -> None:
+    """As camadas do grupo Feixe releem a origem: depois de uma escrita da execução (`so_workspace`: só as do
+    workspace, que mostram na hora; as da CCAR esperam o push) ou de uma sincronização que mudou algo (todas). Camada
+    em edição fica como está, para não atrapalhar quem edita; ela recarrega quando a edição termina."""
     grupo = QgsProject.instance().layerTreeRoot().findGroup(GRUPO)
     if grupo is None:
         return
+    renovadas: set = set()
     for no in grupo.findLayers():
         camada = no.layer()
-        if camada is not None and not camada.isEditable():
-            camada.dataProvider().reloadData()
-            camada.triggerRepaint()
+        if not isinstance(camada, QgsVectorLayer) or camada.isEditable():
+            continue
+        if so_workspace and not do_workspace(camada):
+            continue
+        _renovar_juncoes(camada, renovadas)
+        camada.dataProvider().reloadData()
+        camada.triggerRepaint()
 
 
-# --- Prévia das cargas geradas pela grade (B4) ------------------------------------------------------------------------
-NOME_PREVIA = "Prévia de cargas"
-
-
-def remover_previa() -> None:
-    projeto = QgsProject.instance()
-    projeto.removeMapLayers([c.id() for c in projeto.mapLayersByName(NOME_PREVIA)])
-
-
-def mostrar_previa(celulas: List[Dict]) -> QgsVectorLayer:
-    """Camada temporária (memória) com as células que seriam gravadas, no topo do projeto. Substitui a anterior."""
-    from qgis.core import QgsFeature, QgsField, QgsGeometry
-    from qgis.PyQt.QtCore import QVariant
-
-    remover_previa()
-    camada = QgsVectorLayer("MultiPolygon?crs=EPSG:4674", NOME_PREVIA, "memory")
-    camada.dataProvider().addAttributes([QgsField("geocodigo", QVariant.String), QgsField("folha", QVariant.String)])
-    camada.updateFields()
-    feicoes = []
-    for c in celulas:
-        f = QgsFeature(camada.fields())
-        f.setGeometry(QgsGeometry.fromWkt(c["wkt"]))
-        f.setAttributes([c["geocodigo"], c.get("folha")])
-        feicoes.append(f)
-    camada.dataProvider().addFeatures(feicoes)
-    camada.updateExtents()
-    camada.setRenderer(
-        QgsSingleSymbolRenderer(
-            QgsFillSymbol.createSimple(
-                {"color": "255,0,0,30", "outline_color": "220,30,30,255", "outline_width": "0.5"}
-            )
-        )
-    )
-    QgsProject.instance().addMapLayer(camada, False)
-    QgsProject.instance().layerTreeRoot().insertLayer(0, camada)
-    return camada
+def _renovar_juncoes(camada: QgsVectorLayer, renovadas: set) -> None:
+    """A junção em memória não vê a view mudar: relê a view (uma vez por recarga) e refaz a junção."""
+    for j in camada.vectorJoins():
+        info = j.joinLayer()
+        if info is None:
+            continue
+        if info.id() not in renovadas:
+            info.dataProvider().reloadData()
+            renovadas.add(info.id())
+        camada.removeJoin(j.joinLayerId())
+        camada.addJoin(j)
 
 
 def cargas_selecionadas() -> Dict:
@@ -541,9 +597,8 @@ def cargas_selecionadas() -> Dict:
             continue
         papel = camada.customProperty(_PAPEL)
         if papel not in ("minhas_cargas", "cargas_responsavel", "cargas_a_atribuir"):
-            continue  # não é camada de cargas (Folhas, Minhas folhas, prévia)
-        campo = "id_carga_trabalho" if papel == "minhas_cargas" else "id"
-        ids.update(int(f[campo]) for f in camada.getSelectedFeatures())
+            continue  # não é camada de cargas (Folhas, Minhas folhas)
+        ids.update(int(f["id"]) for f in camada.getSelectedFeatures())
         camadas_.append(camada.name())
     return {"ids": sorted(ids), "camadas": camadas_}
 

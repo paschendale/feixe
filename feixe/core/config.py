@@ -6,7 +6,6 @@ configuração de autenticação; a senha fica no banco de autenticação do QGI
 
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 from qgis.core import QgsApplication, QgsAuthMethodConfig, QgsSettings
@@ -78,10 +77,3 @@ def registrar_conexao_qgis(amb: Ambiente, cid: str) -> str:
     s.setValue(base + "savePassword", "false")
     s.setValue(base + "estimatedMetadata", "true")
     return nome
-
-
-def pasta_workspace(amb: Ambiente, usuario: str) -> str:
-    """Workspace local separado por ambiente e por usuário, nunca misturado."""
-    base = os.path.join(os.path.expanduser("~"), ".feixe", amb.nome, usuario or "anonimo")
-    os.makedirs(base, exist_ok=True)
-    return base

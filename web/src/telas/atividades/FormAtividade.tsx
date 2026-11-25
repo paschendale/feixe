@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { RotuloEstavel } from '@/components/painel'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -149,7 +150,7 @@ export function FormAtividade({ catalogo, atividade, aberto, fechar }: { catalog
             Cancelar
           </Button>
           <Button onClick={salvar} disabled={ocupado || !f.nome.trim()}>
-            {ocupado ? 'Salvando…' : 'Salvar'}
+            <RotuloEstavel ocupado={ocupado} rotulo="Salvar" rotuloOcupado="Salvando…" />
           </Button>
         </DialogFooter>
       </DialogContent>

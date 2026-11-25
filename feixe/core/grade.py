@@ -13,7 +13,7 @@ as coordenadas em hectômetros (`200ME49836N78114`). O sub-nível de 2,5 km, que
 níveis em metros: `2500ME51025N77625` (canto em 5.102.500, 7.762.500).
 
 Puro Python (sem QGIS) para ser testável e usado tanto pelo plugin quanto por scripts. A mesma conta existe em SQL
-(`mapcartacomp.f_grade_*`, em feixe/db/ccar/006_regras.sql), com `ST_Transform` e a string proj4 abaixo.
+(`mapcartacomp.f_grade_*`, em feixe/db/ccar/006_regras.sql), com `ST_Transform` e a mesma projeção em string proj4.
 """
 
 from __future__ import annotations
@@ -21,8 +21,6 @@ from __future__ import annotations
 import math
 import re
 from typing import Iterator, List, Sequence, Tuple
-
-PROJ4 = "+proj=aea +lat_1=-2 +lat_2=-22 +lat_0=-12 +lon_0=-54 +x_0=5000000 +y_0=10000000 +ellps=GRS80 +units=m +no_defs"
 
 # Níveis publicados pelo IBGE e o sub-nível de 2,5 km do Feixe, em metros.
 NIVEIS = (500000, 100000, 50000, 10000, 5000, 2500, 1000, 200)

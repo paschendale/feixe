@@ -1,0 +1,12 @@
+"""Offline e sincronização (fase C, D-111).
+
+- `workspace`: o GeoPackage local por ambiente e usuário, com o espelho da execução, a outbox e o sync_log (C1);
+- `esquema`: as tabelas do workspace e o núcleo do GeoPackage;
+- `geometria`: WKB e blob do GeoPackage em Python puro;
+- `pull`: o escopo da pessoa da CCAR para o workspace, por comparação de versões (C2);
+- `push`: a outbox para a CCAR, com a última escrita vencendo, as regras de novo no servidor e o sync_log (C3);
+- `sincronizar`: push e pull de uma conta, uma de cada vez, e o estado para a barra e o painel (C2, C3);
+- `trabalhador`: a thread que sincroniza em segundo plano, acordada pelas escritas e pelo QTimer de rede (C3).
+
+As funções da execução sobre o workspace ficam em `core/dados/local/`, ao lado das da CCAR.
+"""

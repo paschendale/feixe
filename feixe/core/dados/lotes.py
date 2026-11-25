@@ -6,18 +6,6 @@ from typing import Dict, Iterable, List, Optional
 
 from . import ErroDados, Executor, novo_uuid
 
-
-def temas_com_lotes(ex: Executor, uf: Optional[str]) -> List[Dict]:
-    """Temas que têm lote na UF (todas as UFs se nula), com quantos lotes, em ordem de nome."""
-    sql = (
-        "SELECT t.id, t.nome, count(*) AS lotes FROM mapcartacomp.tema t "
-        "JOIN mapcartacomp.lote l ON l.id_tema = t.id"
-        + (" WHERE l.uf = %s" if uf else "")
-        + " GROUP BY t.id, t.nome ORDER BY t.nome"
-    )
-    return ex.todos(sql, (uf,) if uf else ())
-
-
 # --- Criar e listar lotes (B3) ---------------------------------------------------------------------------------------
 
 _ARTICULACAO = "mapcartctrl.v_articulacao_scn_100000"
@@ -235,6 +223,23 @@ def folhas_no_feixe(ex: Executor, uf: str, id_fluxo: Optional[int] = None) -> Di
         (uf,),
     )
     return {r["id"]: r["temas"] for r in linhas}
+
+
+def buscar_folhas(ex: Executor, filtro: str, limite: int) -> List[Dict]:
+    """Folhas 1:100.000 pelo MI, nome ou nomenclatura: MI exato primeiro, depois os que começam pelo texto (2534 antes
+    de 1253 e 0253), depois o resto. Sem filtro, em ordem de MI."""
+    sql = (
+        "SELECT id_articulacao_scn AS id, cd_mi, nm_carta, nm_nomenclatura_scn AS nomenclatura, "
+        "ST_XMin(geom) AS xmin, ST_YMin(geom) AS ymin, ST_XMax(geom) AS xmax, ST_YMax(geom) AS ymax "
+        f"FROM {_ARTICULACAO} "
+    )
+    if not filtro:
+        return ex.todos(sql + "ORDER BY cd_mi LIMIT %s", (limite,))
+    sql += (
+        "WHERE cd_mi ILIKE %s OR nm_carta ILIKE %s OR nm_nomenclatura_scn ILIKE %s "
+        "ORDER BY cd_mi = %s DESC, cd_mi ILIKE %s DESC, nm_nomenclatura_scn ILIKE %s DESC, cd_mi LIMIT %s"
+    )
+    return ex.todos(sql, (f"%{filtro}%", f"%{filtro}%", f"%{filtro}%", filtro, f"{filtro}%", f"{filtro}%", limite))
 
 
 def folha_no_ponto(ex: Executor, x: float, y: float) -> Optional[Dict]:

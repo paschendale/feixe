@@ -317,3 +317,60 @@ def distribuir_uma(ex: Executor, uf: str, id_lote_etapa: int, responsavel: str, 
         for c in liberados:
             puxar(ex, c)
     return {**item, "liberados": liberados}
+
+
+# --- Passar pendentes (Equipe) ---------------------------------------------------------------------------------------
+
+
+def passar_pendentes(ex: Executor, uf: str, de: str, para: Optional[str]) -> Dict:
+    """Equipe › Passar pendentes: as cargas pendentes de `de` (em etapas abertas) vão para `para` folha a folha, com a
+    regra de uma folha por pessoa do Distribuir (D-109). Na folha em que `para` já trabalha, as cargas vão na hora;
+    nas outras, as de `de` voltam a ficar sem responsável e a folha entra no fim da fila de `para`, que anda na hora
+    se ele está sem carga. Com `para` None as cargas só ficam a atribuir. As concluídas ficam com quem fez.
+
+    A fila de `de` não anda: quem teve as pendentes tiradas em geral não deve receber outra folha agora (férias,
+    afastamento, troca de equipe); o supervisor dá cargas a ela quando quiser."""
+    if para == de:
+        raise ErroDados("escolha outra pessoa para receber as cargas", 400)
+    folhas = ex.todos(
+        "SELECT c.id_lote_etapa AS id, count(*) AS n, min(c.id) AS primeira, "
+        "mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao "
+        "FROM mapcartacomp.carga_trabalho c JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa "
+        "JOIN mapcartacomp.lote l ON l.id = le.id_lote "
+        f"WHERE c.uf = %s AND c.responsavel = %s AND NOT c.concluido AND le.situacao IN {_ABERTAS} "
+        "GROUP BY c.id_lote_etapa, l.tipo, l.nome, le.revisao ORDER BY primeira",
+        (uf, de),
+    )
+    if not folhas:
+        raise ErroDados("a pessoa não tem cargas pendentes para passar")
+    agora, liberadas, na_fila = 0, 0, []
+    for f in folhas:
+        if para is None:
+            liberadas += dc.atribuir(ex, uf, None, lote_etapas=[f["id"]], de=de)["atribuidas"]
+            continue
+        _conferir(ex, uf, para, f["id"])
+        tem = ex.um(
+            "SELECT count(*) AS n FROM mapcartacomp.carga_trabalho WHERE id_lote_etapa = %s AND responsavel = %s "
+            "AND NOT concluido",
+            (f["id"], para),
+        )["n"]
+        if tem:
+            # Já trabalha nesta folha: as cargas de `de` são dele na hora, sem passar pela fila.
+            agora += dc.atribuir(ex, uf, para, lote_etapas=[f["id"]], de=de)["atribuidas"]
+            continue
+        dc.atribuir(ex, uf, None, lote_etapas=[f["id"]], de=de)
+        ex.executar(
+            "DELETE FROM mapcartacomp.fila_folha WHERE id_lote_etapa = %s AND uf = %s AND atribuida_em IS NULL "
+            "AND responsavel <> %s",
+            (f["id"], uf, para),
+        )
+        if not ex.um(
+            "SELECT 1 AS x FROM mapcartacomp.fila_folha WHERE id_lote_etapa = %s AND atribuida_em IS NULL", (f["id"],)
+        ):
+            adicionar(ex, uf, para, f["id"], puxar_agora=False)
+        na_fila.append({"id_lote_etapa": f["id"], "folha_revisao": f["folha_revisao"], "cargas": f["n"]})
+    recebida = puxar(ex, para) if para else None
+    if recebida:
+        agora += recebida["atribuidas"]
+        na_fila = [x for x in na_fila if x["id_lote_etapa"] != recebida["id_lote_etapa"]]
+    return {"agora": agora, "liberadas": liberadas, "na_fila": na_fila, "recebida": recebida}

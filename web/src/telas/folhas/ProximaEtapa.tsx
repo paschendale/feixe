@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
-import { COR } from '@/components/painel'
+import { COR, RotuloEstavel } from '@/components/painel'
 import type { ItemAvanco, ResultadoAvanco } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { lista, num, plural } from '@/lib/formato'
@@ -62,9 +62,10 @@ export function ProximaEtapa({ lotes, fechar }: { lotes: number[]; fechar: (aber
           <DialogTitle>Abrir a próxima etapa</DialogTitle>
           <DialogDescription>Confira o que muda em cada folha. As cargas da etapa nova são geradas na hora, e a distribuição abre em seguida.</DialogDescription>
         </DialogHeader>
-        {!itens && <p className="text-sm text-muted-foreground">Conferindo as folhas…</p>}
+        {/* Mesma altura mínima enquanto confere e depois: o diálogo não salta quando a conferência chega. */}
+        {!itens && <div className="grid min-h-[200px] place-items-center rounded-lg border text-sm text-muted-foreground">Conferindo as folhas…</div>}
         {itens && (
-          <div className="flex max-h-[50vh] flex-col gap-3 overflow-auto">
+          <div className="flex max-h-[50vh] min-h-[200px] flex-col gap-3 overflow-auto">
             {[...grupos.values()].map((g) => {
               const i = g[0]
               return (
@@ -108,7 +109,7 @@ export function ProximaEtapa({ lotes, fechar }: { lotes: number[]; fechar: (aber
           </div>
         )}
         {validos.length > 0 && (
-          <label className="flex flex-col gap-1.5 text-[13px] text-[#3D4B5C]">
+          <label className="flex flex-col gap-1.5 text-[13px] text-texto-2">
             Observação (obrigatória, vai para o histórico de cada folha)
             <Textarea rows={2} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, segue para a revisão" className="text-sm text-foreground" />
           </label>
@@ -118,7 +119,7 @@ export function ProximaEtapa({ lotes, fechar }: { lotes: number[]; fechar: (aber
             Cancelar
           </Button>
           <Button className="font-semibold" disabled={!validos.length || !obs.trim() || ocupado} onClick={confirmar}>
-            {ocupado ? 'Abrindo…' : `Abrir ${unica ?? 'a próxima etapa'} em ${plural(validos.length, 'folha', 'folhas')}`}
+            <RotuloEstavel ocupado={ocupado} rotulo={`Abrir ${unica ?? 'a próxima etapa'} em ${plural(validos.length, 'folha', 'folhas')}`} rotuloOcupado="Abrindo…" />
           </Button>
         </DialogFooter>
       </DialogContent>

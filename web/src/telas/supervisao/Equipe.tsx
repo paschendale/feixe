@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
-import { COR, Carregando, Conteudo, Fichas } from '@/components/painel'
-import type { Pessoa, ResultadoAtribuicao } from '@/lib/api'
+import { COR, Carregando, Colunas, Conteudo, Fichas, RotuloEstavel } from '@/components/painel'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import type { Pessoa, ResultadoPassar } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { lista, num, parado, plural, quando } from '@/lib/formato'
 import { href, navegar, useRota } from '@/lib/rotas'
@@ -26,18 +27,32 @@ export default function Equipe() {
   const { painel, lotes } = usePainel()
   const { dados: equipe, erro } = useApi<{ itens: Pessoa[] }>('/api/equipe', ['carga'])
   const [passar, setPassar] = useState<{ de: string; para: string } | null>(null)
+  const [enviando, setEnviando] = useState(false)
   const p = painel.dados
   const ativa = rota.query.get('grupo') ?? 'todas'
 
   async function aplicar() {
-    if (!passar || !lotes.dados) return
-    const abertas = lotes.dados.itens.filter((l) => l.situacao === 'pendente' || l.situacao === 'em_andamento').map((l) => l.id_lote_etapa_atual)
+    if (!passar || !equipe) return
+    const para = passar.para === '-' ? null : passar.para
+    const nome = equipe.itens.find((y) => y.conta === para)?.nome.split(' ')[0]
+    setEnviando(true)
     try {
-      const r = await enviar<ResultadoAtribuicao>('/api/cargas/atribuir', { lote_etapas: abertas, de: passar.de, responsavel: passar.para === '-' ? null : passar.para })
-      avisar(`${num(r.atribuidas)} cargas passadas.`)
+      const r = await enviar<ResultadoPassar>('/api/equipe/passar', { de: passar.de, para })
+      if (!para) avisar(`${plural(r.liberadas, 'carga ficou', 'cargas ficaram')} a atribuir.`)
+      else
+        avisar(
+          [
+            r.agora > 0 && `${plural(r.agora, 'carga passou', 'cargas passaram')} para ${nome} agora`,
+            r.na_fila.length > 0 && `${lista(r.na_fila.map((f) => f.folha_revisao))} ${r.na_fila.length === 1 ? 'entrou' : 'entraram'} na fila de ${nome}`,
+          ]
+            .filter(Boolean)
+            .join('; ') + '.',
+        )
       setPassar(null)
     } catch (e) {
       avisar((e as Error).message, 'erro')
+    } finally {
+      setEnviando(false)
     }
   }
 
@@ -67,7 +82,7 @@ export default function Equipe() {
         escolher={(id) => navegar(`supervisao/equipe${id === 'todas' ? '' : `?grupo=${id}`}`)}
         fichas={[...p.grupos.map((g) => ({ id: g.chave, rotulo: g.rotulo })), { id: 'todas', rotulo: 'Todas as atividades', todas: true }]}
       />
-      <p className="max-w-[880px] text-base">
+      <p className="min-h-12 max-w-[880px] text-base">
         {ativa === 'todas' ? (
           <>
             <b>{plural(linhas.length, 'pessoa pode', 'pessoas podem')}</b> receber cargas {unidadeDe(eu?.uf).replace(/^Na /, 'na ')}.{' '}
@@ -96,14 +111,15 @@ export default function Equipe() {
       </p>
 
       <div className="overflow-x-auto rounded-[10px] border bg-card">
-        <table className="w-full min-w-[900px] border-collapse text-sm">
+        <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
+          <Colunas larguras={[undefined, 130, '24%', 96, 150, 150, 184]} />
           <thead>
             <tr className="text-left text-xs text-muted-foreground">
               <th className="border-b py-3 pr-2 pl-4 font-medium">Pessoa</th>
               <th className="border-b px-2 py-3 font-medium">Perfil no SGBC</th>
               <th className="border-b px-2 py-3 font-medium">Onde está</th>
               <th className="border-b px-2 py-3 text-right font-medium">Pendentes</th>
-              <th className="border-b px-2 py-3 text-right font-medium">Concluídas em 7 dias</th>
+              <th className="border-b px-2 py-3 text-right font-medium whitespace-nowrap">Concluídas em 7 dias</th>
               <th className="border-b px-2 py-3 font-medium">Última conclusão</th>
               <th className="border-b py-3 pr-4 pl-2" />
             </tr>
@@ -113,14 +129,17 @@ export default function Equipe() {
               const alerta = x.pendentes > 0 && parado(x.ultima)
               const onde = x.painel?.grupos.map((c) => (grupo(c) ? rotuloCurto(grupo(c)!) : c)) ?? []
               const folhas = x.painel?.lotes ?? []
+              const textoOnde = `${lista(onde)}${folhas.length > 0 ? ` · ${folhas.length <= 2 ? lista(folhas.map(nomeLote)) : plural(folhas.length, 'folha', 'folhas')}` : ''}`
+              const nome = `${x.nome}${x.conta === eu?.conta ? ' (você)' : ''}`
               return (
-                <tr key={x.conta} className="border-b border-[#EEF1F4] last:border-0">
-                  <td className="py-3 pr-2 pl-4 font-medium">
-                    {x.nome}
-                    {x.conta === eu?.conta ? ' (você)' : ''}
+                <tr key={x.conta} className="border-b border-linha last:border-0">
+                  <td className="truncate py-3 pr-2 pl-4 font-medium" title={nome}>
+                    {nome}
                   </td>
-                  <td className="px-2 py-3 text-muted-foreground">{perfis(x.perfis)}</td>
-                  <td className="px-2 py-3">
+                  <td className="truncate px-2 py-3 text-muted-foreground" title={perfis(x.perfis)}>
+                    {perfis(x.perfis)}
+                  </td>
+                  <td className="truncate px-2 py-3" title={x.pendentes ? textoOnde : undefined}>
                     {x.pendentes ? (
                       <>
                         {lista(onde)}
@@ -134,38 +153,47 @@ export default function Equipe() {
                   </td>
                   <td className="tab px-2 py-3 text-right">{num(x.pendentes)}</td>
                   <td className="tab px-2 py-3 text-right">{num(x.painel?.concluidas_7d ?? 0)}</td>
-                  <td className={cn('px-2 py-3', alerta && 'font-semibold')} style={{ color: alerta ? COR.alerta : undefined }}>
+                  <td className={cn('truncate px-2 py-3', alerta && 'font-semibold')} style={{ color: alerta ? COR.alerta : undefined }}>
                     {quando(x.ultima)}
                   </td>
-                  <td className="py-3 pr-4 pl-2 text-right whitespace-nowrap">
-                    {passar?.de === x.conta ? (
-                      <span className="inline-flex items-center gap-2">
-                        <Select className="h-8 w-52" value={passar.para} onChange={(e) => setPassar({ ...passar, para: e.target.value })} aria-label="Para quem">
-                          <option value="">Para quem?</option>
-                          <option value="-">Ninguém (a atribuir)</option>
-                          {equipe.itens
-                            .filter((y) => y.conta !== x.conta)
-                            .map((y) => (
-                              <option key={y.conta} value={y.conta}>
-                                {y.nome}
-                              </option>
-                            ))}
-                        </Select>
-                        <Button size="sm" disabled={!passar.para} onClick={aplicar}>
-                          Passar
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setPassar(null)}>
-                          Cancelar
-                        </Button>
-                      </span>
-                    ) : x.pendentes ? (
-                      <Button size="sm" variant="outline" onClick={() => setPassar({ de: x.conta, para: '' })}>
-                        Passar pendentes…
-                      </Button>
+                  <td className="py-3 pr-4 pl-2 text-right">
+                    {x.pendentes ? (
+                      <Popover open={passar?.de === x.conta} onOpenChange={(v) => setPassar(v ? { de: x.conta, para: '' } : null)}>
+                        <PopoverTrigger asChild>
+                          <Button size="sm" variant="outline" className="w-full">
+                            Passar pendentes…
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent>
+                          <div className="flex flex-col gap-1">
+                            <p className="font-semibold">Passar as {plural(x.pendentes, 'pendente', 'pendentes')}</p>
+                            <p className="text-[13px] text-muted-foreground">Uma folha por pessoa: o que não couber agora entra na fila de quem recebe. As concluídas ficam com {x.nome.split(' ')[0]}.</p>
+                          </div>
+                          <Select value={passar?.para ?? ''} onChange={(e) => passar && setPassar({ ...passar, para: e.target.value })} aria-label="Para quem">
+                            <option value="">Para quem?</option>
+                            <option value="-">Ninguém (a atribuir)</option>
+                            {equipe.itens
+                              .filter((y) => y.conta !== x.conta)
+                              .map((y) => (
+                                <option key={y.conta} value={y.conta}>
+                                  {y.nome}
+                                </option>
+                              ))}
+                          </Select>
+                          <div className="flex justify-end gap-2">
+                            <Button size="sm" variant="ghost" onClick={() => setPassar(null)}>
+                              Cancelar
+                            </Button>
+                            <Button size="sm" disabled={!passar?.para || enviando} onClick={aplicar}>
+                              <RotuloEstavel ocupado={enviando} rotulo="Passar" rotuloOcupado="Passando…" />
+                            </Button>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
                     ) : destinoDarCargas ? (
-                      <a href={href('supervisao/folhas', { grupo: destinoDarCargas.chave, atribuir: 1 })} className="font-semibold text-ibge hover:underline">
-                        Dar cargas →
-                      </a>
+                      <Button size="sm" variant="outline" className="w-full" asChild>
+                        <a href={href('supervisao/folhas', { grupo: destinoDarCargas.chave, atribuir: 1 })}>Dar cargas</a>
+                      </Button>
                     ) : null}
                   </td>
                 </tr>

@@ -92,8 +92,3 @@ def registrar(r, ctx) -> None:
     def _estado(req):
         with ctx.tx() as ex:
             return 200, df.estado(ex, inteiro(req.params["id"]))
-
-    @r.rota("GET", "/api/prontas", exige=("supervisor",))
-    def _prontas(req):
-        with ctx.tx() as ex:
-            return 200, {"itens": df.prontas(ex, uf_de(ctx.eu()))}

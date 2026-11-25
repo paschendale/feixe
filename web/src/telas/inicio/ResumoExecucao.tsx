@@ -4,7 +4,8 @@ import type { Passagem, ResumoCargas } from '@/lib/api'
 import { lista, num, pc, plural } from '@/lib/formato'
 import { href } from '@/lib/rotas'
 import { useApi } from '@/lib/useApi'
-import { ABERTAS, Continuar, Producao, pendentesDe, usePorDia } from '../execucao/comum'
+import { ABERTAS, Continuar, Preparando, Producao, pendentesDe, usePorDia } from '../execucao/comum'
+import { MeusConflitos } from '../execucao/MeusConflitos'
 
 function CartaoFolha({ p, principal }: { p: Passagem; principal: boolean }) {
   const aberta = ABERTAS.includes(p.situacao)
@@ -47,6 +48,7 @@ export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
   const { dados } = useApi<ResumoCargas>('/api/cargas/resumo', ['carga', 'lote'])
   const { dias, hoje } = usePorDia()
   if (!dados) return null
+  if (dados.preparando) return comTitulo ? <Secao titulo="Execução" sub="as cargas que estão com você"><Preparando /></Secao> : <Preparando />
   const comPendentes = dados.passagens.filter((p) => pendentesDe(p) > 0 && ABERTAS.includes(p.situacao))
   const outras = dados.passagens.filter((p) => !comPendentes.includes(p))
   const cartoes = [...comPendentes, ...outras].slice(0, 4)
@@ -73,6 +75,7 @@ export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
   const corpo = (
     <>
       {comTitulo && frase}
+      <MeusConflitos />
       <div className="flex flex-wrap items-stretch gap-4">
         {cartoes.length === 0 && <Bloco className="flex-[2_1_420px] text-muted-foreground">Nenhuma carga com você agora. O supervisor atribui as cargas.</Bloco>}
         {cartoes.map((p, i) => (
@@ -103,7 +106,7 @@ export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
       </>
     )
   return (
-    <Secao titulo="Execução" sub="as cargas que estão com você" link={{ href: '#/execucao', rotulo: 'Abrir Minhas cargas' }}>
+    <Secao titulo="Execução" sub="as cargas que estão com você" link={{ href: '#/execucao', rotulo: 'Abrir Execução' }}>
       {corpo}
     </Secao>
   )

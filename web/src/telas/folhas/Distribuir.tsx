@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Colunas, RotuloEstavel } from '@/components/painel'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select } from '@/components/ui/select'
@@ -112,11 +113,17 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
             {comAlguem > 0 && ' Folha que já está com alguém fica com a pessoa; escolha outra para redistribuir: as cargas pendentes saem de quem estava (as concluídas continuam dela).'}
           </DialogDescription>
         </DialogHeader>
-        {!dados && <p className="text-sm text-muted-foreground">Montando a sugestão…</p>}
-        {dados && distribuiveis.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma destas folhas tem cargas a distribuir.</p>}
+        {/* Enquanto a sugestão chega, o espaço da tabela já fica reservado (uma linha por folha): o diálogo não salta. */}
+        {!dados && (
+          <div className="grid place-items-center rounded-md border text-sm text-muted-foreground" style={{ height: `min(${37 + 57 * lotes.length}px, 52vh)` }}>
+            Montando a sugestão…
+          </div>
+        )}
+        {dados && distribuiveis.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma destas folhas tem cargas a distribuir: abra a próxima etapa delas, que já sai com as cargas.</p>}
         {dados && distribuiveis.length > 0 && (
           <div className="max-h-[52vh] overflow-auto rounded-md border">
-            <table className="w-full border-collapse text-sm">
+            <table className="w-full table-fixed border-collapse text-sm">
+              <Colunas larguras={['28%', '44%', undefined]} />
               <thead className="sticky top-0 bg-card">
                 <tr className="text-left text-xs text-muted-foreground">
                   <th className="border-b py-2 pr-2 pl-3 font-medium">Folha</th>
@@ -129,7 +136,7 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
                   const c = escolha[f.id_lote_etapa]
                   const d = destinos[f.id_lote_etapa]
                   return (
-                    <tr key={f.id_lote_etapa} className="border-b border-[#EEF1F4] last:border-0">
+                    <tr key={f.id_lote_etapa} className="border-b border-linha last:border-0">
                       <td className="py-2 pr-2 pl-3">
                         <b className="tab">{f.folha_revisao}</b>
                         <span className="block text-xs text-muted-foreground">
@@ -137,7 +144,7 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
                         </span>
                       </td>
                       <td className="px-2 py-2">
-                        <Select className="h-8 w-full min-w-[240px] text-[13px]" value={c ?? ''} onChange={(e) => setEscolha((x) => ({ ...x, [f.id_lote_etapa]: e.target.value }))} aria-label={`Quem recebe a ${f.folha_revisao}`}>
+                        <Select className="h-8 w-full text-[13px]" value={c ?? ''} onChange={(e) => setEscolha((x) => ({ ...x, [f.id_lote_etapa]: e.target.value }))} aria-label={`Quem recebe a ${f.folha_revisao}`}>
                           <option value="">{f.com.length ? `Deixar com ${comQuem(f)}` : 'Não distribuir agora'}</option>
                           {dados.pessoas.map((p) => (
                             <option key={p.conta} value={p.conta}>
@@ -181,7 +188,7 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
               Depois
             </Button>
             <Button onClick={distribuir} disabled={!itens.length || ocupado}>
-              {ocupado ? 'Distribuindo…' : 'Distribuir'}
+              <RotuloEstavel ocupado={ocupado} rotulo="Distribuir" rotuloOcupado="Distribuindo…" />
             </Button>
           </div>
         </DialogFooter>

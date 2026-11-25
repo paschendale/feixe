@@ -47,3 +47,28 @@ scp apoio/<dump> $O/pre.sql $O/post.sql scripts/dev/restaurar_recorte.sh victor@
 3. Depois: `scripts/db/aplicar.sh` na CCAR de dev, `scripts/db/testar_espelho.sh` no GGC de dev e, como a CCAR de dev não é a de produção e não tem as contas do DF, `scripts/dev/copiar_usuarios_df.sh "$FEIXE_GGC" "$FEIXE_CCAR"` (copia as contas lotadas no DF e as citadas em `bc100ggcdf_apoio`, sem senha e sem disparar os triggers de sincronização).
 
 Resultado em 2026-10-14: GGC com 45.009 cargas, 10.974 amostras e 19 ocorrências em `bc100ggcdf_apoio`, 456 contas em `mapcartctrl` e `dominios` com 183 tabelas; CCAR com 548 contas (mais 116 copiadas do DF), 64.831 folhas e `dominios` com 179 tabelas.
+
+## Medir o pull (S-03)
+
+`medir_pull.py` cronometra o pull inicial do workspace (C2) contra a CCAR de dev, em workspaces numa pasta temporária: (a) o escopo da pessoa com mais cargas no DF e (b) toda a `carga_trabalho` do DF, cada um seguido de um pull sem mudanças, separando o tempo de CCAR (consultas e rede) e o de gravação no workspace. Só lê o banco.
+
+```bash
+/Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 scripts/dev/medir_pull.py 3
+```
+
+Com o Python do QGIS ele usa as conexões do plugin e confere também a sincronização de ponta a ponta (CCAR de dev e uma porta fechada, que tem de dar `offline`). Sem o QGIS (só `psycopg2`), conecta pela URL `FEIXE_CCAR`; é o jeito de medir no disbelief, num container descartável com `python:3.9-slim` e `pip install psycopg2-binary`, com o código copiado por `rsync` (sem `.git` e sem `node_modules`).
+
+## Verificar a fase C e testar o offline (C4)
+
+`verificar_fase_c.py c4` reproduz o ciclo offline de ponta a ponta, sem abrir o QGIS e sem parar container nenhum: copia cinco cargas do DF para a conta de dev, prepara um workspace temporário com o pull, simula a CCAR inalcançável, monta as camadas do workspace (a Supervisão fica de fora, com aviso), conclui uma carga pela API e outra editando `concluido` na camada (edição + commit, com uma recusa e uma geometria mexida no mesmo commit), confere as duas no workspace e na outbox, confere que uma camada da mesma tabela sem o Feixe não consegue gravar, salva e reabre o projeto, devolve a CCAR, sincroniza e confere as duas concluídas na CCAR e no `sync_log`. Apaga o que criou.
+
+```bash
+/Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 scripts/dev/verificar_fase_c.py c4
+```
+
+CCAR fora do ar de mentira, só no ambiente de dev (o host do banco tem outros serviços: nunca pare o container para isso). O plugin trata a CCAR como inalcançável enquanto existir o arquivo `~/.feixe/dev/sem_ccar`, ou com `FEIXE_DEV_SEM_CCAR=1` no ambiente do QGIS. O arquivo dá para criar e apagar com o QGIS aberto: vale na próxima conexão (o teste de rede roda a cada minuto, e "Sincronizar agora" testa na hora). Em homologação e produção isso não existe: o nome do ambiente vem chumbado no build.
+
+```bash
+touch ~/.feixe/dev/sem_ccar   # a CCAR "cai"
+rm ~/.feixe/dev/sem_ccar      # a CCAR "volta"
+```

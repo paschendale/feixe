@@ -49,7 +49,7 @@ function ComecePorAqui() {
             <span className={cn('grid size-7 place-items-center rounded-full text-sm font-semibold', p.feito ? 'bg-[#2E7D4F] text-white' : 'bg-aco-claro text-ibge')}>{p.feito ? '✓' : i + 1}</span>
             <div className="flex flex-col gap-1">
               <b>{p.titulo}</b>
-              <span className="text-[13px] text-[#3D4B5C]">{p.texto}</span>
+              <span className="text-[13px] text-texto-2">{p.texto}</span>
               {p.link && (
                 <LinkSeta href={p.link.href} className="mt-1 text-[13px]">
                   {p.link.rotulo}
@@ -59,7 +59,7 @@ function ComecePorAqui() {
           </li>
         ))}
       </ol>
-      <p className="border-t pt-4 text-[13px] text-[#3D4B5C]">
+      <p className="border-t pt-4 text-[13px] text-texto-2">
         <b>Depois, no dia a dia:</b> quando uma folha termina as cargas, ela aparece aqui em "Precisa de você". Você abre a próxima etapa (as cargas saem na hora) e distribui de novo. Com as filas montadas, quem termina já recebe a próxima folha sem esperar você.
       </p>
     </Bloco>

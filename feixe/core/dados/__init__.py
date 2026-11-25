@@ -12,6 +12,7 @@ Regras que valem para todas as funções daqui:
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -59,3 +60,14 @@ class ErroDados(Exception):
 
 def novo_uuid() -> str:
     return str(uuid.uuid4())
+
+
+def fuso(nome: str) -> dt.tzinfo:
+    """O fuso de quem olha (IANA). O Python do QGIS no Windows pode não ter a base de fusos (`tzdata`): aí vale o fuso
+    da própria estação, que é o de quem está diante dela."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(nome)
+    except Exception:  # noqa: BLE001
+        return dt.datetime.now().astimezone().tzinfo

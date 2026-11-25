@@ -95,10 +95,15 @@ def b0(amb, usuario, senha):
 
 @secao("b1")
 def b1(amb, usuario, senha):
-    """Camadas do Feixe: grupo, estilos, filtros por UF e passagem atual, edição de concluido."""
+    """Camadas do Feixe: grupo, estilos, filtros por UF e passagem atual; a execução do workspace (C4)."""
+    import tempfile
+
     from feixe.core import camadas
     from feixe.core.dados import cargas, grupos
-    from qgis.core import QgsProject
+    from feixe.core.dados.local import grupos as grupos_local
+    from feixe.sync.sincronizar import Sincronizacao
+    from feixe.sync.workspace import Workspace
+    from qgis.core import QgsProject, QgsVectorLayer
 
     # A conta de dev (postgres) não tem cargas: copia 5 cargas pendentes de uma passagem atual do DF para ela.
     copias = []
@@ -118,18 +123,23 @@ def b1(amb, usuario, senha):
                 (u, o["id_lote_etapa"], o["id_atividade"], o["uf"], o["geom"]),
             )
             copias.append(u)
+    # Desde o C4 a execução lê o workspace: um workspace temporário com o pull da conta.
+    ws = Workspace.abrir(amb.nome, usuario, "DF", raiz=tempfile.mkdtemp(prefix="feixe-b1-"))
     try:
+        assert Sincronizacao(lambda: ws, lambda: db.transacao(amb, usuario, senha)).sincronizar()["estado"] == "ok"
         eu = {"uf": "DF", "papeis": ["supervisor"]}
+        with ws.leitura() as lx:
+            exe = grupos_local.execucao(lx)
         with db.transacao(amb, usuario, senha) as ex:
             sup = grupos.supervisao(ex, "DF")
-            exe = grupos.execucao(ex)
             resp = grupos.responsaveis(ex, "DF")
             esperado = {}
             for g in sup:
                 ids = list(g["atividades"])
                 esperado[g["rotulo"]] = ex.um(
+                    # A etapa em que a folha trabalha é a aberta, não a atual do status (D-105).
                     "SELECT (SELECT count(*) FROM mapcartacomp.lote l JOIN mapcartacomp.lote_etapa le "
-                    "ON le.id = l.id_lote_etapa_atual WHERE l.uf = 'DF' "
+                    "ON le.id_lote = l.id WHERE l.uf = 'DF' "
                     "AND le.situacao IN ('pendente', 'em_andamento') "
                     "AND EXISTS (SELECT 1 FROM mapcartacomp.fluxo_etapa_atividade fa WHERE fa.id_fluxo_etapa = "
                     "le.id_fluxo_etapa AND fa.id_atividade = ANY(%s))) AS folhas, "
@@ -142,11 +152,12 @@ def b1(amb, usuario, senha):
         assert len(sup) > 1 and len(exe) == 1, (sup, exe)
         assert any(g["rotulo"].startswith("CQ · ") and len(g["atividades"]) > 1 for g in sup), sup
         authcfg = config.authcfg_id(amb)
-        camadas.montar(amb, authcfg, eu, resp, sup, exe)
-        r = camadas.montar(amb, authcfg, eu, resp, sup, exe)  # de novo: substitui, não duplica
+        camadas.montar(amb, authcfg, eu, resp, sup, exe, ws.caminho)
+        r = camadas.montar(amb, authcfg, eu, resp, sup, exe, ws.caminho)  # de novo: substitui, não duplica
         raiz = QgsProject.instance().layerTreeRoot()
         assert [g.name() for g in raiz.children()].count("Feixe") == 1
-        assert len(QgsProject.instance().mapLayers()) == 2 + 3 * len(sup), QgsProject.instance().mapLayers()
+        # Minhas cargas, Minhas folhas, a view juntada (fora da árvore) e três camadas por subgrupo da supervisão.
+        assert len(QgsProject.instance().mapLayers()) == 3 + 3 * len(sup), QgsProject.instance().mapLayers()
 
         def arvore(no):
             return [(f.name(), arvore(f)) if f.children() else f.name() for f in no.children()]
@@ -225,14 +236,14 @@ def b1(amb, usuario, senha):
             assert all(cfg.readOnly(i) for i in range(len(camada.fields()))), camada.name()
         ok("formulários, dicas e ações: APM com situação e progresso; supervisor só leitura, com abrir no Feixe")
 
-        apm = camadas.montar(amb, authcfg, {"uf": "DF", "papeis": ["apm"]}, [], [], exe)
+        apm = camadas.montar(amb, authcfg, {"uf": "DF", "papeis": ["apm"]}, [], None, exe, ws.caminho)
         assert apm["modo"] == "execucao" and [c["nome"] for c in apm["camadas"]] == ["Minhas cargas", "Minhas folhas"]
         try:
             camadas.modo("supervisao")
             raise AssertionError("APM entrou no modo supervisão")
         except RuntimeError:
             pass
-        r = camadas.montar(amb, authcfg, eu, resp, sup, exe)
+        r = camadas.montar(amb, authcfg, eu, resp, sup, exe, ws.caminho)
         feixe = raiz.findGroup("Feixe")
         ok("APM só tem Execução; o modo supervisão é recusado")
 
@@ -245,33 +256,38 @@ def b1(amb, usuario, senha):
         assert editaveis == ["concluido"], editaveis
         ok("Minhas cargas com o estilo do executor (carga atual, pendente, concluídas) e só concluido editável")
 
-        alvo = next(minhas.getFeatures())
-        minhas.startEditing()
-        minhas.changeAttributeValue(alvo.id(), minhas.fields().indexOf("concluido"), True)
-        assert minhas.commitChanges(), minhas.commitErrors()
-        with db.transacao(amb, usuario, senha) as ex:
-            linha = ex.um(
-                "SELECT concluido, concluido_em FROM mapcartacomp.carga_trabalho WHERE id = %s",
-                (alvo["id_carga_trabalho"],),
-            )
-        assert linha["concluido"] and linha["concluido_em"] is not None, linha
-        ok("concluir pela tabela de atributos grava no banco e preenche concluido_em")
+        assert minhas.providerType() == "ogr" and minhas.source().startswith(ws.caminho)
+        # Concluir pela tabela de atributos vai pela outbox com o gancho do plugin (verificar_fase_c.py c4); uma
+        # camada da mesma tabela sem o gancho é recusada no próprio workspace.
+        crua = QgsVectorLayer(f"{ws.caminho}|layername=carga_trabalho", "crua", "ogr")
+        alvo = next(crua.getFeatures())
+        crua.startEditing()
+        crua.changeAttributeValue(alvo.id(), crua.fields().indexOf("concluido"), True)
+        assert not crua.commitChanges() and "só muda pelas ações do Feixe" in " ".join(crua.commitErrors())
+        crua.rollBack()
+        ok("Minhas cargas é do workspace; gravar nele por fora do Feixe é recusado (a edição vai pela outbox, c4)")
 
         caminho = _renderizar(os.path.join(SAIDA, "feixe-b1-camadas.png"), "Folhas")
         ok(f"imagem das camadas em {caminho}")
     finally:
         QgsProject.instance().clear()
+        ws.fechar()
         with db.transacao(amb, usuario, senha) as ex:
             ex.executar("DELETE FROM mapcartacomp.carga_trabalho WHERE uuid::text = ANY(%s)", (copias,))
 
 
 @secao("b2")
 def b2(amb, usuario, senha):
-    """Minhas cargas: próxima e concluir pelo caminho da barra, com a carga atual, o estilo e a recarga da camada."""
+    """Minhas cargas: próxima e concluir pelo caminho da barra, com a carga atual, o estilo e a recarga da camada.
+    Desde o C3 a execução grava no workspace e a sincronização leva à CCAR: aqui ela roda na hora, no lugar da thread
+    de segundo plano do plugin."""
+    import tempfile
+
     from feixe.core import camadas
-    from feixe.core.dados import cargas as dc
     from feixe.server.api import Contexto
     from feixe.server.rotas import cargas as rc
+    from feixe.sync.sincronizar import Sincronizacao
+    from feixe.sync.workspace import Workspace
     from qgis.core import QgsExpressionContextUtils, QgsProject, QgsRenderContext
 
     copias = []
@@ -292,15 +308,19 @@ def b2(amb, usuario, senha):
                 (u, o["id_lote_etapa"], o["id_atividade"], o["uf"], o["geom"]),
             )
             copias.append(u)
+    ws = Workspace.abrir(amb.nome, usuario, "DF", raiz=tempfile.mkdtemp(prefix="feixe-b2-"))
+    sinc = Sincronizacao(lambda: ws, lambda: db.transacao(amb, usuario, senha, timeout_conexao=5))
     try:
-        camadas.montar(amb, config.authcfg_id(amb), {"uf": "DF", "papeis": ["apm"]}, [], [], [])
+        assert sinc.sincronizar()["estado"] == "ok"
+        camadas.montar(amb, config.authcfg_id(amb), {"uf": "DF", "papeis": ["apm"]}, [], None, [], ws.caminho)
         focadas = []
         ctx = Contexto(
             transacao=lambda: db.transacao(amb, usuario, senha),
             qgis=lambda nome, *a: {
                 "focar_carga": lambda c, p: (camadas.definir_atual(c["id"]), focadas.append(c["id"])),
-                "cargas_mudaram": lambda p: camadas.recarregar_cargas(),
+                "cargas_mudaram": lambda p, so_workspace=False: camadas.recarregar_cargas(so_workspace),
             }[nome](*a),
+            workspace=lambda: ws,
         )
         r = rc.proxima(ctx)
         assert r["carga"] is not None and camadas.carga_atual() == r["carga"]["id"] == focadas[-1]
@@ -321,7 +341,7 @@ def b2(amb, usuario, senha):
             chaves = rend.legendKeysForFeature(f, rctx)
             return [x.label() for x in rend.rootRule().children() if x.ruleKey() in chaves]
 
-        regras = {f["id_carga_trabalho"]: regra(f) for f in minhas.getFeatures()}
+        regras = {f["id"]: regra(f) for f in minhas.getFeatures()}
         rend.stopRender(rctx)
         assert regras[r["carga"]["id"]] == ["Carga atual"], regras
         assert all(v == ["Pendente"] for k, v in regras.items() if k != r["carga"]["id"]), regras
@@ -329,18 +349,23 @@ def b2(amb, usuario, senha):
         alvo = camadas.carga_atual()
         r = rc.concluir(ctx, alvo)
         assert r["progresso"]["concluidas"] == 1 and r["progresso"]["total"] == 4, r["progresso"]
-        feicao = next(minhas.getFeatures(f'"id_carga_trabalho" = {alvo}'))
+        s = sinc.sincronizar()
+        assert s["estado"] == "ok" and s["push"]["resultados"]["aplicado"] == 1, s
+        camadas.recarregar_cargas()
+        feicao = next(minhas.getFeatures(f'"id" = {alvo}'))
         assert feicao["concluido"] is True or feicao["concluido"] == 1, feicao["concluido"]
-        ok("concluir grava, recarrega a camada e devolve o progresso 1/4")
+        ok("concluir grava no workspace, a sincronização leva à CCAR e a camada mostra; progresso 1/4")
         seguinte = rc.proxima(ctx, alvo)["carga"]
         assert seguinte["id"] != alvo and not seguinte["concluido"] and camadas.carga_atual() == seguinte["id"]
         ok("a seguinte é outra carga pendente e vira a atual")
-        with db.transacao(amb, usuario, senha) as ex:
-            assert not dc.desfazer(ex, alvo)["carga"]["concluido"]
-        ok("desfazer dentro de 24 horas")
+        assert not rc.desfazer(ctx, alvo)["carga"]["concluido"]
+        assert sinc.sincronizar()["push"]["resultados"]["aplicado"] == 1
+        ok("desfazer dentro de 24 horas, e a CCAR recebe")
     finally:
         QgsProject.instance().clear()
+        ws.fechar()
         with db.transacao(amb, usuario, senha) as ex:
+            ex.executar("DELETE FROM mapcartacomp.sync_log WHERE uuid::text = ANY(%s)", (copias,))
             ex.executar("DELETE FROM mapcartacomp.carga_trabalho WHERE uuid::text = ANY(%s)", (copias,))
 
 
@@ -439,12 +464,10 @@ def b3(amb, usuario, senha):
 
 @secao("b4")
 def b4(amb, usuario, senha):
-    """Gerar cargas pela grade: prévia numa camada temporária do QGIS, gravar, e recusar gravar de novo."""
-    from feixe.core import camadas
+    """Cargas pela grade ao preparar a passagem (D-109): uma por célula, e preparar de novo não duplica."""
     from feixe.core.dados import lotes as dl
     from feixe.server.api import Contexto
     from feixe.server.rotas import cargas as rc
-    from qgis.core import QgsProject
 
     with db.transacao(amb, usuario, senha) as ex:
         fluxo = ex.um("SELECT id FROM mapcartacomp.fluxo WHERE uf = 'DF' AND nome = 'DF Hidrografia'")["id"]
@@ -457,31 +480,24 @@ def b4(amb, usuario, senha):
         lote = dl.criar_folhas(ex, "DF", fluxo, [folha])["criados"][0]["id_lote"]
         le = ex.um("SELECT id FROM mapcartacomp.lote_etapa WHERE id_lote = %s", (lote,))["id"]
     try:
+        recargas = []
         ctx = Contexto(
             transacao=lambda: db.transacao(amb, usuario, senha),
-            qgis=lambda nome, *a: {
-                "previa_cargas": lambda c: camadas.mostrar_previa(c),
-                "cargas_geradas": lambda: camadas.remover_previa(),
-            }[nome](*a),
+            qgis=lambda nome, *a: recargas.append(nome),
         )
-        r = rc.gerar(ctx, [le], True, "DF")
-        n = r["resultados"][0]["celulas"]
-        previa = QgsProject.instance().mapLayersByName(camadas.NOME_PREVIA)
-        assert len(previa) == 1 and previa[0].featureCount() == n and previa[0].isValid(), previa
-        ok(f"prévia de {n} células numa camada temporária do QGIS; nada gravado")
-        r = rc.gerar(ctx, [le], False, "DF")
-        assert r["resultados"][0]["gravadas"] == n and not QgsProject.instance().mapLayersByName(camadas.NOME_PREVIA)
+        r = rc.preparar(ctx, "DF", [le])
+        n = r["geradas"][0]["gravadas"]
         with db.transacao(amb, usuario, senha) as ex:
             k = ex.um(
-                "SELECT count(DISTINCT geocodigo) AS n FROM mapcartacomp.carga_trabalho WHERE id_lote_etapa = %s", (le,)
+                "SELECT count(*) AS n, count(DISTINCT geocodigo) AS g FROM mapcartacomp.carga_trabalho "
+                "WHERE id_lote_etapa = %s",
+                (le,),
             )
-        assert k["n"] == n, k
-        ok(f"{n} cargas gravadas, uma por célula, e a prévia some do QGIS")
-        r = rc.gerar(ctx, [le], False, "DF")
-        assert not r["resultados"] and "já tem cargas" in r["erros"][0]["erro"], r
-        ok("gravar de novo é recusado com mensagem")
+        assert n > 0 and k["n"] == k["g"] == n and recargas == ["cargas_geradas"], (k, recargas)
+        ok(f"{n} cargas gravadas, uma por célula, e as camadas do QGIS recarregam")
+        assert rc.preparar(ctx, "DF", [le])["geradas"] == []
+        ok("preparar de novo não duplica")
     finally:
-        QgsProject.instance().clear()
         with db.transacao(amb, usuario, senha) as ex:
             ex.executar("DELETE FROM mapcartacomp.lote WHERE id = %s", (lote,))
 

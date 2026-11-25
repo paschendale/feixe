@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Layers } from 'lucide-react'
+import { CloudOff, Layers, RefreshCw } from 'lucide-react'
 import { Logo } from '@/components/Logo'
+import { RotuloEstavel, RotuloNegrito } from '@/components/painel'
 import { AvisosProvider, useAvisar } from '@/lib/avisos'
+import { hora, plural } from '@/lib/formato'
 import { navegar, useRota } from '@/lib/rotas'
 import { SessaoProvider, useSessao } from '@/lib/sessao'
+import { useEvento } from '@/lib/sse'
 import { enviar } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 import { telasDe } from '@/telas'
@@ -17,8 +20,10 @@ function BotaoCamadas() {
   async function montar() {
     setOcupado(true)
     try {
-      const r = await enviar<{ camadas: { nome: string; feicoes: number }[] }>('/api/camadas/montar')
+      const r = await enviar<{ camadas: { nome: string; feicoes: number }[]; avisos?: string[] }>('/api/camadas/montar')
       avisar('Camadas no QGIS: ' + r.camadas.map((c) => `${c.nome} (${c.feicoes})`).join(', '))
+      // Sem a CCAR, o grupo vem só com a Execução (C4): o porquê aparece também aqui.
+      for (const a of r.avisos ?? []) avisar(a, 'erro')
     } catch (e) {
       avisar((e as Error).message, 'erro')
     } finally {
@@ -32,7 +37,7 @@ function BotaoCamadas() {
       title="Monta o grupo Feixe no projeto aberto do QGIS"
       className="flex items-center gap-1.5 rounded-md bg-white/12 px-3 py-[7px] text-white hover:bg-white/20 disabled:opacity-40"
     >
-      <Layers className="size-3.5" /> {ocupado ? 'Montando…' : 'Camadas no QGIS'}
+      <Layers className="size-3.5" /> <RotuloEstavel ocupado={ocupado} rotulo="Camadas no QGIS" rotuloOcupado="Montando…" />
     </button>
   )
 }
@@ -56,6 +61,55 @@ function Conexao() {
       {texto}
       {ambiente ? ` · ${ambiente}` : ''}
     </span>
+  )
+}
+
+// Sincronização do workspace com a CCAR (C3): sincronizado às hh:mm, sincronizando, offline com N pendentes. Clicar
+// sincroniza agora (o mesmo "Sincronizar agora" da barra do QGIS).
+function Sincronia() {
+  const avisar = useAvisar()
+  const { status, conectado } = useSessao()
+  const s = status?.sincronizacao
+  // O que o push recusou ou perdeu num conflito (e o relógio errado) também aparece aqui, não só no QGIS.
+  useEvento(['sincronizacao', 'rede'], (e) => {
+    if (e.evento === 'sincronizacao') for (const a of (e.dados.avisos as string[] | undefined) ?? []) avisar(a, 'erro')
+    // A troca de online para offline e a volta (C4): o mesmo aviso da barra de mensagens do QGIS, uma vez só.
+    if (e.evento === 'rede' && e.dados.texto) avisar(e.dados.texto as string, e.dados.online ? 'ok' : 'erro')
+  })
+  if (!conectado || !status?.credencial || !s) return null
+  const pendentes = s.pendentes ?? 0
+  const aEnviar = pendentes ? plural(pendentes, 'alteração a enviar', 'alterações a enviar') : null
+  const hh = s.ultima_sincronizacao ? hora(s.ultima_sincronizacao) : null
+  const offline = s.online === false || s.ultimo_estado === 'offline'
+  let texto: string
+  let Icone = RefreshCw
+  if (s.em_andamento) texto = 'Sincronizando…'
+  else if (offline) {
+    texto = aEnviar ? `Offline · ${aEnviar}` : 'Offline'
+    Icone = CloudOff
+  } else if (s.ultimo_estado === 'erro') texto = 'Sincronização falhou'
+  else if (aEnviar) texto = aEnviar
+  else texto = hh ? `Sincronizado às ${hh}` : 'Ainda não sincronizado'
+  const dica = [
+    hh ? `Última sincronização às ${hh}.` : 'Ainda não sincronizou.',
+    offline ? 'Sem a CCAR: o Feixe segue offline. O que você fizer em Minhas cargas fica guardado e vai para a CCAR quando a conexão voltar.' : null,
+    s.ultimo_estado === 'erro' && s.mensagem ? `Última tentativa: ${s.mensagem}` : null,
+    'Clique para sincronizar agora.',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  async function agora() {
+    try {
+      await enviar('/api/sincronizar')
+    } catch (e) {
+      avisar((e as Error).message, 'erro')
+    }
+  }
+  return (
+    <button onClick={agora} disabled={s.em_andamento} title={dica} aria-live="polite" className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-white/85 hover:bg-white/12 hover:text-white disabled:opacity-80">
+      <Icone className={cn('size-3.5', s.em_andamento && 'animate-spin')} aria-hidden />
+      {texto}
+    </button>
   )
 }
 
@@ -87,15 +141,16 @@ function Casca() {
                 aria-current={t.id === atual?.id ? 'page' : undefined}
                 className={cn(
                   'border-b-2 border-transparent px-3 py-2 text-white/78 hover:text-white',
-                  t.id === atual?.id && 'border-white font-semibold text-white',
+                  t.id === atual?.id && 'border-white text-white',
                 )}
               >
-                {t.rotulo}
+                <RotuloNegrito ativo={t.id === atual?.id}>{t.rotulo}</RotuloNegrito>
               </a>
             ))}
         </nav>
         <div className="ml-auto flex flex-wrap items-center gap-3.5 text-[13px] text-white/85">
           <Conexao />
+          <Sincronia />
           <BotaoCamadas />
           <a
             href="#/sobre"

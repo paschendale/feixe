@@ -51,7 +51,7 @@ MODOS: List[Tuple[str, str, str, str]] = [
 
 ESTADOS = {
     "conectado": ("#3FA45B", "Conectado"),
-    "fora": ("#F0A040", "Sem resposta da CCAR"),
+    "fora": ("#F0A040", "Sem a CCAR (offline)"),
     "sem_conta": ("#9AA0A6", "Usuário e senha não configurados"),
 }
 
@@ -104,6 +104,11 @@ class BarraFeixe(QToolBar):
         "concluir": "Alt+Shift+C",
     }
 
+    TEXTO_SINCRONIZAR = (
+        "Envia o que você fez e traz da CCAR as suas cargas, a sua fila e as folhas da UF. O Feixe testa a "
+        "conexão sozinho a cada minuto."
+    )
+
     def __init__(self, amb: Ambiente, parent=None):
         super().__init__("Feixe", parent)
         self.setObjectName("FeixeBarra")  # o QGIS lembra posição e visibilidade pelo nome
@@ -112,13 +117,13 @@ class BarraFeixe(QToolBar):
         self.amb = amb
         self._dicas: Dict[QAction, Tuple[str, str]] = {}
         self._estado = ("sem_conta", "", None)
+        self._sincronizacao = ""
 
-        # 1. Conectar: clique abre usuário e senha. "Verificar a conexão agora" fica no menu Complementos > Feixe e
-        # no atalho; o Feixe já verifica sozinho a cada minuto.
+        # 1. Conectar: clique abre usuário e senha. "Sincronizar agora" fica no menu Complementos > Feixe e no atalho
+        # (o nome do objeto continua "verificar", para não perder o atalho que a pessoa já configurou).
         self.acao_conta = self._acao("conectar", "conectar", "Conectar ao Feixe", "", self.conta)
         self.acao_verificar = self._acao(
-            "verificar", "verificar", "Verificar a conexão agora",
-            "Testa de novo se a CCAR responde. O Feixe já verifica sozinho a cada minuto.", self.sincronizar,
+            "verificar", "verificar", "Sincronizar agora", self.TEXTO_SINCRONIZAR, self.sincronizar,
         )  # fmt: skip
         self.addAction(self.acao_conta)
 
@@ -166,8 +171,6 @@ class BarraFeixe(QToolBar):
         self.addAction(self.acao_proxima)
         self.addAction(self.acao_pular)
         self.addAction(self.acao_concluir)
-        self._ancora_acoes = self.addSeparator()
-        self._ancora_acoes.setVisible(False)
         self.mostrar_estado("sem_conta")
 
     # --- montagem -------------------------------------------------------------------------------
@@ -212,10 +215,6 @@ class BarraFeixe(QToolBar):
         for k, a in self.acoes_modo.items():
             a.setChecked(k == chave)
 
-    def adicionar_acao(self, acao: QAction) -> None:
-        """Ação de alta frequência nova (fases seguintes), depois de concluir carga."""
-        self.insertAction(self._ancora_acoes, acao)
-
     # --- estado ---------------------------------------------------------------------------------
     def mostrar_estado(self, estado: str, conta: str = "", detalhe: Optional[str] = None, pendentes: int = 0) -> None:
         """Pinta o botão de conectar: verde conectado, laranja sem a CCAR, cinza sem usuário e senha."""
@@ -225,12 +224,25 @@ class BarraFeixe(QToolBar):
         linhas.append(f"Modo: <b>{self.amb.rotulo}</b> · banco {self.amb.descricao_banco}")
         if detalhe:
             linhas.append(detalhe)
+        if self._sincronizacao:
+            linhas.append(self._sincronizacao)
+        if estado == "fora":
+            linhas.append(
+                "Minhas cargas continuam funcionando: o que você fizer fica guardado e vai quando a conexão voltar."
+            )
         if pendentes:
-            linhas.append(f"{pendentes} alterações locais a enviar")
+            linhas.append(f"{pendentes} alteração a enviar" if pendentes == 1 else f"{pendentes} alterações a enviar")
         clique = "trocar de usuário" if estado != "sem_conta" else "informar usuário e senha"
         linhas.append(f"Clique para {clique}.")
         self._dicas[self.acao_conta] = ("Conectar ao Feixe", "<br>".join(linhas))
         self._atualizar_dica(self.acao_conta)
+
+    def mostrar_sincronizacao(self, texto: str) -> None:
+        """Última sincronização ("Sincronizado às 14:05", "Sincronizando…") na dica de Sincronizar agora e de Conectar
+        (a de Conectar é refeita no próximo `mostrar_estado`)."""
+        self._sincronizacao = texto
+        self._dicas[self.acao_verificar] = ("Sincronizar agora", f"{texto}<br>{self.TEXTO_SINCRONIZAR}")
+        self._atualizar_dica(self.acao_verificar)
 
 
 class DialogoCredenciais(QDialog):

@@ -23,11 +23,10 @@ export function EscolherFluxo({ valor, mudar }: { valor: number | null; mudar: (
           </option>
         ))}
       </Select>
-      {atual && (
-        <p className="text-xs text-muted-foreground">
-          {atual.primeira_etapa ? `Começa em: ${atual.primeira_etapa}` : 'Este fluxo ainda não tem etapas.'}
-        </p>
-      )}
+      {/* A linha fica reservada antes da escolha: o diálogo não cresce ao escolher o fluxo. */}
+      <p className="h-4 truncate text-xs text-muted-foreground">
+        {atual ? (atual.primeira_etapa ? `Começa em: ${atual.primeira_etapa}` : 'Este fluxo ainda não tem etapas.') : 'A folha começa na primeira etapa do fluxo.'}
+      </p>
     </div>
   )
 }

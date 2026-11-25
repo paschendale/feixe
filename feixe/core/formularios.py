@@ -80,60 +80,58 @@ def _acao(camada: QgsVectorLayer, titulo: str, chamada: str) -> None:
 
 
 # --- APM: Minhas cargas -----------------------------------------------------------------------------------------------
+# Do workspace (C4): `id` é o id da carga na CCAR; folha, tema, etapa, atividade e as contagens vêm da view juntada
+# (`vw_minhas_cargas_info`), com as contagens em texto (a view não tipa expressão: daí o `to_int`).
 def minhas_cargas(camada: QgsVectorLayer) -> None:
     _campo_expressao(camada, "situacao_txt", "Situação", _quando_concluida())
     _campo_expressao(camada, "folha_txt", "Folha", '"folha_revisao" || \' · \' || "tema"')
     _campo_expressao(
         camada, "progresso_txt", "Minhas cargas na folha",
-        "\"minhas_concluidas_na_folha\" || ' de ' || \"minhas_na_folha\" || ' concluídas (' || "
-        "round(100.0 * \"minhas_concluidas_na_folha\" / \"minhas_na_folha\") || '%)'",
+        "to_int(\"minhas_concluidas_na_folha\") || ' de ' || to_int(\"minhas_na_folha\") || ' concluídas (' || "
+        "round(100.0 * to_int(\"minhas_concluidas_na_folha\") / to_int(\"minhas_na_folha\")) || '%)'",
     )  # fmt: skip
     camada.setFieldAlias(camada.fields().indexOf("concluido"), "Concluída")
     camada.setFieldAlias(camada.fields().indexOf("atividade"), "Atividade")
     camada.setFieldAlias(camada.fields().indexOf("etapa"), "Etapa")
-    camada.setFieldAlias(camada.fields().indexOf("id_carga_trabalho"), "Carga nº")
+    camada.setFieldAlias(camada.fields().indexOf("id"), "Carga nº")
     _formulario(
         camada,
         [
             ("Situação", ["concluido", "situacao_txt"], None, False),
             ("Folha", ["folha_txt", "etapa", "progresso_txt"], None, False),
-            ("Detalhes", ["atividade", "id_carga_trabalho"], None, True),
+            ("Detalhes", ["atividade", "id"], None, True),
         ],
         editaveis=("concluido",),
     )
     camada.setDisplayExpression("'Carga · ' || \"folha_revisao\"")
     camada.setMapTipTemplate(
         "<b>[% \"folha_revisao\" %]</b> · carga [% CASE WHEN \"concluido\" THEN 'concluída' ELSE 'pendente' END %]"
-        '<br>Minhas na folha: [% "minhas_concluidas_na_folha" %] de [% "minhas_na_folha" %]'
+        '<br>Minhas na folha: [% to_int("minhas_concluidas_na_folha") %] de [% to_int("minhas_na_folha") %]'
     )
-    _acao(camada, "Trabalhar nesta carga", 'trabalhar_em([% "id_carga_trabalho" %])')
-    _acao(camada, "Pular esta carga", 'pular_carga([% "id_carga_trabalho" %])')
+    _acao(camada, "Trabalhar nesta carga", 'trabalhar_em([% "id" %])')
+    _acao(camada, "Pular esta carga", 'pular_carga([% "id" %])')
 
 
 # --- APM: Minhas folhas -----------------------------------------------------------------------------------------------
 def minhas_folhas(camada: QgsVectorLayer, id_camada_minhas: str) -> None:
-    """`id_camada_minhas`: a camada Minhas cargas do mesmo subgrupo, para contar as cargas da pessoa na folha."""
+    """`id_camada_minhas`: a camada Minhas cargas do mesmo subgrupo, para contar as cargas da pessoa na folha. Do
+    workspace (C4), que só tem as cargas da pessoa: a folha toda (todas as cargas, o responsável principal) fica na
+    supervisão, que lê a CCAR."""
     contar = (
-        "aggregate(layer:='{id}', aggregate:='count', expression:=\"id_carga_trabalho\", "
+        "aggregate(layer:='{id}', aggregate:='count', expression:=\"id\", "
         "filter:=\"id_lote\" = attribute(@parent, 'id_lote'){extra})"
     )
     total = contar.format(id=id_camada_minhas, extra="")
     feitas = contar.format(id=id_camada_minhas, extra=' AND "concluido"')
     _campo_expressao(camada, "minhas_txt", "Minhas cargas", f"{feitas} || ' de ' || {total} || ' concluídas'")
     _campo_expressao(camada, "etapa_txt", "Etapa", f"\"etapa\" || ' · ' || {_SITUACAO.format(c='situacao')}")
-    _campo_expressao(
-        camada, "folha_toda_txt", "Folha toda",
-        "\"cargas_concluidas\" || ' de ' || \"cargas_total\" || ' concluídas (' || "
-        "coalesce(round(\"perc_concluidas\"), 0) || '%)'",
-    )  # fmt: skip
     camada.setFieldAlias(camada.fields().indexOf("folha_revisao"), "Folha")
     camada.setFieldAlias(camada.fields().indexOf("tema"), "Tema")
-    camada.setFieldAlias(camada.fields().indexOf("responsavel_nome"), "Responsável principal")
     _formulario(
         camada,
         [
             ("Folha", ["folha_revisao", "tema", "etapa_txt"], None, False),
-            ("Andamento", ["minhas_txt", "folha_toda_txt", "responsavel_nome"], None, False),
+            ("Andamento", ["minhas_txt"], None, False),
         ],
     )
     camada.setDisplayExpression("'Folha · ' || \"folha_revisao\"")

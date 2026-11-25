@@ -17,7 +17,7 @@ export type Tela = {
 }
 
 // Módulos do topo (D-103), os mesmos modos do QGIS: o Início junta um painel por papel e leva a cada módulo.
-export const TELAS: Tela[] = [
+const TELAS: Tela[] = [
   { id: 'inicio', rotulo: 'Início', papeis: [], componente: Inicio },
   { id: 'supervisao', rotulo: 'Supervisão', papeis: ['supervisor', 'gerente'], componente: Supervisao },
   { id: 'execucao', rotulo: 'Execução', papeis: ['apm', 'avaliador', 'supervisor'], componente: Execucao },

@@ -89,14 +89,3 @@ def test_recusas(amb):
     assert dc.atribuir(ex, "GO", "t_apm_a", ids=[c])["atribuidas"] == 0  # carga de outra UF não muda
     cen.mudar(le, "concluida")
     assert dc.atribuir(ex, "DF", "t_apm_a", ids=[c])["atribuidas"] == 0  # etapa encerrada não muda
-
-
-def test_dividir_em_blocos(amb):
-    cen, ex = amb
-    le = cen.passagem("aquisicao", "em_andamento")
-    ids = [cen.carga(le, x=-44.5 + i * 0.05) for i in range(7)]
-    r = dc.dividir(ex, "DF", le, ["t_apm_a", "t_apm_b"])
-    assert r == {"disponiveis": 7, "plano": [{"conta": "t_apm_a", "cargas": 4}, {"conta": "t_apm_b", "cargas": 3}]}
-    assert _resp(ex, ids) == [None] * 7  # prévia não grava
-    dc.dividir(ex, "DF", le, ["t_apm_a", "t_apm_b"], previa=False)
-    assert _resp(ex, ids) == ["t_apm_a"] * 4 + ["t_apm_b"] * 3  # blocos contíguos de oeste a leste

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Bloco, CabecalhoModulo, Carregando, Conteudo } from '@/components/painel'
+import { Bloco, CabecalhoModulo, Carregando, Colunas, Conteudo } from '@/components/painel'
 import type { Atividade, Catalogo as TCatalogo, Tema } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { GERACAO, nivelGrade, plural } from '@/lib/formato'
@@ -44,7 +44,9 @@ function SecaoTema({ t, atividades, abrir, gerente, editar }: { t: Tema; ativida
           {atividades.length === 0 ? (
             <p className="px-5 py-4 text-sm text-muted-foreground">Nenhuma atividade.</p>
           ) : (
-            <table className="w-full min-w-[820px] border-collapse text-sm">
+            <table className="w-full min-w-[820px] table-fixed border-collapse text-sm">
+              {/* Mesmas larguras em todos os temas: as colunas ficam alinhadas de um bloco para o outro. */}
+              <Colunas larguras={[undefined, 150, 120, 210, 150, ...(gerente ? [110] : [])]} />
               <thead>
                 <tr className="text-left text-xs text-muted-foreground">
                   <th className="border-b py-2.5 pr-2 pl-5 font-medium">Atividade</th>
@@ -57,7 +59,7 @@ function SecaoTema({ t, atividades, abrir, gerente, editar }: { t: Tema; ativida
               </thead>
               <tbody>
                 {atividades.map((a) => (
-                  <tr key={a.id} className={cn('border-b border-[#EEF1F4] last:border-0', !a.ativo && 'text-muted-foreground')}>
+                  <tr key={a.id} className={cn('border-b border-linha last:border-0', !a.ativo && 'text-muted-foreground')}>
                     <td className="py-2.5 pr-2 pl-5 font-medium">{a.nome}</td>
                     <td className="px-2 py-2.5">{a.fase_nome}</td>
                     <td className="px-2 py-2.5">{geraCargas(a)}</td>
@@ -112,7 +114,8 @@ function Temas({ dados, gerente }: { dados: TCatalogo; gerente: boolean }) {
         )}
       </div>
       <div className="overflow-x-auto rounded-[10px] border bg-card">
-        <table className="w-full border-collapse text-sm">
+        <table className="w-full table-fixed border-collapse text-sm">
+          <Colunas larguras={[undefined, 120, 160, ...(gerente ? [110] : [])]} />
           <thead>
             <tr className="text-left text-xs text-muted-foreground">
               <th className="border-b py-2.5 pr-2 pl-5 font-medium">Tema</th>
@@ -123,7 +126,7 @@ function Temas({ dados, gerente }: { dados: TCatalogo; gerente: boolean }) {
           </thead>
           <tbody>
             {dados.temas.map((t) => (
-              <tr key={t.id} className="border-b border-[#EEF1F4] last:border-0">
+              <tr key={t.id} className="border-b border-linha last:border-0">
                 <td className="py-2.5 pr-2 pl-5 font-medium">{t.nome}</td>
                 <td className="tab px-2 py-2.5 text-right">{t.atividades}</td>
                 <td className="px-2 py-2.5">{t.ativo ? 'ativo' : <Badge variant="outline">inativo</Badge>}</td>

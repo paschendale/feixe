@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { MousePointerSquareDashed } from 'lucide-react'
+import { RotuloEstavel } from '@/components/painel'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -72,7 +73,7 @@ export function NovoLoteLivre({ aberto, fechar }: { aberto: boolean; fechar: (cr
             Cancelar
           </Button>
           <Button onClick={criar} disabled={!fluxo || !nome.trim() || !selecao || ocupado}>
-            {ocupado ? 'Criando e gerando as cargas…' : 'Criar o lote e gerar as cargas'}
+            <RotuloEstavel ocupado={ocupado} rotulo="Criar o lote e gerar as cargas" rotuloOcupado="Criando e gerando as cargas…" />
           </Button>
         </DialogFooter>
       </DialogContent>

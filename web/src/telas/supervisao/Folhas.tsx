@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { Barra, Bloco, COR, Carregando, Conteudo, Fichas } from '@/components/painel'
+import { Barra, Bloco, COR, Carregando, Colunas, Conteudo, Fichas } from '@/components/painel'
 import type { FluxoCompleto, GrupoAtividade, LotePainel } from '@/lib/api'
 import { diasAtras, lista, num, parado, pc, plural, quando } from '@/lib/formato'
 import { href, navegar, useRota } from '@/lib/rotas'
@@ -89,6 +89,9 @@ export default function Folhas() {
   const marcadosLotes = itens.filter((l) => marcados.has(l.id))
   const todosMarcados = itens.length > 0 && itens.every((l) => marcados.has(l.id))
   const fluxosDoGrupo = grupo ? [...new Set(doGrupo.map((l) => l.id_fluxo))].map((id) => fluxos?.itens.find((f) => f.id === id)).filter(Boolean) : []
+  const descricao = grupo
+    ? fluxosDoGrupo.map((f) => `Fluxo ${f!.nome}: ${f!.etapas.map((e) => e.nome).join(' → ')}`).join(' · ') || grupo.tema
+    : 'em produção, esperando a próxima etapa e encerradas, de todos os temas'
 
   if (!p || !lotes.dados)
     return (
@@ -109,13 +112,11 @@ export default function Folhas() {
         ]}
       />
 
-      <Bloco className="flex-row flex-wrap items-center gap-x-7 gap-y-3 px-5 py-4">
+      <Bloco className="min-h-[100px] flex-row flex-wrap items-center gap-x-7 gap-y-3 px-5 py-4">
         <div className="flex min-w-[300px] flex-[1_1_360px] flex-col gap-0.5">
           <span className="text-base font-semibold">{grupo ? grupo.rotulo : 'Todas as folhas da unidade'}</span>
-          <span className="text-[13px] text-muted-foreground">
-            {grupo
-              ? fluxosDoGrupo.map((f) => `Fluxo ${f!.nome}: ${f!.etapas.map((e) => e.nome).join(' → ')}`).join(' · ') || grupo.tema
-              : 'em produção, esperando a próxima etapa e encerradas, de todos os temas'}
+          <span className="line-clamp-2 text-[13px] text-muted-foreground" title={descricao}>
+            {descricao}
           </span>
         </div>
         {grupo && (
@@ -145,19 +146,19 @@ export default function Folhas() {
         )}
       </Bloco>
 
+      {/* Barra das marcadas: flutua sobre a lista, sem empurrar os filtros e a tabela para baixo do ponteiro. */}
       {supervisor && marcadosLotes.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3 rounded-[10px] border border-[#C9D7EA] bg-[#EEF3FA] px-4 py-3">
-          <b>{plural(marcadosLotes.length, 'folha marcada', 'folhas marcadas')}</b>
-          <span className="text-[#3D4B5C]">{marcadosLotes.length <= 5 ? lista(marcadosLotes.map((l) => l.folha_revisao)) : ''}</span>
-          <span className="flex-1" />
-          <div className="flex flex-wrap gap-2">
+        <div role="region" aria-label="Folhas marcadas" className="fixed inset-x-0 bottom-5 z-40 mx-auto flex w-fit max-w-[calc(100%-2rem)] items-center gap-3 rounded-xl border border-[#C9D7EA] bg-[#EEF3FA]/95 px-4 py-3 shadow-lg backdrop-blur">
+          <b className="whitespace-nowrap">{plural(marcadosLotes.length, 'folha marcada', 'folhas marcadas')}</b>
+          <span className="max-w-[360px] truncate text-texto-2">{marcadosLotes.length <= 5 ? lista(marcadosLotes.map((l) => l.folha_revisao)) : ''}</span>
+          <div className="flex shrink-0 gap-2">
             <Button className="font-semibold" onClick={() => setDistribuir(marcadosLotes.map((l) => l.id))}>
               Distribuir
             </Button>
             <Button variant="outline" className="bg-card" onClick={() => setAvancar(marcadosLotes.map((l) => l.id))}>
               Abrir a próxima etapa
             </Button>
-            <button type="button" className="h-9 px-3 text-[#3D4B5C] hover:underline" onClick={() => setMarcados(new Set())}>
+            <button type="button" className="h-9 px-3 text-texto-2 hover:underline" onClick={() => setMarcados(new Set())}>
               Limpar
             </button>
           </div>
@@ -192,11 +193,12 @@ export default function Folhas() {
       </div>
 
       <div className="overflow-x-auto rounded-[10px] border bg-card">
-        <table className="w-full min-w-[900px] border-collapse text-sm">
+        <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
+          <Colunas larguras={[...(supervisor ? [40] : []), 96, undefined, 300, '17%', 140, 130]} />
           <thead>
             <tr className="text-left text-xs text-muted-foreground">
               {supervisor && (
-                <th className="w-8 border-b py-3 pr-2 pl-4">
+                <th className="border-b py-3 pr-2 pl-4">
                   <input
                     type="checkbox"
                     aria-label="Marcar todas"
@@ -216,7 +218,7 @@ export default function Folhas() {
           <tbody>
             {itens.length === 0 && (
               <tr>
-                <td colSpan={7} className="p-4 text-muted-foreground">
+                <td colSpan={7} className="px-4 py-3 text-muted-foreground">
                   {todos.length ? 'Nenhuma folha com esses filtros.' : supervisor ? 'A unidade ainda não tem folhas no Feixe: use "Novas folhas" acima.' : 'A unidade ainda não tem folhas no Feixe.'}
                 </td>
               </tr>
@@ -227,7 +229,7 @@ export default function Folhas() {
               const alerta = grupo?.fase !== 'cq' && aberta && (l.cargas_total ?? 0) > 0 && l.situacao === 'em_andamento' && parado(x?.ultima ?? x?.iniciada_em ?? null)
               const dias = diasAtras(x?.iniciada_em ?? null)
               return (
-                <tr key={l.id} className={cn('border-b border-[#EEF1F4] last:border-0 hover:bg-[#F7F9FB]', (marcados.has(l.id) || selecionado === l.id) && 'bg-[#F4F8FD]')}>
+                <tr key={l.id} className={cn('border-b border-linha last:border-0 hover:bg-[#F7F9FB]', (marcados.has(l.id) || selecionado === l.id) && 'bg-[#F4F8FD]')}>
                   {supervisor && (
                     <td className="py-3 pr-2 pl-4">
                       <input type="checkbox" aria-label={`Marcar ${l.folha_revisao}`} checked={marcados.has(l.id)} onChange={() => marcar(l.id)} />
@@ -238,27 +240,29 @@ export default function Folhas() {
                       {l.folha_revisao}
                     </a>
                   </td>
-                  <td className="px-2 py-3">
+                  <td className="truncate px-2 py-3" title={[!grupo && l.tema, l.etapa, l.situacao && (aberta ? SITUACAO[l.situacao] : 'esperando a próxima')].filter(Boolean).join(' · ')}>
                     {!grupo && <span className="text-muted-foreground">{l.tema} · </span>}
                     {l.etapa ?? '—'}
                     {l.situacao && <span className="text-muted-foreground"> · {aberta ? SITUACAO[l.situacao] : 'esperando a próxima'}</span>}
                   </td>
                   <td className="px-2 py-3">
                     {l.cargas_total ? (
-                      <div className="flex items-center gap-2.5">
-                        <Barra className="w-[90px]" altura={6} total={l.cargas_total} partes={[{ valor: l.cargas_concluidas ?? 0, cor: COR.concluida }]} />
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <Barra className="w-[90px] shrink-0" altura={6} total={l.cargas_total} partes={[{ valor: l.cargas_concluidas ?? 0, cor: COR.concluida }]} />
                         <span className="tab">
                           {num(l.cargas_concluidas ?? 0)}/{num(l.cargas_total)}
                         </span>
-                        {!!x?.a_atribuir && <span style={{ color: COR.alerta }}>· {num(x.a_atribuir)} {grupo?.fase === 'cq' ? 'sem avaliador' : 'a atribuir'}</span>}
-                        {!!x?.na_fila && <span className="text-muted-foreground">· na fila de {(x.fila_de ?? '').split(' ')[0]}</span>}
+                        <span className="min-w-0 truncate">
+                          {!!x?.a_atribuir && <span style={{ color: COR.alerta }}>· {num(x.a_atribuir)} {grupo?.fase === 'cq' ? 'sem avaliador' : 'a atribuir'} </span>}
+                          {!!x?.na_fila && <span className="text-muted-foreground">· na fila de {(x.fila_de ?? '').split(' ')[0]}</span>}
+                        </span>
                       </div>
                     ) : (
                       <span className="text-muted-foreground">sem cargas</span>
                     )}
                   </td>
-                  <td className="max-w-56 px-2 py-3">{x?.responsaveis.length ? lista(x.responsaveis.map((n) => n.split(' ')[0])) : <span className="text-muted-foreground">—</span>}</td>
-                  <td className={cn('px-2 py-3', alerta && 'font-semibold')} style={{ color: alerta ? COR.alerta : x?.ultima ? undefined : 'var(--muted-foreground)' }}>
+                  <td className="truncate px-2 py-3" title={x?.responsaveis.join(', ')}>{x?.responsaveis.length ? lista(x.responsaveis.map((n) => n.split(' ')[0])) : <span className="text-muted-foreground">—</span>}</td>
+                  <td className={cn('truncate px-2 py-3', alerta && 'font-semibold')} style={{ color: alerta ? COR.alerta : x?.ultima ? undefined : 'var(--muted-foreground)' }}>
                     {aberta ? quando(x?.ultima ?? null) : '—'}
                   </td>
                   <td className="tab py-3 pr-4 pl-2 text-right">
