@@ -2,10 +2,9 @@ import { useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { Bloco, COR } from '@/components/painel'
 import type { MeuSyncLog } from '@/lib/api'
-import { plural } from '@/lib/formato'
+import { FUSO, plural } from '@/lib/formato'
 import { useApi } from '@/lib/useApi'
 
-const FUSO = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo'
 
 // O que não entrou na CCAR do que a pessoa fez (C5): recusas e conflitos perdidos dos últimos 7 dias, lidos do
 // workspace (funciona offline). Só o próprio trabalho: nenhum nome de colega.

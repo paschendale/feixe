@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { MousePointerClick, Search, X } from 'lucide-react'
+import { RotuloEstavel } from '@/components/painel'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -7,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { api, type Folha, type ResultadoCriacao } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { useSessao } from '@/lib/sessao'
+import { useEvento } from '@/lib/sse'
 import { enviar } from '@/lib/useApi'
 import { EscolherFluxo } from './EscolherFluxo'
 import { comCargas, resumoPreparo } from './preparo'
@@ -29,7 +31,7 @@ export function criadosComCargas(r: ResultadoCriacao) {
 // cargas da primeira etapa saem junto (D-109), e quem abriu o diálogo recebe os lotes com cargas para distribuir.
 export function NovaFolha({ aberto, fechar: fecharDialogo, fluxoInicial = null }: { aberto: boolean; fechar: (criados?: number[]) => void; fluxoInicial?: number | null }) {
   const avisar = useAvisar()
-  const { ultimo, conectado } = useSessao()
+  const { conectado } = useSessao()
   const [fluxo, setFluxo] = useState<number | null>(fluxoInicial)
   useEffect(() => {
     if (aberto && fluxoInicial) setFluxo(fluxoInicial)
@@ -44,12 +46,12 @@ export function NovaFolha({ aberto, fechar: fecharDialogo, fluxoInicial = null }
   const adicionar = (f: Escolhida) => setEscolhidas((xs) => (xs.some((x) => x.id === f.id) ? xs : [...xs, f]))
 
   // Folhas escolhidas ou tiradas no mapa do QGIS chegam pelo evento qgis {acao: "folhas", adicionar, tirar}.
-  useEffect(() => {
-    if (!aberto || ultimo?.evento !== 'qgis' || ultimo.dados.acao !== 'folhas') return
-    const novas = (ultimo.dados.adicionar ?? []) as Escolhida[]
-    const tirar = new Set((ultimo.dados.tirar ?? []) as number[])
+  useEvento(['qgis'], (e) => {
+    if (!aberto || e.dados.acao !== 'folhas') return
+    const novas = (e.dados.adicionar ?? []) as Escolhida[]
+    const tirar = new Set((e.dados.tirar ?? []) as number[])
     setEscolhidas((xs) => [...xs.filter((x) => !tirar.has(x.id)), ...novas.filter((n) => !xs.some((x) => x.id === n.id))])
-  }, [ultimo, aberto])
+  })
 
   // A malha no QGIS acompanha a lista daqui (escolhidas pela busca ou tiradas no X) e o fluxo (o que já está no Feixe).
   useEffect(() => {
@@ -119,8 +121,10 @@ export function NovaFolha({ aberto, fechar: fecharDialogo, fluxoInicial = null }
               <MousePointerClick /> No mapa
             </Button>
           </form>
+          {/* Resultados, escolhidas e rodapé com altura fixa: o diálogo não cresce a cada busca ou escolha. */}
+          {achadas.length === 0 && <p className="grid h-40 place-items-center rounded-md border border-dashed px-4 text-center text-[13px] text-muted-foreground">As folhas achadas aparecem aqui. Também dá para escolher no mapa do QGIS.</p>}
           {achadas.length > 0 && (
-            <ul className="max-h-40 divide-y overflow-auto rounded-md border text-sm">
+            <ul className="h-40 divide-y overflow-auto rounded-md border text-sm">
               {achadas.map((f) => (
                 <li key={f.id}>
                   <button className="flex w-full justify-between px-3 py-1.5 text-left hover:bg-accent" onClick={() => adicionar(f)}>
@@ -140,18 +144,15 @@ export function NovaFolha({ aberto, fechar: fecharDialogo, fluxoInicial = null }
             No QGIS: clique numa folha para escolher ou tirar; <b>Ctrl ou Shift e arraste</b> para escolher todas as folhas de um retângulo. Em azul, as escolhidas; hachuradas, as que já estão no Feixe{fluxo ? ' neste tema' : ' na sua unidade'}.
           </p>
         )}
-        {escolhidas.length > 0 && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">
-              {escolhidas.length === 1 ? '1 folha escolhida' : `${escolhidas.length} folhas escolhidas`}
-            </span>
+        <div className="flex h-8 items-center justify-between text-sm">
+          <span className="text-muted-foreground">{escolhidas.length === 0 ? 'Nenhuma folha escolhida.' : escolhidas.length === 1 ? '1 folha escolhida' : `${escolhidas.length} folhas escolhidas`}</span>
+          {escolhidas.length > 0 && (
             <Button variant="ghost" size="sm" onClick={() => setEscolhidas([])}>
               Tirar todas
             </Button>
-          </div>
-        )}
-        <div className="flex max-h-48 min-h-9 flex-wrap content-start gap-2 overflow-y-auto">
-          {escolhidas.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma folha escolhida.</p>}
+          )}
+        </div>
+        <div className="flex h-[76px] flex-wrap content-start gap-2 overflow-y-auto">
           {escolhidas.map((f) => (
             <span key={f.id} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-ibge pr-1.5 pl-3 text-sm text-white">
               <b className="tab">{f.cd_mi}</b>
@@ -166,7 +167,7 @@ export function NovaFolha({ aberto, fechar: fecharDialogo, fluxoInicial = null }
             Cancelar
           </Button>
           <Button onClick={criar} disabled={!fluxo || escolhidas.length === 0 || ocupado}>
-            {ocupado ? 'Criando e gerando as cargas…' : escolhidas.length > 1 ? `Criar ${escolhidas.length} folhas e gerar as cargas` : 'Criar a folha e gerar as cargas'}
+            <RotuloEstavel ocupado={ocupado} rotulo={escolhidas.length > 1 ? `Criar ${escolhidas.length} folhas e gerar as cargas` : 'Criar a folha e gerar as cargas'} rotuloOcupado="Criando e gerando as cargas…" />
           </Button>
         </DialogFooter>
       </DialogContent>

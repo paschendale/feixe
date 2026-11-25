@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { CloudOff, Layers, RefreshCw } from 'lucide-react'
 import { Logo } from '@/components/Logo'
+import { RotuloEstavel, RotuloNegrito } from '@/components/painel'
 import { AvisosProvider, useAvisar } from '@/lib/avisos'
-import { plural } from '@/lib/formato'
+import { hora, plural } from '@/lib/formato'
 import { navegar, useRota } from '@/lib/rotas'
 import { SessaoProvider, useSessao } from '@/lib/sessao'
+import { useEvento } from '@/lib/sse'
 import { enviar } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 import { telasDe } from '@/telas'
@@ -35,7 +37,7 @@ function BotaoCamadas() {
       title="Monta o grupo Feixe no projeto aberto do QGIS"
       className="flex items-center gap-1.5 rounded-md bg-white/12 px-3 py-[7px] text-white hover:bg-white/20 disabled:opacity-40"
     >
-      <Layers className="size-3.5" /> {ocupado ? 'Montando…' : 'Camadas no QGIS'}
+      <Layers className="size-3.5" /> <RotuloEstavel ocupado={ocupado} rotulo="Camadas no QGIS" rotuloOcupado="Montando…" />
     </button>
   )
 }
@@ -66,24 +68,18 @@ function Conexao() {
 // sincroniza agora (o mesmo "Sincronizar agora" da barra do QGIS).
 function Sincronia() {
   const avisar = useAvisar()
-  const { status, conectado, ultimo } = useSessao()
+  const { status, conectado } = useSessao()
   const s = status?.sincronizacao
   // O que o push recusou ou perdeu num conflito (e o relógio errado) também aparece aqui, não só no QGIS.
-  useEffect(() => {
-    if (ultimo?.evento === 'sincronizacao') {
-      for (const a of (ultimo.dados.avisos as string[] | undefined) ?? []) avisar(a, 'erro')
-    }
+  useEvento(['sincronizacao', 'rede'], (e) => {
+    if (e.evento === 'sincronizacao') for (const a of (e.dados.avisos as string[] | undefined) ?? []) avisar(a, 'erro')
     // A troca de online para offline e a volta (C4): o mesmo aviso da barra de mensagens do QGIS, uma vez só.
-    if (ultimo?.evento === 'rede' && ultimo.dados.texto) {
-      avisar(ultimo.dados.texto as string, ultimo.dados.online ? 'ok' : 'erro')
-    }
-  }, [ultimo, avisar])
+    if (e.evento === 'rede' && e.dados.texto) avisar(e.dados.texto as string, e.dados.online ? 'ok' : 'erro')
+  })
   if (!conectado || !status?.credencial || !s) return null
   const pendentes = s.pendentes ?? 0
   const aEnviar = pendentes ? plural(pendentes, 'alteração a enviar', 'alterações a enviar') : null
-  const hora = s.ultima_sincronizacao
-    ? new Date(s.ultima_sincronizacao).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-    : null
+  const hh = s.ultima_sincronizacao ? hora(s.ultima_sincronizacao) : null
   const offline = s.online === false || s.ultimo_estado === 'offline'
   let texto: string
   let Icone = RefreshCw
@@ -93,9 +89,9 @@ function Sincronia() {
     Icone = CloudOff
   } else if (s.ultimo_estado === 'erro') texto = 'Sincronização falhou'
   else if (aEnviar) texto = aEnviar
-  else texto = hora ? `Sincronizado às ${hora}` : 'Ainda não sincronizado'
+  else texto = hh ? `Sincronizado às ${hh}` : 'Ainda não sincronizado'
   const dica = [
-    hora ? `Última sincronização às ${hora}.` : 'Ainda não sincronizou.',
+    hh ? `Última sincronização às ${hh}.` : 'Ainda não sincronizou.',
     offline ? 'Sem a CCAR: o Feixe segue offline. O que você fizer em Minhas cargas fica guardado e vai para a CCAR quando a conexão voltar.' : null,
     s.ultimo_estado === 'erro' && s.mensagem ? `Última tentativa: ${s.mensagem}` : null,
     'Clique para sincronizar agora.',
@@ -145,10 +141,10 @@ function Casca() {
                 aria-current={t.id === atual?.id ? 'page' : undefined}
                 className={cn(
                   'border-b-2 border-transparent px-3 py-2 text-white/78 hover:text-white',
-                  t.id === atual?.id && 'border-white font-semibold text-white',
+                  t.id === atual?.id && 'border-white text-white',
                 )}
               >
-                {t.rotulo}
+                <RotuloNegrito ativo={t.id === atual?.id}>{t.rotulo}</RotuloNegrito>
               </a>
             ))}
         </nav>

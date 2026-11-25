@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Dialog as D } from 'radix-ui'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
@@ -46,7 +47,7 @@ function Trilho({ fluxo, lote, estado }: { fluxo: FluxoCompleto; lote: LoteCompl
         else if (ultima?.situacao === 'concluida') lado = `concluída ${diaMes(ultima.concluida_em)}${ps.length > 1 ? ` · ${ps.length}×` : ''}`
         else if (ultima?.situacao === 'pulada') lado = 'pulada'
         return (
-          <li key={e.id} className={cn('grid grid-cols-[22px_1fr_auto] items-center gap-2.5 border-b border-[#EEF1F4] py-2.5 last:border-0', aberta && 'font-semibold')}>
+          <li key={e.id} className={cn('grid grid-cols-[22px_1fr_auto] items-center gap-2.5 border-b border-linha py-2.5 last:border-0', aberta && 'font-semibold')}>
             <span
               className={cn(
                 'inline-block size-3 rounded-full border-2 border-[#C7D0DB]',
@@ -153,7 +154,7 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
           Sugestão do Feixe: {sugestao} Nada anda sozinho: a decisão é sua.
         </p>
       )}
-      <label className="flex flex-col gap-1.5 text-[13px] text-[#3D4B5C]">
+      <label className="flex flex-col gap-1.5 text-[13px] text-texto-2">
         Observação (fica no histórico; obrigatória)
         <Textarea rows={3} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, segue para o CQ" className="text-sm text-foreground" />
       </label>
@@ -225,19 +226,19 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
   const aberta = !!atual && ABERTAS.includes(atual.situacao)
   const supervisor = tem('supervisor') && lote?.uf === eu?.uf
 
-  useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && fechar()
-    window.addEventListener('keydown', esc)
-    return () => window.removeEventListener('keydown', esc)
-  }, [fechar])
-
+  // Diálogo do Radix (como os outros): prende e devolve o foco, e o Esc fecha só a camada de cima (o Distribuir aberto
+  // daqui fecha sem fechar a gaveta).
   return (
-    <div className="fixed inset-0 z-40 flex">
-      <button aria-label="Fechar a folha" className="flex-1 cursor-default bg-[#1C2733]/10" onClick={fechar} />
-      <aside aria-label={lote ? `Folha ${lote.folha_revisao}` : 'Folha'} className="flex w-full max-w-[620px] flex-col gap-6 overflow-auto border-l bg-card px-7 pt-6 pb-10 shadow-[-12px_0_32px_rgba(28,39,51,.08)]">
+    <D.Root open onOpenChange={(v) => !v && fechar()}>
+      <D.Portal>
+        <D.Overlay className="fixed inset-0 z-40 bg-[#1C2733]/10" />
+        <D.Content
+          aria-describedby={undefined}
+          className="fixed inset-y-0 right-0 z-40 flex w-full max-w-[620px] flex-col gap-6 overflow-auto border-l bg-card px-7 pt-6 pb-10 shadow-[-12px_0_32px_rgba(28,39,51,.08)] outline-none"
+        >
         <div className="flex items-start gap-3">
           <div className="flex flex-1 flex-col gap-1">
-            <h1 className="tab text-[26px] font-bold">{lote?.folha_revisao ?? '…'}</h1>
+            <D.Title className="tab text-[26px] font-bold">{lote?.folha_revisao ?? '…'}</D.Title>
             {lote && (
               <span className="text-muted-foreground">
                 {lote.tema} · {lote.projeto}
@@ -371,7 +372,7 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                 <Titulo>Histórico</Titulo>
                 <ol className="flex flex-col text-[13px]">
                   {hist.itens.slice(0, 20).map((h, i) => (
-                    <li key={i} className="flex flex-col gap-0.5 border-b border-[#EEF1F4] py-2.5 last:border-0">
+                    <li key={i} className="flex flex-col gap-0.5 border-b border-linha py-2.5 last:border-0">
                       <span>
                         <b>{ACAO[h.acao] ?? h.acao}</b> {h.etapa}
                         {h.instancia > 1 ? ` (${h.instancia}ª)` : ''}
@@ -387,7 +388,8 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
             )}
           </>
         )}
-      </aside>
-    </div>
+        </D.Content>
+      </D.Portal>
+    </D.Root>
   )
 }

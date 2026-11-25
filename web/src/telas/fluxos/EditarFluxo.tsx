@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
+import { RotuloEstavel } from '@/components/painel'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -158,7 +159,7 @@ export function EditarFluxo({ fluxo, catalogo, fechar }: { fluxo: FluxoCompleto 
             Cancelar
           </Button>
           <Button onClick={salvar} disabled={ocupado || !nome.trim()}>
-            {ocupado ? 'Salvando…' : 'Salvar fluxo'}
+            <RotuloEstavel ocupado={ocupado} rotulo="Salvar fluxo" rotuloOcupado="Salvando…" />
           </Button>
         </DialogFooter>
       </DialogContent>

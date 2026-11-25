@@ -120,7 +120,7 @@ function PrecisaDeVoce({ p, esperando, lotes }: { p: PainelSupervisao; esperando
   )
 }
 
-export function CartaoAtividade({ g, link = true }: { g: GrupoAtividade; link?: boolean }) {
+function CartaoAtividade({ g }: { g: GrupoAtividade }) {
   const cq = ehCq(g)
   const pendentes = g.com_alguem + g.a_atribuir + g.na_fila
   return (
@@ -174,7 +174,7 @@ export function CartaoAtividade({ g, link = true }: { g: GrupoAtividade; link?: 
         )}
         {!cq && pendentes === 0 && g.total > 0 && <span className="text-muted-foreground">todas concluídas</span>}
       </div>
-      {link && <LinkSeta href={href('supervisao/folhas', { grupo: g.chave })}>{cq ? 'Ver folhas e amostras' : 'Ver folhas e cargas'}</LinkSeta>}
+      <LinkSeta href={href('supervisao/folhas', { grupo: g.chave })}>{cq ? 'Ver folhas e amostras' : 'Ver folhas e cargas'}</LinkSeta>
     </Bloco>
   )
 }
@@ -248,7 +248,7 @@ function EquipeCartao({ p }: { p: PainelSupervisao }) {
           </thead>
           <tbody>
             {mostrar.map((x) => (
-              <tr key={x.conta} className="border-b border-[#EEF1F4] last:border-0">
+              <tr key={x.conta} className="border-b border-linha last:border-0">
                 <td className="py-2 pr-2">
                   {x.nome}
                   {x.conta === eu?.conta ? ' (você)' : ''}
@@ -290,7 +290,10 @@ export function ResumoSupervisao({ dados }: { dados: ReturnType<typeof usePainel
             ))}
           </div>
         ) : (
-          <Bloco className="text-muted-foreground">Nenhuma atividade em produção: nenhuma folha com etapa aberta.</Bloco>
+          <Bloco className="flex-row flex-wrap items-center justify-between text-muted-foreground">
+            Nenhuma atividade em produção: nenhuma folha com etapa aberta.
+            <LinkSeta href={href('supervisao/folhas', { grupo: 'todas' })}>Ver as folhas da unidade</LinkSeta>
+          </Bloco>
         )}
       </div>
       <div className="flex flex-wrap items-stretch gap-4">

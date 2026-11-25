@@ -6,13 +6,12 @@ import { Select } from '@/components/ui/select'
 import { Bloco, COR, Carregando, Conteudo } from '@/components/painel'
 import type { ContagemSyncLog, ItemSyncLog, ListaSyncLog, Pessoa } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
-import { dataHora, num, plural } from '@/lib/formato'
+import { dataHora, FUSO, num, plural } from '@/lib/formato'
 import { href, navegar, useRota } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 
-const FUSO = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo'
 
 // Contador da aba e do Início: conflitos e recusas dos últimos 7 dias.
 export function useContagemConflitos(ativo: boolean) {
@@ -46,7 +45,7 @@ function Lado({ titulo, quem, em, ficou }: { titulo: string; quem: string | null
         {quem ?? '—'}
         {em ? ` · ${dataHora(em)}` : ''}
       </span>
-      <span className={cn('mt-1 inline-block rounded-full px-2 text-[11px] font-semibold', ficou ? 'bg-[#2E7D4F] text-white' : 'bg-[#DCE2EA] text-[#3D4B5C]')}>{ficou ? 'ficou' : 'descartado'}</span>
+      <span className={cn('mt-1 inline-block rounded-full px-2 text-[11px] font-semibold', ficou ? 'bg-[#2E7D4F] text-white' : 'bg-[#DCE2EA] text-texto-2')}>{ficou ? 'ficou' : 'descartado'}</span>
     </th>
   )
 }
@@ -103,7 +102,7 @@ function Item({ i }: { i: ItemSyncLog }) {
             </thead>
             <tbody>
               {i.valores.map((v) => (
-                <tr key={v.campo} className="border-b border-[#EEF1F4] last:border-0">
+                <tr key={v.campo} className="border-b border-linha last:border-0">
                   <td className="px-3 py-1.5 text-[13px] text-muted-foreground">{v.rotulo}</td>
                   <td className={cn('tab px-3 py-1.5', !ficouLocal && !v.igual && 'text-muted-foreground line-through')}>{v.local}</td>
                   <td className={cn('tab px-3 py-1.5', ficouLocal && !v.igual && 'text-muted-foreground line-through')}>{v.servidor}</td>
@@ -140,7 +139,7 @@ export default function Conflitos() {
   if (ate) params.set('ate', ate)
   if (pessoa) params.set('pessoa', pessoa)
   if (folha) params.set('folha', folha)
-  const { dados, erro, carregando } = useApi<ListaSyncLog>(`/api/sync_log?${params}`, ['sincronizacao'])
+  const { dados, erro, carregando } = useApi<ListaSyncLog>(`/api/sync_log?${params}`, ['sincronizacao'], { manterAnterior: true })
   const { dados: equipe } = useApi<{ itens: Pessoa[] }>('/api/equipe', ['carga'])
 
   const mudar = (novo: Record<string, string | number | null>) => {
@@ -237,7 +236,7 @@ export default function Conflitos() {
             {dados.total ? plural(dados.total, 'registro', 'registros') : 'Nenhum conflito nem recusa com estes filtros.'}
             {dados.total > dados.por_pagina ? ` · página ${num(dados.pagina)} de ${num(paginas)}` : ''}
           </p>
-          <div className="flex flex-col gap-3">
+          <div className={cn('flex flex-col gap-3 transition-opacity', carregando && 'opacity-60')}>
             {dados.itens.map((i) => (
               <Item key={i.id} i={i} />
             ))}

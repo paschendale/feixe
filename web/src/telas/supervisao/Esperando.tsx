@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Bloco, COR, Carregando, Conteudo } from '@/components/painel'
+import { Bloco, Carregando, Conteudo, COR, RotuloEstavel } from '@/components/painel'
 import type { GrupoEsperando, ResultadoAvanco } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { diaMes, num, plural } from '@/lib/formato'
@@ -77,7 +77,7 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
       </div>
 
       {fim && (
-        <p className="text-[13px] text-[#3D4B5C]">
+        <p className="text-[13px] text-texto-2">
           Não há etapa seguinte no fluxo {g.fluxo}, e a CCAR ainda vê estas folhas no status da última etapa. Encerrar a folha (marcar como concluída quando a última etapa do fluxo termina) ainda está para decidir; até lá, abra outra etapa pela gaveta se for o caso.
         </p>
       )}
@@ -112,14 +112,14 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
         )}
         {g.folhas.length > VISIVEIS && (
           <button className="px-2 text-sm text-ibge hover:underline" onClick={() => setTodas(!todas)}>
-            {todas ? 'ver menos' : `mais ${num(g.folhas.length - VISIVEIS)}`}
+            <RotuloEstavel ocupado={todas} rotulo={`mais ${num(g.folhas.length - VISIVEIS)}`} rotuloOcupado="ver menos" />
           </button>
         )}
       </div>
 
       {!fim && (
         <div className="flex flex-wrap items-end gap-2.5 border-t pt-4">
-          <label className="flex min-w-[280px] flex-1 flex-col gap-1.5 text-[13px] text-[#3D4B5C]">
+          <label className="flex min-w-[280px] flex-1 flex-col gap-1.5 text-[13px] text-texto-2">
             Observação (obrigatória, vai para o histórico de cada folha)
             <Input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, CQ por amostragem" className="text-sm text-foreground" />
           </label>
@@ -127,7 +127,7 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
             {marcadas.size ? `Abrir ${g.proxima} em ${plural(marcadas.size, 'folha', 'folhas')}` : `Abrir ${g.proxima}`}
           </Button>
           <Button variant="outline" onClick={() => setMarcadas(tudo ? new Set() : new Set(g.folhas.map((f) => f.id_lote)))}>
-            {tudo ? 'Desmarcar' : `Marcar as ${num(g.folhas.length)}`}
+            <RotuloEstavel ocupado={tudo} rotulo={`Marcar as ${num(g.folhas.length)}`} rotuloOcupado="Desmarcar" />
           </Button>
         </div>
       )}

@@ -77,7 +77,7 @@ export default function Fluxos() {
               key={x.id}
               href={href(`supervisao/fluxos/${x.id}`)}
               aria-current={x.id === f?.id ? 'true' : undefined}
-              className={cn('flex flex-col gap-0.5 border-b border-[#EEF1F4] px-4 py-3 last:border-0', x.id === f?.id ? 'bg-[#EEF3FA] shadow-[inset_3px_0_0_var(--ibge)]' : 'hover:bg-[#F7F9FB]', !x.ativo && 'opacity-60')}
+              className={cn('flex flex-col gap-0.5 border-b border-linha px-4 py-3 last:border-0', x.id === f?.id ? 'bg-[#EEF3FA] shadow-[inset_3px_0_0_var(--ibge)]' : 'hover:bg-[#F7F9FB]', !x.ativo && 'opacity-60')}
             >
               <b>{x.nome}</b>
               <span className="text-[13px] text-muted-foreground">
@@ -128,7 +128,7 @@ export default function Fluxos() {
               const agora = aqui.filter((l) => ABERTAS.includes(l.situacao ?? '')).length
               const paradas = aqui.length - agora
               return (
-                <li key={e.id} className="grid grid-cols-[32px_1fr_auto] items-center gap-x-3 gap-y-1 border-b border-[#EEF1F4] py-3 last:border-0 md:grid-cols-[32px_1fr_110px_220px_120px]">
+                <li key={e.id} className="grid grid-cols-[32px_1fr_auto] items-center gap-x-3 gap-y-1 border-b border-linha py-3 last:border-0 md:grid-cols-[32px_1fr_110px_220px_120px]">
                   <span className="grid size-7 place-items-center rounded-full bg-aco-claro text-xs font-semibold text-ibge">{e.ordem}</span>
                   <div className="flex min-w-0 flex-col">
                     <b>{e.nome}</b>

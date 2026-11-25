@@ -45,7 +45,7 @@ function CartaoFolha({ p, principal }: { p: Passagem; principal: boolean }) {
 
 // Execução no Início: frase, as folhas com "Continuar no QGIS" e as conclusões dos últimos dias.
 export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
-  const { dados } = useApi<ResumoCargas>('/api/cargas/resumo', ['carga', 'lote', 'sincronizacao'])
+  const { dados } = useApi<ResumoCargas>('/api/cargas/resumo', ['carga', 'lote'])
   const { dias, hoje } = usePorDia()
   if (!dados) return null
   if (dados.preparando) return comTitulo ? <Secao titulo="Execução" sub="as cargas que estão com você"><Preparando /></Secao> : <Preparando />
@@ -106,7 +106,7 @@ export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
       </>
     )
   return (
-    <Secao titulo="Execução" sub="as cargas que estão com você" link={{ href: '#/execucao', rotulo: 'Abrir Minhas cargas' }}>
+    <Secao titulo="Execução" sub="as cargas que estão com você" link={{ href: '#/execucao', rotulo: 'Abrir Execução' }}>
       {corpo}
     </Secao>
   )

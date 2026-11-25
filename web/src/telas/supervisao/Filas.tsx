@@ -89,7 +89,7 @@ export default function Filas() {
       </p>
 
       <div className="overflow-x-auto rounded-[10px] border bg-card">
-        <table className="w-full min-w-[900px] border-collapse text-sm">
+        <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
           <thead>
             <tr className="text-left text-xs text-muted-foreground">
               <th className="w-[26%] border-b py-3 pr-2 pl-4 font-medium">Pessoa</th>
@@ -102,8 +102,8 @@ export default function Filas() {
               const fila = filaDe(x.conta)
               const agora = doPainel.get(x.conta)
               return (
-                <tr key={x.conta} className="border-b border-[#EEF1F4] align-top last:border-0">
-                  <td className="py-3 pr-2 pl-4 font-medium">
+                <tr key={x.conta} className="border-b border-linha align-top last:border-0">
+                  <td className="truncate py-3 pr-2 pl-4 font-medium">
                     {x.nome}
                     {x.conta === eu?.conta ? ' (você)' : ''}
                   </td>
