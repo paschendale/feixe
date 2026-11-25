@@ -4,8 +4,6 @@ import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const Dialog = D.Root
-const DialogTrigger = D.Trigger
-const DialogClose = D.Close
 
 function DialogContent({ className, children, ...props }: React.ComponentProps<typeof D.Content>) {
   return (
@@ -39,4 +37,4 @@ function DialogDescription({ className, ...props }: React.ComponentProps<typeof 
   return <D.Description className={cn('text-sm text-muted-foreground', className)} {...props} />
 }
 
-export { Dialog, DialogTrigger, DialogClose, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription }
+export { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription }

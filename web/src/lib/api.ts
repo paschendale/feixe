@@ -12,7 +12,7 @@ export function token(): string {
   return sessionStorage.getItem(CHAVE) ?? ''
 }
 
-export class ErroApi extends Error {
+class ErroApi extends Error {
   status: number
   constructor(status: number, mensagem: string) {
     super(mensagem)

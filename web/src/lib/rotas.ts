@@ -4,19 +4,8 @@ import { useEffect, useState } from 'react'
 // recarregar. `tela` é o módulo do topo; `partes` o resto do caminho (aba, id).
 export type Rota = { tela: string; partes: string[]; query: URLSearchParams }
 
-// Endereços de antes dos módulos (D-103), que o plugin ou um favorito ainda podem abrir.
-const ANTIGAS: Record<string, string> = {
-  'minhas-cargas': 'execucao',
-  folhas: 'supervisao/folhas',
-  equipe: 'supervisao/equipe',
-  fluxos: 'supervisao/fluxos',
-  atividades: 'catalogo/atividades',
-}
-
 function ler(): Rota {
-  let bruto = window.location.hash.replace(/^#\/?/, '')
-  const primeiro = bruto.split(/[/?]/)[0]
-  if (ANTIGAS[primeiro]) bruto = ANTIGAS[primeiro] + bruto.slice(primeiro.length)
+  const bruto = window.location.hash.replace(/^#\/?/, '')
   const [caminho, q = ''] = bruto.split('?')
   const partes = caminho.split('/').filter(Boolean)
   return { tela: partes[0] ?? '', partes: partes.slice(1), query: new URLSearchParams(q) }
