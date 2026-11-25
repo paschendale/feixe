@@ -33,14 +33,16 @@ ROTULOS_CORRIGIDOS = {"2470-5", "2570-5", "2532-2", "2535-2"}
 
 
 def _contar(cur):
+    # Só o que a conversão gravou (criado pela conta que roda a conversão): cargas e folhas de teste criadas no dev
+    # por outras contas ou por scripts (criado_por próprio) não entram.
     cur.execute(
         """
-        SELECT (SELECT count(*) FROM mapcartacomp.carga_trabalho WHERE uf = 'DF'),
-               (SELECT count(*) FROM mapcartacomp.cq_amostra WHERE uf = 'DF'),
-               (SELECT count(*) FROM mapcartacomp.lote WHERE uf = 'DF'),
-               (SELECT count(*) FROM mapcartacomp.lote_etapa WHERE uf = 'DF'),
-               (SELECT count(*) FROM mapcartacomp.cq_plano WHERE uf = 'DF'),
-               (SELECT count(*) FROM mapcartacomp.cq_inspecao WHERE uf = 'DF')
+        SELECT (SELECT count(*) FROM mapcartacomp.carga_trabalho WHERE uf = 'DF' AND criado_por = current_user),
+               (SELECT count(*) FROM mapcartacomp.cq_amostra WHERE uf = 'DF' AND criado_por = current_user),
+               (SELECT count(*) FROM mapcartacomp.lote WHERE uf = 'DF' AND criado_por = current_user),
+               (SELECT count(*) FROM mapcartacomp.lote_etapa WHERE uf = 'DF' AND criado_por = current_user),
+               (SELECT count(*) FROM mapcartacomp.cq_plano WHERE uf = 'DF' AND criado_por = current_user),
+               (SELECT count(*) FROM mapcartacomp.cq_inspecao WHERE uf = 'DF' AND criado_por = current_user)
         """
     )
     return cur.fetchone()

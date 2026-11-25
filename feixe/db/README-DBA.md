@@ -16,10 +16,10 @@ flowchart LR
 | `ccar/001_schema.sql` | Schema `mapcartacomp` e `schema_version` (controle das migrações) |
 | `ccar/002_referencias.sql` | Tema, fase (com carga inicial), atividade, fluxo e etapas, usuários do Feixe, calendário |
 | `ccar/003_lotes.sql` | Lotes (folhas e lotes livres), passagens por etapa e histórico |
-| `ccar/004_cargas_cq.sql` | Planos de amostragem, cargas de trabalho, amostras e ocorrências de inspeção |
+| `ccar/004_cargas_cq.sql` | Planos de amostragem, cargas de trabalho, amostras, ocorrências de inspeção e a fila de folhas por pessoa |
 | `ccar/005_sync_log.sql` | Registro da sincronização |
 | `ccar/006_regras.sql` | Triggers: datas de conclusão e avaliação, auditoria, derivação do status nacional, recusa de carga fora da folha ou de atividade fora da etapa |
-| `ccar/007_views.sql` | Views de compatibilidade (`vw_*`, filtradas pelo usuário) e de acompanhamento (`ctrl_*`) |
+| `ccar/007_views.sql` | Views de compatibilidade (`vw_*`, filtradas pelo usuário), de acompanhamento (`ctrl_*`) e `vw_carga_supervisao` (cargas da unidade para o supervisor, só leitura) |
 
 Scripts auxiliares (na raiz do repositório): `scripts/db/aplicar.sh` (aplica as migrações que faltam) e `scripts/db/gerar_grants.py` (gera os GRANTs para as roles reais).
 
@@ -54,7 +54,7 @@ Scripts auxiliares (na raiz do repositório): `scripts/db/aplicar.sh` (aplica as
 
 Nesta versão o banco não restringe linhas: quem tem os GRANTs lê e altera os dados do Feixe de todas as GGCs. Todas as roles da lista recebem o mesmo acesso: leitura e escrita nas tabelas do Feixe, exceto `schema_version` e `fase`, que são só de leitura. Quem é APM, avaliador, supervisor ou gerente é decidido pelo plugin, a partir dos perfis do SGBC em `mapcartctrl` e da tabela `mapcartacomp.usuario_feixe`, e não pelas roles do banco.
 
-As views `vw_*` filtram pelo usuário conectado e são editáveis (por RULE): quem continuar operando direto no QGIS conclui cargas e avalia amostras por elas, como hoje no `*_apoio`. Inserir ocorrência pela `vw_cq_inspecao` exige o campo `uuid` preenchido (no QGIS, valor padrão `uuid()`); o banco nunca gera uuid.
+As views `vw_*` (menos `vw_carga_supervisao`, só leitura e limitada pela RLS por UF) filtram pelo usuário conectado e são editáveis (por RULE): quem continuar operando direto no QGIS conclui cargas e avalia amostras por elas, como hoje no `*_apoio`. Inserir ocorrência pela `vw_cq_inspecao` exige o campo `uuid` preenchido (no QGIS, valor padrão `uuid()`); o banco nunca gera uuid.
 
 ## Rollback
 

@@ -111,6 +111,60 @@ COMMENT ON COLUMN mapcartacomp.atividade.grade_nivel IS
     'Nível da grade estatística do IBGE (lado da célula em metros) em que as cargas da atividade são geradas: 5000, '
     '2500 (sub-nível do Feixe), 1000... Nulo = atividade que não usa a grade. Contas em mapcartacomp.f_grade_*.';
 
+-- Pré-seed do catálogo nacional (D-87): os temas e as atividades do BC100 em uso hoje. Daqui em diante a CCAR cadastra
+-- pelo painel (gerente). Padrões de geração (D-73, D-74): aquisição de hidrografia na grade de 5 km, ADE e LML no
+-- sub-nível de 2,5 km; CQ por área na grade de 5 km, uma atividade por medida (D-83). Acurácia temporal entra no
+-- catálogo de CQ como elemento local, fora do núcleo da GCQ (é do DF). Configurável depois; aqui é só o ponto de partida.
+INSERT INTO mapcartacomp.tema (nome) VALUES ('Hidrografia'), ('Áreas densamente edificadas'), ('LML')
+ON CONFLICT (nome) DO NOTHING;
+
+DO $$
+DECLARE
+    v_projeto integer;
+    v_acuracia integer;
+BEGIN
+    SELECT cod_projeto INTO v_projeto FROM mapcartctrl.t_projeto WHERE nom_projeto = 'BC100';
+    IF v_projeto IS NULL THEN
+        RAISE EXCEPTION 'projeto BC100 ausente em mapcartctrl.t_projeto: o pré-seed das atividades precisa dele';
+    END IF;
+    SELECT id INTO v_acuracia FROM mapcartctrl.t_qua_medidadequalidade WHERE nome = 'Acurácia Temporal';
+    IF v_acuracia IS NULL THEN
+        RAISE EXCEPTION 'medida Acurácia Temporal ausente em mapcartctrl.t_qua_medidadequalidade';
+    END IF;
+    INSERT INTO mapcartacomp.cq_elemento (id_medidadequalidade, nucleo, fracao_critica, ordem)
+    VALUES (v_acuracia, false, 4, 10)
+    ON CONFLICT (id_medidadequalidade) DO NOTHING;
+
+    INSERT INTO mapcartacomp.atividade (cod_projeto, id_tema, fase, nome, geracao, grade_nivel, id_medidadequalidade)
+    SELECT v_projeto, t.id, a.fase, a.nome, a.geracao, a.grade, m.id
+      FROM (VALUES
+        ('Hidrografia', 'aquisicao', 'Aquisição BC100 - Hidrografia', 'grade', 5000, NULL),
+        ('Hidrografia', 'cq', 'CQ BC100 - Hidrografia - Nome Geográfico', 'amostra_area', 5000, 'Nome Geográfico'),
+        ('Hidrografia', 'cq', 'CQ BC100 - Hidrografia - Omissão', 'amostra_area', 5000, 'Omissão'),
+        ('Hidrografia', 'cq', 'CQ BC100 - Hidrografia - Comissão', 'amostra_area', 5000, 'Comissão'),
+        ('Hidrografia', 'correcao_inspecao', 'Correção de inspeção BC100 - Hidrografia', 'manual', NULL, NULL),
+        ('Hidrografia', 'correcao_topologica', 'Correção topológica BC100 - Hidrografia', 'manual', NULL, NULL),
+        ('Hidrografia', 'envio_gcq', 'Envio à GCQ BC100 - Hidrografia', 'nenhuma', NULL, NULL),
+        ('Hidrografia', 'revisao', 'Revisão pontual BC100 - Hidrografia - nomes de insumo', 'grade', 5000, NULL),
+        ('Hidrografia', 'revisao', 'Revisão pontual BC100 - Hidrografia - corte de massa d''água', 'manual', NULL, NULL),
+        ('Áreas densamente edificadas', 'aquisicao', 'Aquisição BC100 - Áreas densamente edificadas', 'grade', 2500,
+         NULL),
+        ('Áreas densamente edificadas', 'cq', 'CQ BC100 - Áreas densamente edificadas - Omissão', 'amostra_area', 5000,
+         'Omissão'),
+        ('Áreas densamente edificadas', 'cq', 'CQ BC100 - Áreas densamente edificadas - Acurácia Temporal',
+         'amostra_area', 5000, 'Acurácia Temporal'),
+        ('Áreas densamente edificadas', 'cq', 'CQ BC100 - Áreas densamente edificadas - Comissão', 'amostra_area',
+         5000, 'Comissão'),
+        ('Áreas densamente edificadas', 'cq', 'CQ BC100 - Áreas densamente edificadas - Consistência Topológica',
+         'amostra_area', 5000, 'Consistência Topológica'),
+        ('LML', 'aquisicao', 'Aquisição BC100 - LML', 'grade', 2500, NULL)
+      ) a (tema, fase, nome, geracao, grade, medida)
+      JOIN mapcartacomp.tema t ON t.nome = a.tema
+      LEFT JOIN mapcartctrl.t_qua_medidadequalidade m ON m.nome = a.medida
+    ON CONFLICT (cod_projeto, nome) DO NOTHING;
+END
+$$;
+
 -- Fluxo da GGC: sequência de etapas por projeto + tema + UF.
 CREATE TABLE IF NOT EXISTS mapcartacomp.fluxo (
     id serial PRIMARY KEY,

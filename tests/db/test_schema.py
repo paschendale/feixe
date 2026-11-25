@@ -222,3 +222,16 @@ def test_folha_unica_por_projeto_e_tema(banco, psycopg2):
         # Fluxo de outro tema é recusado (FK composta lote -> fluxo).
         with pytest.raises(psycopg2.IntegrityError):
             cur.execute(sql.replace("'folha', %s", "'livre', NULL"), (ta, ids[1][1]))
+
+
+def test_executor_pg_le_e_escreve_na_transacao(banco):
+    """O executor da camada de dados sobre um cursor de dicionários (B0)."""
+    import psycopg2.extras
+    from feixe.core.dados import ExecutorPg
+
+    with banco.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        ex = ExecutorPg(cur)
+        ex.executar("CREATE TEMP TABLE t_b0 (x int)")
+        assert ex.executar("INSERT INTO t_b0 VALUES (1), (2)") == 2
+        assert ex.um("SELECT sum(x) AS s FROM t_b0") == {"s": 2 + 1}
+        assert ex.um("SELECT x FROM t_b0 WHERE x > 5") is None

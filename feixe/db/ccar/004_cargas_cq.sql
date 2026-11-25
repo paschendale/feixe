@@ -142,3 +142,34 @@ COMMENT ON COLUMN mapcartacomp.cq_inspecao.ciente_em IS
 CREATE INDEX IF NOT EXISTS cq_inspecao_lote_idx ON mapcartacomp.cq_inspecao (id_lote);
 CREATE INDEX IF NOT EXISTS cq_inspecao_geom_idx ON mapcartacomp.cq_inspecao USING gist (geom);
 CREATE INDEX IF NOT EXISTS cq_inspecao_atualizado_em_idx ON mapcartacomp.cq_inspecao (uf, atualizado_em);
+
+-- Fila de folhas por pessoa (B8, D-65, D-106): o supervisor enfileira, para cada pessoa, folhas (passagens abertas com
+-- cargas a atribuir) na ordem em que ela deve pegá-las. Quando a pessoa conclui a última carga pendente que tem numa
+-- passagem, o plugin atribui a ela as cargas a atribuir do primeiro item da fila que ainda tem o que atribuir, na
+-- mesma transação da conclusão, e marca o item como atribuído. Assim ninguém fica com várias folhas abertas e ninguém
+-- fica parado. Não é sincronizada (só cargas, CQ e inspeções são): é planejamento do supervisor, online.
+CREATE TABLE IF NOT EXISTS mapcartacomp.fila_folha (
+    id serial PRIMARY KEY,
+    uuid uuid NOT NULL UNIQUE,
+    id_lote_etapa integer NOT NULL REFERENCES mapcartacomp.lote_etapa (id) ON DELETE CASCADE,
+    uf char(2) NOT NULL CHECK (uf ~ '^[A-Z]{2}$'),
+    responsavel text NOT NULL,
+    ordem integer NOT NULL,
+    atribuida_em timestamptz,
+    atribuidas integer,
+    criado_em timestamptz NOT NULL DEFAULT now(),
+    criado_por text NOT NULL DEFAULT current_user,
+    atualizado_em timestamptz NOT NULL DEFAULT now(),
+    atualizado_por text NOT NULL DEFAULT current_user,
+    CHECK ((atribuida_em IS NULL) = (atribuidas IS NULL))
+);
+
+COMMENT ON COLUMN mapcartacomp.fila_folha.ordem IS 'Posição na fila da pessoa (menor = próxima).';
+COMMENT ON COLUMN mapcartacomp.fila_folha.atribuida_em IS
+    'Quando a fila atribuiu as cargas da folha à pessoa; nulo = ainda na fila. Fica como registro.';
+
+-- Uma folha espera na fila de uma pessoa só.
+CREATE UNIQUE INDEX IF NOT EXISTS fila_folha_aguardando_uq ON mapcartacomp.fila_folha (id_lote_etapa)
+    WHERE atribuida_em IS NULL;
+CREATE INDEX IF NOT EXISTS fila_folha_responsavel_idx ON mapcartacomp.fila_folha (uf, responsavel, ordem)
+    WHERE atribuida_em IS NULL;

@@ -21,7 +21,7 @@ DECLARE
 BEGIN
     FOREACH t IN ARRAY ARRAY['tema', 'atividade', 'fluxo', 'fluxo_etapa', 'fluxo_etapa_atividade', 'cq_elemento',
                              'usuario_feixe', 'calendario', 'lote', 'lote_etapa', 'lote_etapa_hist', 'carga_trabalho',
-                             'cq_plano', 'cq_amostra', 'cq_inspecao']
+                             'cq_plano', 'cq_amostra', 'cq_inspecao', 'fila_folha']
     LOOP
         EXECUTE format('DROP TRIGGER IF EXISTS t00_atualizado ON mapcartacomp.%I', t);
         EXECUTE format('CREATE TRIGGER t00_atualizado BEFORE UPDATE ON mapcartacomp.%I '
@@ -40,7 +40,7 @@ BEGIN
     END IF;
     IF TG_TABLE_NAME = 'lote_etapa' THEN
         SELECT uf INTO NEW.uf FROM mapcartacomp.lote WHERE id = NEW.id_lote;
-    ELSIF TG_TABLE_NAME IN ('carga_trabalho', 'cq_plano', 'lote_etapa_hist') THEN
+    ELSIF TG_TABLE_NAME IN ('carga_trabalho', 'cq_plano', 'lote_etapa_hist', 'fila_folha') THEN
         SELECT uf INTO NEW.uf FROM mapcartacomp.lote_etapa WHERE id = NEW.id_lote_etapa;
     ELSIF TG_TABLE_NAME = 'cq_amostra' THEN
         SELECT uf INTO NEW.uf FROM mapcartacomp.carga_trabalho WHERE id = NEW.id_carga_trabalho;
@@ -55,7 +55,8 @@ DO $$
 DECLARE
     t text;
 BEGIN
-    FOREACH t IN ARRAY ARRAY['lote_etapa', 'lote_etapa_hist', 'carga_trabalho', 'cq_plano', 'cq_amostra', 'cq_inspecao']
+    FOREACH t IN ARRAY ARRAY['lote_etapa', 'lote_etapa_hist', 'carga_trabalho', 'cq_plano', 'cq_amostra', 'cq_inspecao',
+                             'fila_folha']
     LOOP
         EXECUTE format('DROP TRIGGER IF EXISTS t01_uf ON mapcartacomp.%I', t);
         EXECUTE format('CREATE TRIGGER t01_uf BEFORE INSERT ON mapcartacomp.%I '
