@@ -130,7 +130,7 @@ def test_escrita_da_supervisao_acorda_a_sincronizacao(montar, monkeypatch):
 
 
 def test_identidade_guardada_abre_a_execucao_offline():
-    import psycopg2
+    psycopg2 = pytest.importorskip("psycopg2")
 
     def consultar(sql, params=None):
         raise psycopg2.OperationalError("could not connect to server")

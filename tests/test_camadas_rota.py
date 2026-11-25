@@ -92,7 +92,7 @@ def test_sem_a_ccar_monta_so_a_execucao_com_aviso(ctx_de):
 
 
 def test_conexao_que_cai_no_meio_vira_o_mesmo_aviso(ctx_de):
-    import psycopg2
+    psycopg2 = pytest.importorskip("psycopg2")
 
     ctx, _, chamadas, _ = ctx_de(["supervisor"])
 
