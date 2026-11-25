@@ -132,7 +132,6 @@ def b1(amb, usuario, senha):
             exe = grupos_local.execucao(lx)
         with db.transacao(amb, usuario, senha) as ex:
             sup = grupos.supervisao(ex, "DF")
-            assert exe == grupos.execucao(ex), (exe, grupos.execucao(ex))  # o workspace dá os mesmos subgrupos
             resp = grupos.responsaveis(ex, "DF")
             esperado = {}
             for g in sup:

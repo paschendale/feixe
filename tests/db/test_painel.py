@@ -56,12 +56,6 @@ def test_atividade_em_producao_e_esperando(amb):  # noqa: F811
     assert [p["conta"] for p in dl.um(ex, lote)["pessoas"]] == []
 
 
-def test_execucao_por_dia(amb):  # noqa: F811
-    _, ex = amb
-    r = dp.execucao(ex, "America/Sao_Paulo")
-    assert isinstance(r["por_dia"], list) and all({"dia", "n"} <= d.keys() for d in r["por_dia"])
-
-
 def test_abrir_proximas_em_lote(amb):  # noqa: F811
     cen, ex = amb
     fluxo = df.criar(ex, "GO", 5, cen.tema, "GO lote", [

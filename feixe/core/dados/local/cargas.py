@@ -1,4 +1,4 @@
-"""Minhas cargas sobre o workspace (D-111): a versão local de `core/dados/cargas.py` (B2, D-94, D-102).
+"""Minhas cargas sobre o workspace (D-111): a execução, que antes do C3 lia e gravava na CCAR (B2, D-94, D-102).
 
 Regras, as mesmas da CCAR (D-94): minhas = `responsavel` = a conta do workspace; concluir em etapa encerrada pelo
 supervisor é recusado; concluir de novo não faz nada; desfazer só pelo responsável e até 24 h depois de concluir.
@@ -148,7 +148,7 @@ def proxima(
     excluir: Optional[List[int]] = None,
     id_lote: Optional[int] = None,
 ) -> Optional[Dict]:
-    """Minha próxima carga pendente, com a ordenação de `cargas.proxima` da CCAR: primeiro as da mesma passagem da
+    """Minha próxima carga pendente, com a ordenação da B2: primeiro as da mesma passagem da
     referência (a carga atual ou, sem ela, a última que concluí), depois a menor distância entre centroides (em graus,
     como o ST_Distance em 4674), depois folha e id. Só passagens abertas; `excluir` deixa de fora as puladas (D-102);
     `id_lote` restringe a uma folha. Nenhuma pendente: None."""
@@ -201,7 +201,7 @@ def _fuso(nome: str) -> dt.tzinfo:
 
 
 def execucao(ex, fuso: str, dias: int = 14) -> Dict:
-    """Minhas conclusões por dia no fuso de quem olha: a versão local de `painel.execucao`."""
+    """Minhas conclusões por dia no fuso de quem olha: as barras do Início e de Execução."""
     tz = _fuso(fuso)
     desde = (ex.agora - dt.timedelta(days=dias + 1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     linhas = ex.todos(

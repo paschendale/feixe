@@ -1,4 +1,4 @@
-"""Subgrupos da execução nas camadas do QGIS, sobre o workspace (C4): a versão local de `grupos.execucao` (D-102).
+"""Subgrupos da execução nas camadas do QGIS, sobre o workspace (C4, D-102).
 
 As camadas da execução leem o workspace (online ou offline), então os subgrupos também saem dele: as atividades das
 cargas da pessoa em passagens abertas, agrupadas como na CCAR (as de CQ de um tema num subgrupo só). A supervisão

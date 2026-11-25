@@ -54,6 +54,7 @@ from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple
 
 from ..core.dados import cargas as dc
 from ..core.dados import novo_uuid
+from ..core.dados.local import cargas as lc
 from ..core.dados.local import rotulo
 from . import esquema
 from .pull import _colunas
@@ -61,7 +62,7 @@ from .workspace import Workspace, _json_padrao, agora, de_iso, iso_exato
 
 S = "mapcartacomp"
 MAX_TENTATIVAS = 5
-JANELA_DESFAZER = dt.timedelta(hours=dc.JANELA_DESFAZER_HORAS)
+JANELA_DESFAZER = dt.timedelta(hours=lc.JANELA_DESFAZER_HORAS)
 ABERTAS = ("pendente", "em_andamento")
 AUDITORIA = ("criado_em", "criado_por", "atualizado_em", "atualizado_por")
 DESVIO_AVISO = dt.timedelta(minutes=5)
@@ -448,7 +449,7 @@ class _Push:
             if not valores["concluido"]:
                 quando = srv.get("concluido_em")
                 if quando is None or hora - quando >= JANELA_DESFAZER:
-                    return f"só dá para desfazer até {dc.JANELA_DESFAZER_HORAS} horas depois de concluir"
+                    return f"só dá para desfazer até {lc.JANELA_DESFAZER_HORAS} horas depois de concluir"
         return None
 
     def perfil(self, cod_projeto: Optional[int]) -> bool:

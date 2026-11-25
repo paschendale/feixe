@@ -228,14 +228,3 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
             g["ate"] = r["desde"] if g["ate"] is None else max(g["ate"], r["desde"])
     # Fim do fluxo por último: é outra decisão (encerrar a folha), não abrir a próxima.
     return sorted(grupos.values(), key=lambda g: (g["id_proxima"] is None, -len(g["folhas"])))
-
-
-def execucao(ex: Executor, fuso: str, dias: int = 14) -> Dict:
-    """Minhas conclusões por dia (no fuso de quem olha), para as barras do Início e de Execução."""
-    linhas = ex.todos(
-        "SELECT (c.concluido_em AT TIME ZONE %s)::date AS dia, count(*) AS n FROM mapcartacomp.carga_trabalho c "
-        "WHERE c.responsavel = current_user AND c.concluido "
-        "AND c.concluido_em > now() - (%s || ' days')::interval GROUP BY 1 ORDER BY 1",
-        (fuso, str(dias + 1)),
-    )
-    return {"por_dia": [{"dia": r["dia"].isoformat(), "n": r["n"]} for r in linhas]}

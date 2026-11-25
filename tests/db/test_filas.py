@@ -1,5 +1,6 @@
 """B8: fila de folhas por pessoa, pela camada de dados. A pessoa da fila é a própria conta conectada (current_user),
-cadastrada no SGBC dentro da transação (desfeita), para o concluir rodar de ponta a ponta."""
+cadastrada no SGBC dentro da transação (desfeita). Concluir é da execução, no workspace (C3); aqui a carga é concluída
+por UPDATE e a fila anda por `filas.puxar`, como no push do workspace."""
 
 from __future__ import annotations
 
@@ -8,7 +9,6 @@ import uuid
 import psycopg2.extras
 import pytest
 from feixe.core.dados import ErroDados, ExecutorPg
-from feixe.core.dados import cargas as dc
 from feixe.core.dados import filas as dfi
 
 from tests.db.migracoes import aplicar
@@ -91,6 +91,16 @@ def _minhas(ex, le, eu):
     return [r["id"] for r in ex.todos(sql, (le, eu))]
 
 
+def _concluir(ex, id_carga, eu):
+    """Conclui a carga e, como depois de cada conclusão, deixa a fila andar: o que `puxar` atribuiu, ou None."""
+    ex.executar("UPDATE mapcartacomp.carga_trabalho SET concluido = true WHERE id = %s", (id_carga,))
+    return dfi.puxar(ex, eu)
+
+
+def _desfazer(ex, id_carga):
+    ex.executar("UPDATE mapcartacomp.carga_trabalho SET concluido = false WHERE id = %s", (id_carga,))
+
+
 def _recusa(ex, fn, *args):
     ex.cur.execute("SAVEPOINT s")
     with pytest.raises(ErroDados) as e:
@@ -118,16 +128,16 @@ def test_fila_passa_a_proxima_folha_ao_concluir(amb):
     dfi.reordenar(ex, "DF", eu, [ib, ia])  # B passa na frente
     assert "mudou" in _recusa(ex, dfi.reordenar, "DF", eu, [ib])
 
-    assert dc.concluir(ex, minhas[0])["fila"] is None  # ainda tenho pendente: nada muda
-    r = dc.concluir(ex, minhas[1])["fila"]
+    assert _concluir(ex, minhas[0], eu) is None  # ainda tenho pendente: nada muda
+    r = _concluir(ex, minhas[1], eu)
     assert (r["id_lote_etapa"], r["atribuidas"]) == (b, 2)
     assert _donos(ex, b) == sorted([eu, eu, "t_apm_b"]) and _donos(ex, a) == ["-", "-"]
     assert [i["id"] for i in _fila(ex)] == [ia]
     assert [x["id"] for x in _fila(ex, "recentes")] == [ib]
 
     # Desfazer não desatribui, e concluir de novo com B ainda pendente não puxa A.
-    dc.desfazer(ex, minhas[1])
-    assert dc.concluir(ex, minhas[1])["fila"] is None and _donos(ex, b).count(eu) == 2
+    _desfazer(ex, minhas[1])
+    assert _concluir(ex, minhas[1], eu) is None and _donos(ex, b).count(eu) == 2
 
     # Item sem nada a atribuir é pulado e fica na fila; acabou B, vem A; acabou a fila, nada.
     c = _folha_livre(cen, "fila C")
@@ -135,10 +145,10 @@ def test_fila_passa_a_proxima_folha_ao_concluir(amb):
     ic = dfi.adicionar(ex, "DF", eu, c)["id"]
     dfi.reordenar(ex, "DF", eu, [ic, ia])
     ids_b = _minhas(ex, b, eu)
-    dc.concluir(ex, ids_b[0])
-    assert dc.concluir(ex, ids_b[1])["fila"]["id_lote_etapa"] == a
+    _concluir(ex, ids_b[0], eu)
+    assert _concluir(ex, ids_b[1], eu)["id_lote_etapa"] == a
     assert [i["id"] for i in _fila(ex)] == [ic]
-    assert [dc.concluir(ex, i)["fila"] for i in _minhas(ex, a, eu)] == [None, None]  # C não tem o que atribuir
+    assert [_concluir(ex, i, eu) for i in _minhas(ex, a, eu)] == [None, None]  # C não tem o que atribuir
 
     # Quem está sem carga recebe já: não vai concluir nada para a fila andar.
     _conta(cen.cur, "t_apm_c")

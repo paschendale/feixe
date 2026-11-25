@@ -12,7 +12,7 @@ from feixe.core.dados.local import filas as lf
 
 from tests.sync.conftest import USUARIO, carga
 
-# As colunas que `cargas.minhas`/`proxima` da CCAR devolvem (core/dados/cargas.py, _CAMPOS).
+# As colunas de uma carga na execução, as mesmas da B2 (o painel e a barra contam com elas).
 CAMPOS_CCAR = {
     "id", "uuid", "id_lote_etapa", "id_lote", "folha_revisao", "tema", "etapa", "atividade", "geocodigo",
     "concluido", "concluido_em", "situacao_etapa", "xmin", "ymin", "xmax", "ymax",
