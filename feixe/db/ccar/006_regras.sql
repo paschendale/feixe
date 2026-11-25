@@ -181,6 +181,86 @@ DROP TRIGGER IF EXISTS t20_derivar ON mapcartacomp.cq_amostra;
 CREATE TRIGGER t20_derivar AFTER INSERT OR UPDATE OF status, id_carga_trabalho, id_cq_plano OR DELETE
     ON mapcartacomp.cq_amostra FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_amostra_derivar();
 
+-- Passagem de CQ e carga avaliada da ocorrência -------------------------------------------------------------------
+-- Carga de produção que contém o ponto na passagem avaliada pela passagem de CQ: a passagem do mesmo lote, por etapa
+-- que conta revisão, não pulada, com a mesma revisão da passagem de CQ (t10_revisao: a passagem de CQ herda a revisão
+-- corrente). Mais de uma carga no ponto (borda): a de menor id, para o resultado ser sempre o mesmo.
+CREATE OR REPLACE FUNCTION mapcartacomp.f_carga_avaliada(p_lote_etapa integer, p_geom geometry) RETURNS integer
+LANGUAGE sql STABLE AS $$
+    SELECT c.id
+      FROM mapcartacomp.lote_etapa cq
+      JOIN mapcartacomp.lote_etapa le ON le.id_lote = cq.id_lote AND le.revisao = cq.revisao AND le.id <> cq.id
+                                     AND le.situacao <> 'pulada'
+      JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa AND fe.conta_revisao
+      JOIN mapcartacomp.carga_trabalho c ON c.id_lote_etapa = le.id AND c.id_cq_plano IS NULL
+     WHERE cq.id = p_lote_etapa AND c.geom && p_geom AND ST_Intersects(c.geom, p_geom)
+     ORDER BY le.instancia DESC, c.id
+     LIMIT 1
+$$;
+
+CREATE OR REPLACE FUNCTION mapcartacomp.f_inspecao_passagem() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_lote integer;
+BEGIN
+    -- OLD só é lido em UPDATE: no 9.6, ler OLD num INSERT é erro.
+    IF NEW.id_lote_etapa IS NULL AND NEW.id_carga_trabalho IS NOT NULL THEN
+        SELECT c.id_lote_etapa INTO NEW.id_lote_etapa
+          FROM mapcartacomp.carga_trabalho c
+         WHERE c.id = NEW.id_carga_trabalho AND c.id_cq_plano IS NOT NULL;
+    END IF;
+    IF NEW.id_lote_etapa IS NOT NULL THEN
+        SELECT id_lote INTO v_lote FROM mapcartacomp.lote_etapa WHERE id = NEW.id_lote_etapa;
+        IF v_lote IS DISTINCT FROM NEW.id_lote THEN
+            RAISE EXCEPTION 'a passagem % não é do lote % da ocorrência', NEW.id_lote_etapa, NEW.id_lote
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    -- Carga avaliada: derivada quando não veio; num UPDATE que muda o ponto ou a passagem sem mexer nela, de novo.
+    IF NEW.id_lote_etapa IS NOT NULL AND (
+           (TG_OP = 'INSERT' AND NEW.id_carga_avaliada IS NULL)
+        OR (TG_OP = 'UPDATE' AND NEW.id_carga_avaliada IS NOT DISTINCT FROM OLD.id_carga_avaliada
+            AND (NEW.id_carga_avaliada IS NULL OR NOT ST_Equals(NEW.geom, OLD.geom)
+                 OR NEW.id_lote_etapa IS DISTINCT FROM OLD.id_lote_etapa))) THEN
+        NEW.id_carga_avaliada := mapcartacomp.f_carga_avaliada(NEW.id_lote_etapa, NEW.geom);
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS t05_passagem ON mapcartacomp.cq_inspecao;
+CREATE TRIGGER t05_passagem BEFORE INSERT OR UPDATE OF id_lote, id_lote_etapa, id_carga_trabalho, id_carga_avaliada,
+    geom ON mapcartacomp.cq_inspecao FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_inspecao_passagem();
+
+-- tratado_em/tratado_por da ocorrência ------------------------------------------------------------------------------
+-- Ao marcar tratada: guarda a hora e a pessoa informadas (marcação offline sincronizada depois) ou, se não vieram,
+-- agora e quem conectou. Ao desmarcar: limpa.
+
+CREATE OR REPLACE FUNCTION mapcartacomp.f_inspecao_tratado() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NOT NEW.tratado THEN
+        NEW.tratado_em := NULL;
+        NEW.tratado_por := NULL;
+    ELSIF TG_OP = 'INSERT' THEN
+        NEW.tratado_em := coalesce(NEW.tratado_em, now());
+        NEW.tratado_por := coalesce(NEW.tratado_por, current_user);
+    ELSIF NOT OLD.tratado THEN
+        IF NEW.tratado_em IS NULL OR NEW.tratado_em IS NOT DISTINCT FROM OLD.tratado_em THEN
+            NEW.tratado_em := now();
+        END IF;
+        IF NEW.tratado_por IS NULL OR NEW.tratado_por IS NOT DISTINCT FROM OLD.tratado_por THEN
+            NEW.tratado_por := current_user;
+        END IF;
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS t10_tratado ON mapcartacomp.cq_inspecao;
+CREATE TRIGGER t10_tratado BEFORE INSERT OR UPDATE ON mapcartacomp.cq_inspecao
+    FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_inspecao_tratado();
+
 -- Revisão de uma passagem de etapa, quando não informada ------------------------------------------------------------
 -- Passagem por etapa que conta revisão: 1 + passagens anteriores (não puladas) por etapas que contam revisão.
 -- Demais etapas: a revisão corrente da folha.

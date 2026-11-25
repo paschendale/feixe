@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.cq_plano (
     celula_largura numeric,
     celula_altura numeric,
     semente bigint,
+    fracao_critica numeric CHECK (fracao_critica > 0 AND fracao_critica < 100),
     resultado text NOT NULL DEFAULT 'pendente' CHECK (resultado IN ('pendente', 'aprovado', 'reprovado')),
     criado_em timestamptz NOT NULL DEFAULT now(),
     criado_por text NOT NULL DEFAULT current_user,
@@ -39,6 +40,17 @@ COMMENT ON COLUMN mapcartacomp.cq_plano.orientacao IS 'Como a unidade de amostra
 COMMENT ON COLUMN mapcartacomp.cq_plano.universo IS
     'De onde as unidades foram sorteadas (ex.: todas as células do lote, só as que intersectam a camada alvo). Aberto.';
 
+COMMENT ON COLUMN mapcartacomp.cq_plano.nivel_inspecao IS
+    'Nível de inspeção do plano (ex.: II, III). Aberto. O nível III depois de aprovada no II é nova passagem (D-135).';
+COMMENT ON COLUMN mapcartacomp.cq_plano.semente IS 'Semente do sorteio: com o mesmo universo, refaz a mesma amostra.';
+COMMENT ON COLUMN mapcartacomp.cq_plano.fracao_critica IS
+    'Fração crítica (em %) contra a qual se mostra o nível de conformidade deste plano (D-62): a da etapa '
+    '(fluxo_etapa.fracao_critica) ou a do elemento (cq_elemento), gravada ao criar o plano, para não mudar quando a '
+    'GGC trocar o padrão da etapa. Nula = sem velocímetro.';
+
+-- Um plano por atividade em cada passagem (D-83): abrir a passagem gera os planos com o padrão da etapa (D-136) e
+-- não pode gerar de novo. Nova passagem (revisão seguinte, nível III) tem os seus.
+CREATE UNIQUE INDEX IF NOT EXISTS cq_plano_atividade_uq ON mapcartacomp.cq_plano (id_lote_etapa, id_atividade);
 CREATE INDEX IF NOT EXISTS cq_plano_lote_etapa_idx ON mapcartacomp.cq_plano (id_lote_etapa);
 CREATE INDEX IF NOT EXISTS cq_plano_atividade_idx ON mapcartacomp.cq_plano (id_atividade);
 CREATE INDEX IF NOT EXISTS cq_plano_atualizado_em_idx ON mapcartacomp.cq_plano (uf, atualizado_em);
@@ -118,6 +130,8 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.cq_inspecao (
     uuid uuid NOT NULL UNIQUE,
     id_lote integer NOT NULL REFERENCES mapcartacomp.lote (id) ON DELETE CASCADE,
     id_carga_trabalho integer REFERENCES mapcartacomp.carga_trabalho (id) ON DELETE SET NULL,
+    id_lote_etapa integer REFERENCES mapcartacomp.lote_etapa (id) ON DELETE SET NULL,
+    id_carga_avaliada integer REFERENCES mapcartacomp.carga_trabalho (id) ON DELETE SET NULL,
     uf char(2) NOT NULL CHECK (uf ~ '^[A-Z]{2}$'),
     elemento text,
     geom geometry(Point, 4674) NOT NULL,
@@ -139,7 +153,23 @@ COMMENT ON COLUMN mapcartacomp.cq_inspecao.ciente_em IS
     'Quando o APM autor da passagem avaliada deu ciência da ocorrência. Ciência não é correção: quem corrige é a '
     'correção de inspeção ou a revisão seguinte.';
 
+COMMENT ON COLUMN mapcartacomp.cq_inspecao.id_carga_trabalho IS
+    'Carga de CQ (a amostra) em que a ocorrência foi registrada, quando há. Opcional.';
+COMMENT ON COLUMN mapcartacomp.cq_inspecao.id_lote_etapa IS
+    'Passagem de CQ em que a ocorrência foi registrada. Nula no INSERT = a da carga de CQ (006). É por ela que a '
+    'revisão seguinte fica às cegas (D-66): só vê as ocorrências se a sua passagem tem expor_ocorrencias.';
+COMMENT ON COLUMN mapcartacomp.cq_inspecao.id_carga_avaliada IS
+    'Carga de produção que a ocorrência aponta: a que contém o ponto na passagem que conta revisão avaliada por esta '
+    'passagem de CQ (mesma revisão). O responsável dela é o APM autor, que dá ciência. Nula no INSERT = derivada '
+    '(006), porque o avaliador pode registrar offline, sem as cargas dos outros no workspace.';
+COMMENT ON COLUMN mapcartacomp.cq_inspecao.elemento IS
+    'Elemento de qualidade da ocorrência (nome da medida no SGBC, como na atividade de CQ). Aberto.';
+COMMENT ON COLUMN mapcartacomp.cq_inspecao.responsavel IS 'Quem registrou a ocorrência (o avaliador).';
+
 CREATE INDEX IF NOT EXISTS cq_inspecao_lote_idx ON mapcartacomp.cq_inspecao (id_lote);
+CREATE INDEX IF NOT EXISTS cq_inspecao_lote_etapa_idx ON mapcartacomp.cq_inspecao (id_lote_etapa);
+CREATE INDEX IF NOT EXISTS cq_inspecao_carga_idx ON mapcartacomp.cq_inspecao (id_carga_trabalho);
+CREATE INDEX IF NOT EXISTS cq_inspecao_carga_avaliada_idx ON mapcartacomp.cq_inspecao (id_carga_avaliada);
 CREATE INDEX IF NOT EXISTS cq_inspecao_geom_idx ON mapcartacomp.cq_inspecao USING gist (geom);
 CREATE INDEX IF NOT EXISTS cq_inspecao_atualizado_em_idx ON mapcartacomp.cq_inspecao (uf, atualizado_em);
 
