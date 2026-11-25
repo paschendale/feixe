@@ -45,17 +45,23 @@ def _gerar(ccar, cen, ws1, ws2):  # noqa: F811
     """Perdido na carga 1, vencido na carga 0 e recusado na carga 2 (reatribuída pelo supervisor a outra pessoa)."""
     _puxar(ccar, ws1)
     _puxar(ccar, ws2)
-    # carga 1: a estação 1 conclui antes, a 2 depois e envia primeiro -> a 1 perde
-    with ws1.transacao(_antes(30)) as ex:
+    # Concluir nas duas pontas não é conflito (fica a mais antiga, D-133); o conflito é concluir numa e desfazer
+    # na outra.
+    # carga 1: a estação 1 conclui e desfaz antes; a 2 conclui depois e envia primeiro -> a 1 perde
+    with ws1.transacao(_antes(31)) as ex:
         lc.concluir(ex, cen.minhas[1])
+    with ws1.transacao(_antes(30)) as ex:
+        lc.desfazer(ex, cen.minhas[1])
     with ws2.transacao(_antes(20)) as ex:
         lc.concluir(ex, cen.minhas[1])
-    # carga 0: a 2 conclui antes e envia primeiro, a 1 conclui depois -> a 1 vence
+    # carga 0: a 2 conclui antes e envia primeiro; a 1 conclui e desfaz depois -> a 1 vence
     with ws2.transacao(_antes(15)) as ex:
         lc.concluir(ex, cen.minhas[0])
     _enviar(ccar, ws2)
-    with ws1.transacao(_antes(10)) as ex:
+    with ws1.transacao(_antes(11)) as ex:
         lc.concluir(ex, cen.minhas[0])
+    with ws1.transacao(_antes(10)) as ex:
+        lc.desfazer(ex, cen.minhas[0])
     # carga 2: concluída na 1 e reatribuída na CCAR antes do envio -> recusada
     with ws1.transacao(_antes(8)) as ex:
         lc.concluir(ex, cen.minhas[2])
@@ -81,17 +87,16 @@ def test_api_do_supervisor_mostra_os_dois_lados(ccar, cen, ws1, ws2):  # noqa: F
     assert perdido["alvo"]["atividade"].startswith("teste push")
     assert perdido["enviado_por"]["nome"] == f"Teste {EU}"
     conc = next(v for v in perdido["valores"] if v["campo"] == "concluido")
-    assert conc["local"] == "concluída" and conc["servidor"] == "concluída"
-    quando = next(v for v in perdido["valores"] if v["campo"] == "concluido_em")
-    assert quando["local"] != quando["servidor"]  # as duas horas de conclusão, lado a lado
+    assert conc["local"] == "pendente" and conc["servidor"] == "concluída"
     assert perdido["servidor"]["origem_em"] == "acao"
+    assert "concluiu a carga e depois desfez a conclusão" in perdido["frase"]
     assert "tinha concluído a carga" in perdido["frase"] and "ficou a conclusão, das " in perdido["frase"]
     assert "(chegou à CCAR" in perdido["frase"]  # a ação de 30 min atrás só chegou agora
 
     vencido = itens[cen.minhas[0]]
     assert vencido["resultado"] == "conflito_vencido" and vencido["vencedor"] == "local"
     assert vencido["descartado"] == "servidor" and vencido["servidor"]["por"]["conta"] == EU
-    assert "em outro computador" in vencido["frase"] and "ficou a conclusão, das " in vencido["frase"]
+    assert "em outro computador" in vencido["frase"] and "ficou o desfazer, das " in vencido["frase"]
 
     recusado = itens[cen.minhas[2]]
     assert recusado["resultado"] == "recusado" and "não está mais atribuída" in recusado["motivo"]

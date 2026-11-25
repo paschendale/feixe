@@ -33,7 +33,8 @@ enquanto a rede trabalha: a pessoa continua concluindo cargas, e o que ela grava
    workspace fica com o do servidor e o valor local vai para o detalhe). A hora da versão do servidor é a hora da
    ação que a gravou quando ela veio de um push (o `sync_log` guarda versão e hora da ação), e o `atualizado_em`
    quando foi uma mudança direta: senão uma conclusão offline enviada tarde levaria a hora do envio e ganharia de uma
-   ação mais nova.
+   ação mais nova. Exceção: a mesma carga concluída nas duas pontas não é disputa, fica a conclusão mais antiga
+   (`aplicado`, com a nota no detalhe), que é quando o trabalho terminou de fato.
 7. **Falha de banco** que não é rede nem regra (gatilho que recusa, constraint): o item fica na outbox com
    `tentativas` e `erro`, registrado como `erro` nos dois `sync_log`; na quinta tentativa vira recusa. Falha de rede
    derruba o push inteiro: a transação da CCAR é desfeita e a outbox fica como estava.
@@ -484,6 +485,8 @@ class _Push:
         if all(_igual(v, srv.get(c)) for c, v in valores.items()):
             self.registrar(g, "aplicado", self.detalhe(g, hora, srv, sem_efeito="a CCAR já tinha estes valores"))
             return
+        if t == "carga_trabalho" and self.conclusao_dupla(g, hora, srv, valores, rot):
+            return
         base = self.versoes.get((t, u), g["versao_base"])
         em, _, _ = self.hora_servidor(t, u, srv)
         res = decidir(base, iso_exato(srv["atualizado_em"]), hora, em)
@@ -494,7 +497,24 @@ class _Push:
         descartado = "servidor" if res == "conflito_vencido" else None
         self._tentar(g, hora, lambda: self.atualizar(t, u, valores), rot, res, srv, descartado)
 
-    def _tentar(self, g, hora, fazer, rot, resultado="aplicado", antes=None, descartado=None) -> None:
+    def conclusao_dupla(self, g: Dict, hora: dt.datetime, srv: Dict, valores: Dict, rot: str) -> bool:
+        """A mesma carga concluída nas duas pontas (duas estações, ou a estação e a tabela de atributos online): não é
+        disputa de última escrita, fica a conclusão mais antiga, que é quando o trabalho terminou de fato (é a que
+        conta na produtividade). A local mais nova não muda nada; a local mais antiga corrige só a hora."""
+        if set(valores) - {"concluido", "concluido_em"} or not valores.get("concluido") or not srv.get("concluido"):
+            return False
+        local, remota = valores.get("concluido_em"), srv.get("concluido_em")
+        if local is None or remota is None:
+            return False
+        if local >= remota:
+            nota = "a carga já estava concluída na CCAR, mais cedo: fica a conclusão mais antiga"
+            self.registrar(g, "aplicado", self.detalhe(g, hora, srv, sem_efeito=nota))
+            return True
+        nota = "a carga já estava concluída na CCAR, mais tarde: fica a conclusão mais antiga, a desta estação"
+        self._tentar(g, hora, lambda: self.atualizar(g["tabela"], g["uuid"], valores), rot, "aplicado", srv, nota=nota)
+        return True
+
+    def _tentar(self, g, hora, fazer, rot, resultado="aplicado", antes=None, descartado=None, nota=None) -> None:
         try:
             fazer()
         except Exception as e:  # noqa: BLE001 - só erro de banco que não é rede vira resultado
@@ -504,7 +524,7 @@ class _Push:
             self.falhou(g, hora, antes, _mensagem(e), rot)
             return
         g["aplicou"] = True
-        self.registrar(g, resultado, self.detalhe(g, hora, antes, descartado=descartado))
+        self.registrar(g, resultado, self.detalhe(g, hora, antes, descartado=descartado, nota=nota))
         self.depois(g)
 
     def falhou(self, g: Dict, hora, antes, mensagem: str, rot: str) -> None:
