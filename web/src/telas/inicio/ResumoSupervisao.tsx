@@ -6,6 +6,7 @@ import { useSessao } from '@/lib/sessao'
 import { STATUS } from '@/lib/status'
 import { useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
+import { useContagemConflitos } from '../supervisao/Conflitos'
 
 const ehCq = (g: GrupoAtividade) => g.fase === 'cq'
 export const rotuloCurto = (g: GrupoAtividade) => (ehCq(g) ? g.rotulo : g.tema)
@@ -52,6 +53,8 @@ export function fraseSupervisao(p: PainelSupervisao, esperando: GrupoEsperando[]
 }
 
 function PrecisaDeVoce({ p, esperando, lotes }: { p: PainelSupervisao; esperando: GrupoEsperando[]; lotes: Lote[] }) {
+  const { tem } = useSessao()
+  const { dados: conflitos } = useContagemConflitos(tem('supervisor'))
   const nome = (id: number) => lotes.find((l) => l.id === id)?.folha_revisao ?? `#${id}`
   const nEsperando = esperando.reduce((s, g) => s + g.folhas.length, 0)
   const porTema = new Map<string, number>()
@@ -93,6 +96,19 @@ function PrecisaDeVoce({ p, esperando, lotes }: { p: PainelSupervisao; esperando
         <span className="text-[13px] text-muted-foreground">em {plural(g.lotes.length, 'folha', 'folhas')}</span>
         <LinkSeta href={href('supervisao/folhas', { grupo: g.chave })} className="mt-2">
           Distribuir
+        </LinkSeta>
+      </Bloco>,
+    )
+  if (conflitos?.total)
+    cartoes.push(
+      <Bloco key="conflitos" className="flex-[1_1_300px] gap-1.5">
+        <Numero valor={conflitos.total} alerta />
+        <span>{conflitos.total === 1 ? 'alteração se cruzou com outra ou foi recusada' : 'alterações se cruzaram com outras ou foram recusadas'} ao sincronizar</span>
+        <span className="text-[13px] text-muted-foreground">
+          {lista([...(conflitos.conflitos ? [plural(conflitos.conflitos, 'conflito', 'conflitos')] : []), ...(conflitos.recusas ? [plural(conflitos.recusas, 'recusa', 'recusas')] : [])])} nos últimos {conflitos.dias} dias
+        </span>
+        <LinkSeta href="#/supervisao/conflitos" className="mt-2">
+          Ver o que aconteceu
         </LinkSeta>
       </Bloco>,
     )

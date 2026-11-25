@@ -378,3 +378,54 @@ export type ItemFila = {
 export type AtribuidaFila = { id: number; responsavel: string; nome: string; atribuida_em: string; atribuidas: number; folha_revisao: string; id_lote: number }
 
 export type Filas = { itens: ItemFila[]; recentes: AtribuidaFila[] }
+
+// --- Conflitos de sincronização (C5) ---
+
+export type ResultadoSync = 'conflito_vencido' | 'conflito_perdido' | 'recusado'
+export type QuemSync = { conta: string; nome: string } | null
+export type ValorSync = { campo: string; rotulo: string; local: string; servidor: string; igual: boolean }
+
+export type ItemSyncLog = {
+  id: number
+  em: string
+  resultado: ResultadoSync
+  tabela: string
+  tipo: string
+  uuid: string | null
+  enviado_por: QuemSync
+  alvo: {
+    existe: boolean
+    id_carga: number | null
+    geocodigo: string | null
+    id_lote: number | null
+    id_lote_etapa: number | null
+    folha: string | null
+    tema: string | null
+    etapa: string | null
+    atividade: string | null
+    responsavel_atual: QuemSync
+    concluido_atual: boolean | null
+  }
+  local: { por: QuemSync; em: string | null; acao: string }
+  servidor: { por: QuemSync; em: string | null; origem_em: string | null; acao: string } | null
+  valores: ValorSync[]
+  vencedor: 'local' | 'servidor'
+  descartado: 'local' | 'servidor' | null
+  motivo: string | null
+  juntados: number
+  frase: string
+}
+
+export type ListaSyncLog = { itens: ItemSyncLog[]; total: number; pagina: number; por_pagina: number; desde: string; ate: string }
+export type ContagemSyncLog = { conflitos: number; recusas: number; total: number; dias: number }
+
+export type MeuSyncLog = {
+  id: number
+  em: string
+  resultado: 'conflito_perdido' | 'recusado'
+  tipo: string
+  alvo: { id: number | null; geocodigo: string | null; id_lote: number | null; id_lote_etapa: number | null; folha: string | null; etapa: string | null; atividade: string | null }
+  valores: ValorSync[]
+  motivo: string | null
+  frase: string
+}

@@ -5,6 +5,7 @@ import { lista, num, pc, plural } from '@/lib/formato'
 import { href } from '@/lib/rotas'
 import { useApi } from '@/lib/useApi'
 import { ABERTAS, Continuar, Preparando, Producao, pendentesDe, usePorDia } from '../execucao/comum'
+import { MeusConflitos } from '../execucao/MeusConflitos'
 
 function CartaoFolha({ p, principal }: { p: Passagem; principal: boolean }) {
   const aberta = ABERTAS.includes(p.situacao)
@@ -74,6 +75,7 @@ export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
   const corpo = (
     <>
       {comTitulo && frase}
+      <MeusConflitos />
       <div className="flex flex-wrap items-stretch gap-4">
         {cartoes.length === 0 && <Bloco className="flex-[2_1_420px] text-muted-foreground">Nenhuma carga com você agora. O supervisor atribui as cargas.</Bloco>}
         {cartoes.map((p, i) => (

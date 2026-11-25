@@ -9,6 +9,7 @@ import { useSessao } from '@/lib/sessao'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 import { ABERTAS, Continuar, Preparando, Producao, pendentesDe, usePorDia } from './comum'
+import { MeusConflitos } from './MeusConflitos'
 
 const JANELA_DESFAZER_MS = 24 * 3600 * 1000
 const chaveDe = (p: Passagem) => `${p.tema} · ${p.etapa}`
@@ -176,6 +177,7 @@ export default function Execucao() {
     <>
       <CabecalhoModulo titulo="Execução" abas={abasModulo} ativa="cargas" />
       <Conteudo largura={1240}>
+        <MeusConflitos />
         {chaves.length === 0 ? (
           <Bloco className="text-muted-foreground">Nenhuma carga atribuída a você em folhas abertas. O supervisor atribui as cargas.</Bloco>
         ) : (
