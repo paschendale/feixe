@@ -68,18 +68,18 @@ def _amostras(ex: Executor, ids_le: List[int]) -> List[Dict]:
     )
 
 
-def _executores(ex: Executor, id_lotes: List[int]) -> Dict[str, List[str]]:
-    """Quem teve carga numa passagem de produção (fase que não é CQ) de cada folha: conta -> folhas."""
-    por: Dict[str, List[str]] = {}
+def _executores(ex: Executor, id_lotes: List[int]) -> Dict[str, Dict[int, List[str]]]:
+    """Quem teve carga numa passagem de produção (fase que não é CQ) de cada folha: conta -> lote -> passagens."""
+    por: Dict[str, Dict[int, List[str]]] = {}
     for r in ex.todos(
-        "SELECT DISTINCT c.responsavel, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha "
+        "SELECT DISTINCT c.responsavel, le.id_lote, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha "
         "FROM mapcartacomp.carga_trabalho c JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa "
         "JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa AND fe.fase <> 'cq' "
         "JOIN mapcartacomp.lote l ON l.id = le.id_lote "
         "WHERE le.id_lote = ANY(%s) AND c.responsavel IS NOT NULL ORDER BY folha",
         (list(id_lotes),),
     ):
-        por.setdefault(r["responsavel"], []).append(r["folha"])
+        por.setdefault(r["responsavel"], {}).setdefault(r["id_lote"], []).append(r["folha"])
     return por
 
 
@@ -128,9 +128,14 @@ def _contexto(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
             x["projetos"].add(cp)
     # Sem ninguém com perfil de avaliador (V) no projeto (o DF de hoje avalia com perfil O), vale toda a equipe.
     tem_v = any(":V" in x["perfis"] for x in pessoas.values())
+    # Quem executou uma folha só não avalia aquela folha (D-147): as amostras dela vão para os outros escolhidos.
     for x in pessoas.values():
-        if x["conta"] in executores:
-            x["motivo"] = f"executou {', '.join(executores[x['conta']])}: ninguém avalia o próprio trabalho"
+        feitos = executores.get(x["conta"], {})
+        x["bloqueadas"] = {p["id_lote_etapa"] for p in ps if p["id_lote"] in feitos}
+        x["nao_avalia"] = [p["folha_revisao"] for p in ps if p["id_lote"] in feitos]
+        x["executou"] = [f for lote in sorted(feitos) for f in feitos[lote]]
+        if ps and len(x["bloqueadas"]) == len(ps):
+            x["motivo"] = f"executou {', '.join(x['executou'])}: ninguém avalia o próprio trabalho"
         elif x["projetos"] != set(projetos):
             x["motivo"] = "sem perfil num dos projetos destas folhas"
         elif tem_v and ":V" not in x["perfis"]:
@@ -146,10 +151,12 @@ def _contexto(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
             (list(contas),),
         ):
             pessoas[r["conta"]] = {"conta": r["conta"], "nome": r["nome"], "pendentes": 0, "projetos": set(),
-                                   "perfis": "", "motivo": "não está mais na equipe do projeto"}  # fmt: skip
+                                   "perfis": "", "motivo": "não está mais na equipe do projeto",
+                                   "bloqueadas": set(), "nao_avalia": [], "executou": []}  # fmt: skip
         for c in contas - set(pessoas):
             pessoas[c] = {"conta": c, "nome": c, "pendentes": 0, "projetos": set(), "perfis": "",
-                          "motivo": "não está mais na equipe do projeto"}  # fmt: skip
+                          "motivo": "não está mais na equipe do projeto", "bloqueadas": set(), "nao_avalia": [],
+                          "executou": []}  # fmt: skip
     return {"passagens": ps, "fora": fora, "amostras": amostras, "pessoas": pessoas, "sem_perfil_v": not tem_v}
 
 
@@ -213,6 +220,7 @@ def sugestao(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
                     "pendentes": p["pendentes"],
                     "motivo": p["motivo"],
                     "com": atual.get(p["conta"], 0),
+                    "nao_avalia": p["nao_avalia"],
                     "peso": em_amostras.get(p["conta"], 0),
                 }  # fmt: skip
                 for p in pessoas.values()
@@ -222,17 +230,30 @@ def sugestao(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
     }
 
 
-def repartir(amostras: List[Dict], pesos: List[Tuple[str, float]]) -> Dict[int, str]:
+def repartir(
+    amostras: List[Dict], pesos: List[Tuple[str, float]], bloqueadas: Optional[Dict[str, set]] = None
+) -> Dict[int, Optional[str]]:
     """O novo responsável de cada amostra não avaliada (id da carga -> conta), elemento a elemento.
 
     Por elemento: a cota de cada um sobre o total do elemento (menos as avaliadas por quem ficou fora da divisão),
     pelos maiores restos; as avaliadas contam na cota de quem avaliou; as pendentes completam o que falta a cada um,
-    primeiro mantendo as que a pessoa já tem, depois em blocos contínuos na ordem da folha e da grade."""
+    primeiro mantendo as que a pessoa já tem, depois em blocos contínuos na ordem da folha e da grade.
+
+    `bloqueadas` (conta -> passagens): a pessoa não recebe amostras dessas passagens (executou a folha). Quem tem
+    bloqueio escolhe primeiro, entre as que pode; o que ninguém da cota pôde pegar vai para quem pode e tem mais cota
+    sobrando; amostra que nenhum escolhido pode avaliar fica sem avaliador (None)."""
+    bloqueadas = bloqueadas or {}
     contas = [c for c, p in pesos if p and float(p) > 0]
-    novo: Dict[int, str] = {}
+
+    def pode(c, a):
+        return a["id_lote_etapa"] not in bloqueadas.get(c, ())
+
+    novo: Dict[int, Optional[str]] = {}
     por_elem: Dict[int, List[Dict]] = {}
     for a in amostras:
         por_elem.setdefault(a["id_atividade"], []).append(a)
+    # Os com bloqueio primeiro (escolhem entre as que podem), mantendo a ordem dos pesos entre iguais.
+    ordem = sorted(contas, key=lambda c: (-len(bloqueadas.get(c, ())), contas.index(c)))
     for itens in por_elem.values():
         feitas = [a for a in itens if a["concluido"]]
         pend = [a for a in itens if not a["concluido"]]
@@ -250,18 +271,31 @@ def repartir(amostras: List[Dict], pesos: List[Tuple[str, float]]) -> Dict[int, 
             cota = dict(falta)
         livres = []
         for a in pend:
-            if a["responsavel"] in cota and cota[a["responsavel"]] > 0:
-                novo[a["id"]] = a["responsavel"]
-                cota[a["responsavel"]] -= 1
+            c = a["responsavel"]
+            if c in cota and cota[c] > 0 and pode(c, a):
+                novo[a["id"]] = c
+                cota[c] -= 1
             else:
                 livres.append(a)
-        fila = iter(livres)
-        for c in contas:
-            for _ in range(cota.get(c, 0)):
-                a = next(fila, None)
-                if a is None:
-                    break
-                novo[a["id"]] = c
+        for c in ordem:
+            if not livres or cota.get(c, 0) <= 0:
+                continue
+            resto = []
+            for a in livres:
+                if cota[c] > 0 and pode(c, a):
+                    novo[a["id"]] = c
+                    cota[c] -= 1
+                else:
+                    resto.append(a)
+            livres = resto
+        for a in livres:
+            aptos = [c for c in contas if pode(c, a)]
+            if not aptos:
+                novo[a["id"]] = None
+                continue
+            c = max(aptos, key=lambda x: (cota.get(x, 0), -contas.index(x)))
+            novo[a["id"]] = c
+            cota[c] = cota.get(c, 0) - 1
     return novo
 
 
@@ -283,7 +317,7 @@ def distribuir(ex: Executor, uf: str, id_lotes: List[int], pesos: Dict[str, floa
         if p["motivo"]:
             raise ErroDados(f"{p['nome'] or c} não pode avaliar estas folhas: {p['motivo']}", 400)
     lista.sort(key=lambda x: (pessoas[x[0]]["nome"] or "", x[0]))
-    novo = repartir(amostras, lista)
+    novo = repartir(amostras, lista, {c: pessoas[c]["bloqueadas"] for c, _ in lista})
     mudam = {a["id"]: novo[a["id"]] for a in amostras if a["id"] in novo and novo[a["id"]] != a["responsavel"]}
     resumo: Dict[str, Dict] = {}
 
@@ -299,7 +333,8 @@ def distribuir(ex: Executor, uf: str, id_lotes: List[int], pesos: Dict[str, floa
             r["avaliadas"] += 1 if a["concluido"] else 0
             r["por_elemento"][a["id_atividade"]] = r["por_elemento"].get(a["id_atividade"], 0) + 1
         if a["id"] in mudam:
-            de(mudam[a["id"]])["recebe"] += 1
+            if mudam[a["id"]]:
+                de(mudam[a["id"]])["recebe"] += 1
             if a["responsavel"]:
                 de(a["responsavel"])["perde"] += 1
     if not previa and mudam:
@@ -307,15 +342,26 @@ def distribuir(ex: Executor, uf: str, id_lotes: List[int], pesos: Dict[str, floa
         for i, c in mudam.items():
             por_conta.setdefault(c, []).append(i)
         for c, ids in por_conta.items():
-            dc.atribuir(ex, uf, c, ids=ids)
+            dc.atribuir(ex, uf, c, ids=ids)  # c None: fica sem avaliador (nenhum escolhido pode avaliar a folha)
         # A fila é da produção (uma folha por pessoa): amostras não esperam em fila.
         ex.executar(
             "DELETE FROM mapcartacomp.fila_folha WHERE id_lote_etapa = ANY(%s) AND atribuida_em IS NULL",
             ([p["id_lote_etapa"] for p in ctx["passagens"]],),
         )
+    # Amostras que nenhum dos escolhidos pode avaliar (todos executaram a folha): ficam sem avaliador, com o aviso.
+    sem: Dict[str, int] = {}
+    for a in amostras:
+        if not a["concluido"] and a["id"] in novo and novo[a["id"]] is None:
+            sem[a["folha_revisao"]] = sem.get(a["folha_revisao"], 0) + 1
     return {
         "previa": previa,
         "movidas": len(mudam),
+        "sem_avaliador": [{"folha_revisao": f, "amostras": n} for f, n in sorted(sem.items())],
+        "excluidos": [
+            {"conta": c, "nome": pessoas[c]["nome"], "folhas": pessoas[c]["nao_avalia"]}
+            for c, _ in lista
+            if pessoas[c]["nao_avalia"]
+        ],
         "folhas": [p["folha_revisao"] for p in ctx["passagens"]],
         "ids_lote": [p["id_lote"] for p in ctx["passagens"]],
         "elementos": _elementos(amostras),

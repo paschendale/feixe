@@ -79,11 +79,20 @@ def test_varias_pessoas_na_mesma_folha_por_proporcao(amb):
     s = dd.sugestao(ex, "DF", [a, b])
     assert [f["folha_revisao"][:4] for f in s["folhas"]] == ["2534", "2535"] and s["origem"] == "nenhuma"
     pessoas = {p["conta"]: p for p in s["pessoas"]}
-    assert "executou 2534" in pessoas["t_caio"]["motivo"]
+    # Quem executou uma das folhas só fica fora dela: avalia a outra.
+    assert pessoas["t_caio"]["motivo"] is None and [f[:4] for f in pessoas["t_caio"]["nao_avalia"]] == ["2534"]
     assert "avaliador (V)" in pessoas["t_apm"]["motivo"]
     assert pessoas["t_ana"]["motivo"] is None and not any(p["peso"] for p in s["pessoas"])  # ninguém marcado
+    so_caio = dd.distribuir(ex, "DF", [a, b], {"t_caio": 1}, previa=True)
+    n_a = sum(1 for _ in ex.todos("SELECT 1 FROM mapcartacomp.carga_trabalho WHERE id_lote_etapa = %s", (le_a,)))
+    assert [(x["folha_revisao"][:4], x["amostras"]) for x in so_caio["sem_avaliador"]] == [("2534", n_a)]
+    assert so_caio["pessoas"][0]["total"] == s["total"] - n_a and so_caio["excluidos"][0]["conta"] == "t_caio"
+    # Com outra pessoa junto, a 2534 vai toda para ela, e o caio fica com a parte dele na 2535.
+    caio_ana = dd.distribuir(ex, "DF", [a, b], {"t_caio": 1, "t_ana": 1}, previa=True)
+    assert caio_ana["sem_avaliador"] == [] and sum(x["total"] for x in caio_ana["pessoas"]) == s["total"]
+    # Só com a 2534, ele não pode avaliar nada: o servidor recusa.
     with pytest.raises(ErroDados, match="próprio trabalho"):
-        dd.distribuir(ex, "DF", [a, b], {"t_caio": 1}, previa=True)
+        dd.distribuir(ex, "DF", [a], {"t_caio": 1}, previa=True)
 
     # Prévia não muda nada; 3 para 1, as amostras das duas folhas juntas e cada elemento repartido.
     p = dd.distribuir(ex, "DF", [a, b], {"t_ana": 3, "t_bia": 1}, previa=True)

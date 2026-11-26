@@ -11,8 +11,8 @@ def _amostras(elementos, por_elemento, folhas=("2534-1",)):
         for f in folhas:
             for g in range(por_elemento):
                 i += 1
-                out.append({"id": i, "id_atividade": e, "folha_revisao": f, "geocodigo": f"G{g:03d}",
-                            "responsavel": None, "concluido": False})  # fmt: skip
+                out.append({"id": i, "id_lote_etapa": f, "id_atividade": e, "folha_revisao": f,
+                            "geocodigo": f"G{g:03d}", "responsavel": None, "concluido": False})  # fmt: skip
     return out
 
 
@@ -67,3 +67,19 @@ def test_quem_sai_da_divisao_perde_as_pendentes():
     amostras[0]["concluido"] = True
     novo = repartir(amostras, [("bia", 1)])
     assert amostras[0]["id"] not in novo and [novo[a["id"]] for a in amostras[1:]] == ["bia"] * 5
+
+
+def test_quem_executou_a_folha_fica_so_fora_dela():
+    # Duas folhas (passagens 1 e 2), um elemento, 8 amostras em cada; a ana executou a folha 1.
+    amostras = []
+    for le, f in ((1, "2534-1"), (2, "2535-1")):
+        for g in range(8):
+            amostras.append({"id": len(amostras) + 1, "id_lote_etapa": le, "id_atividade": 1, "folha_revisao": f,
+                             "geocodigo": f"G{g:03d}", "responsavel": None, "concluido": False})  # fmt: skip
+    novo = repartir(amostras, [("ana", 1), ("bia", 1)], {"ana": {1}})
+    assert all(novo[a["id"]] == "bia" for a in amostras if a["id_lote_etapa"] == 1)
+    assert all(novo[a["id"]] == "ana" for a in amostras if a["id_lote_etapa"] == 2)  # cota 8 e 8, cada um na sua
+    # Só a ana: a folha 1 fica sem avaliador.
+    so = repartir(amostras, [("ana", 1)], {"ana": {1}})
+    assert all(so[a["id"]] is None for a in amostras if a["id_lote_etapa"] == 1)
+    assert all(so[a["id"]] == "ana" for a in amostras if a["id_lote_etapa"] == 2)

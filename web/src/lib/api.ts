@@ -488,11 +488,14 @@ export type SugestaoDistribuicaoCQ = {
   origem: 'atual' | 'ultima' | 'igual'
   origem_folha: string | null
   sem_perfil_v: boolean
-  pessoas: { conta: string; nome: string; pendentes: number; motivo: string | null; com: number; peso: number }[]
+  // nao_avalia: as folhas desta seleção que a pessoa executou (ela fica só fora delas)
+  pessoas: { conta: string; nome: string; pendentes: number; motivo: string | null; com: number; peso: number; nao_avalia: string[] }[]
 }
 export type ResultadoDistribuicaoCQ = {
   previa: boolean
   movidas: number
+  sem_avaliador: { folha_revisao: string; amostras: number }[]
+  excluidos: { conta: string; nome: string; folhas: string[] }[]
   folhas: string[]
   elementos: ElementoDistribuirCQ[]
   pessoas: { conta: string; nome: string; total: number; avaliadas: number; recebe: number; perde: number; por_elemento: Record<string, number> }[]

@@ -191,6 +191,11 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
                               {p?.pendentes ? `${num(p.pendentes)} pendentes agora` : 'sem carga agora'}
                               {p?.com ? ` · está com ${num(p.com)} destas` : ''}
                             </span>
+                            {!!p?.nao_avalia.length && (
+                              <span className="block truncate text-xs text-[#8A5300]" title={`Executou ${p.nao_avalia.join(', ')}: fica fora destas folhas, as amostras delas vão para os outros.`}>
+                                fora de {folhasTxt(p.nao_avalia)} (executou)
+                              </span>
+                            )}
                           </td>
                           <td className="px-2 py-2">
                             <Input type="number" min={0} max={100} step={1} className="h-8 text-[13px]" value={pct(peso)} onChange={(e) => setPesos((x) => ({ ...x, [conta]: Math.max(0, (Number(e.target.value) * total) / 100) }))} aria-label={`Porcentagem de ${p?.nome ?? conta}`} />
@@ -231,6 +236,7 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
                 {paraAdicionar.map((p) => (
                   <option key={p.conta} value={p.conta} disabled={!!p.motivo}>
                     {primeiro(p.nome)} · {p.motivo ?? (p.pendentes ? `${num(p.pendentes)} pendentes` : 'sem carga')}
+                    {!p.motivo && p.nao_avalia.length ? ` · fora de ${plural(p.nao_avalia.length, 'folha', 'folhas')} (executou)` : ''}
                   </option>
                 ))}
               </Select>
@@ -245,6 +251,11 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
           </>
         )}
 
+        {!pergunta && previa && previa.sem_avaliador.length > 0 && (
+          <p className="rounded-md bg-[#FFF4E0] px-3 py-2 text-[13px] text-[#8A5300]">
+            Ficam sem avaliador: {previa.sem_avaliador.map((x) => `${x.folha_revisao} (${plural(x.amostras, 'amostra', 'amostras')})`).join(', ')}. Todos os escolhidos executaram {previa.sem_avaliador.length === 1 ? 'esta folha' : 'estas folhas'}: adicione alguém que possa avaliar.
+          </p>
+        )}
         <DialogFooter className="items-center gap-3 sm:justify-between">
           <span className={cn('text-[13px] text-muted-foreground', erroPrevia && 'text-[#8A5300]')}>
             {pergunta || !dados || !total
