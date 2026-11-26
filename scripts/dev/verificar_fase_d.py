@@ -516,7 +516,10 @@ def d3c(amb, usuario, senha):
             projeto.layerTreeRoot().findLayer(c.id()).setItemVisibilityChecked(False)
         r = plugin.proxima_amostra()
         primeira = camadas.amostra_atual()
-        assert projeto.layerTreeRoot().findLayer(camadas.camada_com_amostra(primeira).id()).isVisible()
+        atual_c = camadas.camada_com_amostra(primeira)
+        raiz = projeto.layerTreeRoot()
+        ligadas = [c.name() for c in camadas.camadas_amostras() if raiz.findLayer(c.id()).isVisible()]
+        assert ligadas == [atual_c.name()], ligadas  # só o elemento da amostra atual fica ligado
         assert r["carga"]["id"] == primeira and plugin.iface.canvas.piscadas[-1][0].startswith("Amostras - "), r
         # Zoom na extensão da amostra, com 10% de folga (D-148).
         from qgis.core import QgsRectangle

@@ -815,8 +815,10 @@ def ligar(camada) -> None:
 
 
 def ligar_elemento(camada) -> None:
-    """Liga a camada de amostras de um elemento e as ocorrências do mesmo elemento (só a do primeiro vem ligada ao
-    montar): a próxima amostra pode ser de outro elemento, e numa camada desligada o mapa ia até ela sem mostrá-la."""
+    """Deixa ligadas só as camadas do elemento da amostra atual: Amostras e Ocorrências desse elemento ligam, e as dos
+    outros elementos (de todos os temas, no grupo Controle de qualidade) desligam. A mesma célula pode ser sorteada em
+    mais de um elemento, e as hachuras de outra camada por baixo confundiam a amostra atual (D-150). Minhas folhas
+    fica como está."""
     if camada is None:
         return
     raiz = QgsProject.instance().layerTreeRoot()
@@ -824,12 +826,15 @@ def ligar_elemento(camada) -> None:
     if no is None:
         return
     elemento = camada.name().split(" - ", 1)[-1]
-    pai = no.parent()
-    for irmao in pai.findLayers() if pai is not None else [no]:
-        if irmao.layer() is not None and irmao.layer().name() in (camada.name(), f"Ocorrências - {elemento}"):
-            irmao.setItemVisibilityChecked(True)
-    if pai is not None:
-        pai.setItemVisibilityChecked(True)
+    meu = no.parent()
+    grupo = raiz.findGroup(GRUPO)
+    controle = grupo.findGroup(CONTROLE) if grupo is not None else None
+    for n in (controle or meu).findLayers():
+        c = n.layer()
+        if c is None or c.customProperty(_PAPEL) not in ("amostras", "ocorrencias"):
+            continue
+        n.setItemVisibilityChecked(n.parent() is meu and c.name() in (camada.name(), f"Ocorrências - {elemento}"))
+    meu.setItemVisibilityChecked(True)
 
 
 def _gpkg_do_grupo() -> Optional[str]:
