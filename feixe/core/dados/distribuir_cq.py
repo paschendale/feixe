@@ -166,7 +166,8 @@ def _elementos(amostras: List[Dict]) -> List[Dict]:
 def sugestao(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
     """O que o diálogo precisa: as folhas (e as que ficam de fora, com o motivo), os elementos, os avaliadores aptos e
     os que não podem (com o motivo) e o peso inicial de cada um, com a origem: `atual` (a divisão que as folhas já
-    têm), `ultima` (a última passagem de CQ distribuída da mesma etapa) ou `nenhuma` (ninguém marcado: o supervisor escolhe)."""
+    têm), `ultima` (a última passagem de CQ distribuída da mesma etapa) ou `nenhuma` (ninguém marcado: o supervisor
+    escolhe)."""
     ctx = _contexto(ex, uf, id_lotes)
     ps, amostras, pessoas = ctx["passagens"], ctx["amostras"], ctx["pessoas"]
     aptos = [c for c, p in pessoas.items() if not p["motivo"]]
