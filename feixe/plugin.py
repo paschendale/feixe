@@ -139,7 +139,10 @@ class FeixePlugin:
         # projeto (ao montar, ou ao abrir um projeto salvo com o grupo Feixe) passa a gravar pela outbox.
         QgsProject.instance().layersAdded.connect(self._ligar_edicao)
         self._ligar_edicao(list(QgsProject.instance().mapLayers().values()))
-        QgsProject.instance().layerTreeRoot().visibilityChanged.connect(self._mostrar_barra_cq)
+        # A barra do avaliador acompanha o grupo Controle de qualidade: ligar e desligar na árvore, tirar o grupo ou as
+        # camadas, e abrir, criar ou fechar projeto (que não emitem visibilityChanged).
+        for sinal in self._sinais_da_barra():
+            sinal.connect(self._mostrar_barra_cq_depois)
         self._abrir_workspace_gravado()
         self.iniciar_servidor()
         self._atualizar_cq()  # as ações do CQ na barra, pelo workspace gravado (offline também)
@@ -153,8 +156,9 @@ class FeixePlugin:
         self._timer.stop()
         with contextlib.suppress(TypeError):  # o initGui parou antes de ligar (ambiente inválido)
             QgsProject.instance().layersAdded.disconnect(self._ligar_edicao)
-        with contextlib.suppress(TypeError):
-            QgsProject.instance().layerTreeRoot().visibilityChanged.disconnect(self._mostrar_barra_cq)
+        for sinal in self._sinais_da_barra():
+            with contextlib.suppress(TypeError):
+                sinal.disconnect(self._mostrar_barra_cq_depois)
         self._desligar_edicao()
         self.trabalhador.parar()
         self.fim_folhas()
@@ -659,6 +663,17 @@ class FeixePlugin:
                 Qgis.Info,
                 10,
             )
+
+    @staticmethod
+    def _sinais_da_barra():
+        projeto = QgsProject.instance()
+        raiz = projeto.layerTreeRoot()
+        return [raiz.visibilityChanged, raiz.addedChildren, raiz.removedChildren, projeto.cleared,
+                projeto.readProject, projeto.layersRemoved]  # fmt: skip
+
+    def _mostrar_barra_cq_depois(self, *_):
+        """Depois que a árvore termina de mudar (a remoção de um grupo emite vários sinais seguidos)."""
+        QTimer.singleShot(0, self._mostrar_barra_cq)
 
     def _mostrar_barra_cq(self, *_):
         """As ações do avaliador aparecem só com o grupo Controle de qualidade ligado (modo Avaliar, D-148): ao trocar
