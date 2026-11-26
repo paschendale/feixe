@@ -3,6 +3,7 @@
 
 Uso:
     python3 scripts/db/migrar_df.py <conninfo_ggc> <conninfo_ccar> [--ensaio] [--relatorio arquivo.txt]
+                                    [--limiar 0.5] [--sem-grade]
 
 Lê o banco da GGC (só leitura) e escreve no da CCAR numa única transação, conectado como dono do mapcartacomp.
 Com --ensaio tudo é desfeito no fim. Pode ser rodado de novo: os uuid são derivados das chaves de origem (uuid5) e
@@ -20,6 +21,13 @@ Mapeamento (decisões no build log do projeto):
   atividade da carga. Na ADE, omissão e acurácia temporal foram sorteadas na grade completa e comissão e consistência
   topológica nas células com ADE. A letra-código é a do tamanho de amostra tabelado mais próximo do n observado; LQA e
   Ac ficam abertos;
+- as passagens das atividades pela grade (aquisição e revisões de hidrografia, ADE e LML), concluídas e em
+  andamento, passam para a grade estatística no nível da atividade (D-158, D-160): entram as células com centroide
+  dentro das cargas antigas da passagem (uma revisão parcial fica parcial); a célula fica concluída quando as cargas
+  antigas concluídas cobrem ao menos o limiar da área dela (padrão 50%) ou quando a passagem toda já está concluída,
+  com a conclusão mais recente entre elas e quem tem mais área concluída nela; a pendente fica com quem tem mais área
+  pendente nela (ou sem responsável). O CQ (amostras avaliadas nas células antigas) e as etapas que não são pela grade
+  ficam com as cargas antigas. --sem-grade desliga a passagem para a grade;
 - ignorados (e listados no relatório): atividade nula, massa d'água (não executado), "NNNN-X", "SHOW",
   rótulos que são uma conta de usuário ("u_<número>", lotes de teste), CQ sem amostras e cargas com mais da metade
   da área fora da folha (exceto grupos de CQ inteiros fora da folha do rótulo, que são erro de digitação do rótulo e
@@ -140,6 +148,47 @@ def uid(*partes) -> str:
     return str(uuid.uuid5(NAMESPACE, "/".join(str(p) for p in partes)))
 
 
+# --- passagem para a grade estatística (D-158) ----------------------------------------------------------------------
+
+LIMIAR_PADRAO = 0.5
+LIMIARES_RELATORIO = (0.25, 0.4, 0.5, 0.6, 0.75)
+
+
+def transferir(area: float, pedacos: List[dict], limiar: float = LIMIAR_PADRAO, concluida: bool = False) -> dict:
+    """Andamento de uma célula da grade a partir das cargas antigas que a cobrem.
+
+    `pedacos`: a interseção da célula com cada carga antiga ({area, concluido, concluido_em, responsavel}). Concluída
+    quando as concluídas cobrem ao menos `limiar` da área, ou sempre que a passagem toda já está concluída
+    (`concluida`); então vale a conclusão mais recente e o responsável com mais área concluída na célula. Pendente: o
+    responsável com mais área pendente, ou ninguém.
+    """
+    feitos = [q for q in pedacos if q["concluido"] and q["area"] > 0]
+    cobertura = min(1.0, sum(q["area"] for q in feitos) / area) if area > 0 else 0.0
+    concluido = (concluida or cobertura >= limiar) and bool(feitos)
+
+    def maior(qs):
+        por: Dict[str, float] = collections.defaultdict(float)
+        for q in qs:
+            if q["responsavel"] and q["area"] > 0:
+                por[q["responsavel"]] += q["area"]
+        return max(sorted(por), key=lambda r: por[r]) if por else None
+
+    if concluido:
+        datas = [q["concluido_em"] for q in feitos if q["concluido_em"] is not None]
+        return {
+            "concluido": True,
+            "concluido_em": max(datas) if datas else None,
+            "responsavel": maior(feitos),
+            "cobertura": cobertura,
+        }
+    return {
+        "concluido": False,
+        "concluido_em": None,
+        "responsavel": maior([q for q in pedacos if not q["concluido"]]),
+        "cobertura": cobertura,
+    }
+
+
 # --- extração (banco da GGC) ---------------------------------------------------------------------------------------
 
 SQL_ARTICULACAO = """
@@ -214,6 +263,8 @@ class Relatorio:
         self.amostras_ignoradas = collections.defaultdict(int)
         self.avisos: List[str] = []
         self.contagens: Dict[str, int] = collections.Counter()
+        self.grade: List[dict] = []  # uma linha por passagem levada para a grade
+        self.limiar = LIMIAR_PADRAO
 
     def ignorar(self, motivo: str, carga: dict):
         self.ignoradas[motivo].append(carga["id_carga_trabalho"])
@@ -229,6 +280,28 @@ class Relatorio:
         linhas += ["", "Amostras ignoradas:"]
         for motivo, n in sorted(self.amostras_ignoradas.items()):
             linhas.append(f"  {n:6d}  {motivo}")
+        if self.grade:
+            abertas = [g for g in self.grade if not g["concluida"]]
+            fechadas = [g for g in self.grade if g["concluida"]]
+            linhas += ["", "Grade estatística (D-158, D-160):"]
+            linhas.append(
+                f"  {len(fechadas)} passagens concluídas: {sum(g['cargas_antes'] for g in fechadas)} cargas antigas "
+                f"viraram {sum(g['celulas'] for g in fechadas)} células, todas concluídas"
+            )
+            if abertas:
+                linhas += ["", f"  Passagens em andamento (limiar {self.limiar:.0%}):"]
+                linhas.append(f"  {'passagem':24s} {'nível':>6s} {'antes':>15s} {'na grade':>15s} {'no limite':>9s}")
+                for g in sorted(abertas, key=lambda g: g["rotulo"]):
+                    antes = f"{g['concluidas_antes']}/{g['cargas_antes']} ({g['perc_antes']:.0f}%)"
+                    depois = f"{g['concluidas']}/{g['celulas']} ({g['perc']:.0f}%)"
+                    linhas.append(
+                        f"  {g['rotulo']:24s} {g['nivel']:>6d} {antes:>15s} {depois:>15s} {g['no_limite']:>9d}"
+                    )
+                total = sum(g["celulas"] for g in abertas)
+                linhas += ["", "  Células concluídas nas passagens em andamento conforme o limiar:"]
+                for lim in LIMIARES_RELATORIO:
+                    n = sum(1 for g in abertas for c in g["coberturas"] if c >= lim and c > 0)
+                    linhas.append(f"    {lim:.0%}: {n} de {total}")
         linhas += ["", "Avisos:"] + [f"  - {a}" for a in self.avisos]
         return "\n".join(linhas) + "\n"
 
@@ -372,16 +445,18 @@ def _referencias(cur, rel) -> dict:
         if linha is None:
             raise RuntimeError(f"tema {nome!r} ausente: aplique as migrações (pré-seed do 002) antes da conversão")
         temas[k] = linha[0]
-    ativ = {}
+    ativ, niveis = {}, {}
     for k, (tema, fase, nome, _medida) in ATIVIDADES.items():
         cur.execute(
-            "SELECT id, id_tema, fase FROM mapcartacomp.atividade WHERE cod_projeto = %s AND nome = %s",
+            "SELECT id, id_tema, fase, CASE WHEN geracao = 'grade' THEN grade_nivel END "
+            "FROM mapcartacomp.atividade WHERE cod_projeto = %s AND nome = %s",
             (projeto, nome),
         )
         linha = cur.fetchone()
         if linha is None or (linha[1], linha[2]) != (temas[tema], fase):
             raise RuntimeError(f"atividade {nome!r} ausente ou diferente no pré-seed do 002 (tema e fase)")
         ativ[k] = linha[0]
+        niveis[linha[0]] = linha[3]
     fluxos, etapas, etapa_ativ = {}, {}, {}
     for tema, (nome, lista) in FLUXOS.items():
         cur.execute(
@@ -432,6 +507,7 @@ def _referencias(cur, rel) -> dict:
         "etapas": etapas,
         "etapa_ativ": etapa_ativ,
         "ativ": ativ,
+        "nivel": niveis,
         "folhas": folhas,
     }
 
@@ -466,7 +542,138 @@ def _planos(p: Passagem, amostras_por_carga, rel: Relatorio) -> List[dict]:
     return planos
 
 
-def carregar(ccar, dados: dict, passagens: Dict[tuple, Passagem], amostras_por_carga, rel: Relatorio) -> None:
+SQL_GRADE = """
+WITH cel AS (
+    SELECT p.id_le, c.geocodigo, c.geom
+      FROM feixe_para_grade p
+      JOIN mapcartctrl.t_articulacao_scn ar ON ar.id_articulacao_scn = p.id_articulacao_scn
+     CROSS JOIN LATERAL mapcartacomp.f_grade_celulas(ST_Multi(ar.geom), p.nivel) c
+     WHERE EXISTS (SELECT 1 FROM feixe_legado l
+                    WHERE l.id_le = p.id_le AND l.geom && c.geom AND ST_Intersects(l.geom, ST_Centroid(c.geom)))
+)
+SELECT cel.id_le, cel.geocodigo, encode(ST_AsEWKB(cel.geom), 'hex') AS geom, ST_Area(cel.geom::geography) AS area,
+       l.responsavel, l.concluido, l.concluido_em,
+       ST_Area(ST_Intersection(cel.geom, l.geom)::geography) AS area_pedaco
+  FROM cel
+  LEFT JOIN feixe_legado l ON l.id_le = cel.id_le AND l.geom && cel.geom AND ST_Intersects(l.geom, cel.geom)
+ ORDER BY cel.id_le, cel.geocodigo
+"""
+
+
+def _para_grade(cur, itens: List[dict], rel: Relatorio, limiar: float) -> List[tuple]:
+    """Leva as passagens em andamento para a grade estatística (D-158) e devolve as linhas de carga_trabalho.
+
+    `itens`: {passagem, le_uuid, id_le, id_atividade, nivel, id_articulacao_scn}. As cargas antigas sobem para uma
+    tabela temporária; a grade e as interseções saem do banco (f_grade_celulas, a mesma da geração de cargas).
+    """
+    if not itens:
+        return []
+    cur.execute(
+        "CREATE TEMP TABLE IF NOT EXISTS feixe_para_grade (id_le integer, nivel integer, id_articulacao_scn integer) "
+        "ON COMMIT DROP"
+    )
+    cur.execute(
+        "CREATE TEMP TABLE IF NOT EXISTS feixe_legado (id_le integer, responsavel text, concluido boolean, "
+        "concluido_em timestamptz, geom geometry) ON COMMIT DROP"
+    )
+    cur.execute("TRUNCATE feixe_para_grade, feixe_legado")
+    from psycopg2.extras import execute_values
+
+    execute_values(
+        cur,
+        "INSERT INTO feixe_para_grade VALUES %s",
+        [(i["id_le"], i["nivel"], i["id_articulacao_scn"]) for i in itens],
+    )
+    legado = []
+    for i in itens:
+        for c in i["passagem"].cargas:
+            resp = None if c["responsavel"] in (None, "", "DISPONIVEL") else c["responsavel"]
+            legado.append((i["id_le"], resp, c["concluido"], c["concluido_em"], c["geom"]))
+    execute_values(
+        cur,
+        "INSERT INTO feixe_legado VALUES %s",
+        legado,
+        template="(%s, %s, %s, %s, ST_SetSRID(%s::geometry, 4674))",
+        page_size=1000,
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS feixe_legado_geom ON feixe_legado USING gist (geom)")
+    cur.execute("ANALYZE feixe_legado")
+    cur.execute(SQL_GRADE)
+    celulas: Dict[tuple, dict] = {}
+    for id_le, geocodigo, geom, area, resp, concl, concl_em, area_pedaco in cur.fetchall():
+        c = celulas.setdefault((id_le, geocodigo), {"geom": geom, "area": area, "pedacos": []})
+        if area_pedaco:
+            c["pedacos"].append(
+                {"responsavel": resp, "concluido": concl, "concluido_em": concl_em, "area": area_pedaco}
+            )
+    por_le = {i["id_le"]: i for i in itens}
+    linhas = []
+    resumo: Dict[int, dict] = {}
+    for (id_le, geocodigo), c in celulas.items():
+        i = por_le[id_le]
+        t = transferir(c["area"], c["pedacos"], limiar, i["concluida"])
+        linhas.append((uid("carga_trabalho", "grade", i["le_uuid"], geocodigo), id_le, i["id_atividade"], None, UF,
+                       t["responsavel"], c["geom"], t["concluido"], t["concluido_em"], i["passagem"].inicio,
+                       geocodigo))  # fmt: skip
+        r = resumo.setdefault(id_le, {"celulas": 0, "concluidas": 0, "no_limite": 0, "coberturas": []})
+        r["celulas"] += 1
+        r["concluidas"] += t["concluido"]
+        r["no_limite"] += abs(t["cobertura"] - limiar) < 0.1
+        r["coberturas"].append(t["cobertura"])
+    rel.limiar = limiar
+    for i in itens:
+        p = i["passagem"]
+        r = resumo.get(i["id_le"], {"celulas": 0, "concluidas": 0, "no_limite": 0, "coberturas": []})
+        antes = sum(1 for c in p.cargas if c["concluido"])
+        rel.grade.append({
+            "rotulo": f"{TEMAS[p.tema]} {p.rotulo}",
+            "concluida": i["concluida"],
+            "nivel": i["nivel"],
+            "cargas_antes": len(p.cargas),
+            "concluidas_antes": antes,
+            "perc_antes": 100.0 * antes / len(p.cargas),
+            "perc": 100.0 * r["concluidas"] / r["celulas"] if r["celulas"] else 0.0,
+            **r,
+        })  # fmt: skip
+        if not r["celulas"]:
+            rel.avisos.append(f"{TEMAS[p.tema]} {p.rotulo}: nenhuma célula da grade com centroide nas cargas antigas")
+    rel.contagens["passagens levadas para a grade"] = len(itens)
+    rel.contagens["células da grade gravadas"] = len(linhas)
+    return linhas
+
+
+def _limpar_grade(cur, ids_le: List[int], manter: List[str], rel: Relatorio) -> None:
+    """Apaga das passagens levadas para a grade as cargas que não são as da grade (de uma rodada anterior, sem a
+    grade ou com outro desenho). Ocorrência ligada a uma delas passa para a célula da grade que contém o ponto; carga
+    usada por amostra fica (amostra é do CQ, que não vai para a grade)."""
+    if not ids_le:
+        return
+    cur.execute(
+        "UPDATE mapcartacomp.cq_inspecao i SET id_carga_trabalho = ("
+        " SELECT n.id FROM mapcartacomp.carga_trabalho n WHERE n.id_lote_etapa = v.id_lote_etapa "
+        " AND n.uuid::text = ANY(%s) AND n.geom && i.geom AND ST_Intersects(n.geom, i.geom) LIMIT 1) "
+        "FROM mapcartacomp.carga_trabalho v WHERE i.id_carga_trabalho = v.id AND v.id_lote_etapa = ANY(%s) "
+        "AND v.uuid::text <> ALL(%s)",
+        (manter, ids_le, manter),
+    )
+    cur.execute(
+        "DELETE FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = ANY(%s) AND c.uuid::text <> ALL(%s) "
+        "AND NOT EXISTS (SELECT 1 FROM mapcartacomp.cq_amostra a WHERE a.id_carga_trabalho = c.id)",
+        (ids_le, manter),
+    )
+    if cur.rowcount:
+        rel.avisos.append(f"{cur.rowcount} cargas de uma conversão anterior saíram das passagens levadas para a grade")
+
+
+def carregar(
+    ccar,
+    dados: dict,
+    passagens: Dict[tuple, Passagem],
+    amostras_por_carga,
+    rel: Relatorio,
+    grade: bool = True,
+    limiar: float = LIMIAR_PADRAO,
+) -> None:
     with ccar.cursor() as cur:
         cur.execute("SET LOCAL client_min_messages = warning")
         ref = _referencias(cur, rel)
@@ -494,7 +701,7 @@ def carregar(ccar, dados: dict, passagens: Dict[tuple, Passagem], amostras_por_c
             lotes[(tema, folha)] = cur.fetchone()[0]
         rel.contagens["lotes"] = len(lotes)
 
-        cargas_linhas, amostras_linhas, hist = [], [], []
+        cargas_linhas, amostras_linhas, hist, para_grade = [], [], [], []
         convertidas = set()
         n_planos = 0
         for p in sorted(passagens.values(), key=lambda q: (q.tema, q.folha, q.inicio)):
@@ -529,11 +736,20 @@ def carregar(ccar, dados: dict, passagens: Dict[tuple, Passagem], amostras_por_c
                          f"convertido de bc100ggcdf_apoio ({p.rotulo})"))  # fmt: skip
 
             if p.etapa != "cq":
+                id_ativ = ref["etapa_ativ"][(p.tema, p.etapa)]
+                if grade and ref["nivel"].get(id_ativ):
+                    para_grade.append({
+                        "passagem": p, "le_uuid": le_uuid, "id_le": id_le, "id_atividade": id_ativ,
+                        "nivel": ref["nivel"][id_ativ], "id_articulacao_scn": ref["folhas"][p.folha],
+                        "concluida": situacao == "concluida",
+                    })  # fmt: skip
+                    convertidas.update(c["id_carga_trabalho"] for c in p.cargas)
+                    continue
                 for c in p.cargas:
                     responsavel = None if c["responsavel"] in (None, "", "DISPONIVEL") else c["responsavel"]
-                    cargas_linhas.append((uid("carga_trabalho", c["id_carga_trabalho"]), id_le,
-                                          ref["etapa_ativ"][(p.tema, p.etapa)], None, UF, responsavel, c["geom"],
-                                          c["concluido"], c["concluido_em"], c["criada_em"]))  # fmt: skip
+                    cargas_linhas.append((uid("carga_trabalho", c["id_carga_trabalho"]), id_le, id_ativ, None, UF,
+                                          responsavel, c["geom"], c["concluido"], c["concluido_em"], c["criada_em"],
+                                          None))  # fmt: skip
                     convertidas.add(c["id_carga_trabalho"])
                 continue
             for plano in _planos(p, amostras_por_carga, rel):
@@ -570,11 +786,13 @@ def carregar(ccar, dados: dict, passagens: Dict[tuple, Passagem], amostras_por_c
                     responsavel = None if c["responsavel"] in (None, "", "DISPONIVEL") else c["responsavel"]
                     u_carga = uid("carga_trabalho", c["id_carga_trabalho"], plano["medida"])
                     cargas_linhas.append((u_carga, id_le, id_ativ, id_plano, UF, responsavel, c["geom"], avaliada,
-                                          concluido_em if avaliada else None, c["criada_em"]))  # fmt: skip
+                                          concluido_em if avaliada else None, c["criada_em"], None))  # fmt: skip
                     amostras_linhas.append((uid("cq_amostra", a["id_cq_amostra"]), id_plano, u_carga, UF, a["status"],
                                             concluido_em if avaliada else None, responsavel if avaliada else None,
                                             a["criado_em"]))  # fmt: skip
                     convertidas.add(c["id_carga_trabalho"])
+        linhas_grade = _para_grade(cur, para_grade, rel, limiar)
+        cargas_linhas += linhas_grade
         rel.contagens["passagens de etapa"] = len(hist)
         rel.contagens["planos de CQ"] = n_planos
 
@@ -588,13 +806,13 @@ def carregar(ccar, dados: dict, passagens: Dict[tuple, Passagem], amostras_por_c
         for u, i in _executar_valores(
             cur,
             "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_atividade, id_cq_plano, uf, responsavel, "
-            "geom, concluido, concluido_em, criado_em) VALUES %s ON CONFLICT (uuid) DO UPDATE SET "
+            "geom, concluido, concluido_em, criado_em, geocodigo) VALUES %s ON CONFLICT (uuid) DO UPDATE SET "
             "id_lote_etapa = EXCLUDED.id_lote_etapa, id_atividade = EXCLUDED.id_atividade, "
             "id_cq_plano = EXCLUDED.id_cq_plano, "
             "responsavel = EXCLUDED.responsavel, geom = EXCLUDED.geom, concluido = EXCLUDED.concluido, "
-            "concluido_em = EXCLUDED.concluido_em RETURNING uuid::text, id",
+            "concluido_em = EXCLUDED.concluido_em, geocodigo = EXCLUDED.geocodigo RETURNING uuid::text, id",
             cargas_linhas,
-            template="(%s, %s, %s, %s, %s, %s, %s::geometry, %s, %s, %s)",
+            template="(%s, %s, %s, %s, %s, %s, %s::geometry, %s, %s, %s, %s)",
         ):
             ids_carga[u] = i
         rel.contagens["cargas convertidas"] = len(convertidas)
@@ -615,6 +833,7 @@ def carregar(ccar, dados: dict, passagens: Dict[tuple, Passagem], amostras_por_c
                 rel.amostras_ignoradas["da carga ignorada"] += 1
 
         _inspecoes(cur, dados["inspecoes"], rel)
+        _limpar_grade(cur, [i["id_le"] for i in para_grade], [linha[0] for linha in linhas_grade], rel)
         _equipe_e_calendario(cur, dados, rel)
 
 
@@ -688,15 +907,17 @@ def _equipe_e_calendario(cur, dados, rel):
     rel.contagens["dias de calendário"] = len(dados["calendario"])
 
 
-def converter(ggc, ccar) -> Relatorio:
-    """Faz a conversão na transação aberta de `ccar`, sem confirmar. Quem chama decide entre commit e rollback."""
+def converter(ggc, ccar, grade: bool = True, limiar: float = LIMIAR_PADRAO) -> Relatorio:
+    """Faz a conversão na transação aberta de `ccar`, sem confirmar. Quem chama decide entre commit e rollback.
+
+    `grade`: leva as passagens em andamento para a grade estatística (D-158), com o `limiar` de cobertura."""
     rel = Relatorio()
     dados = extrair(ggc)
     rel.contagens["cargas na origem"] = len(dados["cargas"])
     rel.contagens["amostras na origem"] = len(dados["amostras"])
     rel.contagens["ocorrências na origem"] = len(dados["inspecoes"])
     passagens, amostras_por_carga = classificar(dados, rel)
-    carregar(ccar, dados, passagens, amostras_por_carga, rel)
+    carregar(ccar, dados, passagens, amostras_por_carga, rel, grade=grade, limiar=limiar)
     rel.contagens["cargas ignoradas"] = sum(len(v) for v in rel.ignoradas.values())
     return rel
 
@@ -707,12 +928,22 @@ def main(argv=None) -> int:
     p.add_argument("ccar", help="conexão com o banco da CCAR (escreve em mapcartacomp, como dono do schema)")
     p.add_argument("--ensaio", action="store_true", help="converte e desfaz tudo no fim")
     p.add_argument("--relatorio", help="arquivo onde gravar o relatório (além de imprimir)")
+    p.add_argument(
+        "--limiar",
+        type=float,
+        default=LIMIAR_PADRAO,
+        help="fração da célula da grade coberta por cargas antigas concluídas para ela contar como concluída "
+        f"(padrão {LIMIAR_PADRAO})",
+    )
+    p.add_argument("--sem-grade", action="store_true", help="mantém as passagens em andamento nas cargas antigas")
     a = p.parse_args(argv)
+    if not 0 < a.limiar <= 1:
+        p.error("--limiar fica entre 0 e 1")
     import psycopg2
 
     ggc, ccar = psycopg2.connect(a.ggc), psycopg2.connect(a.ccar)
     try:
-        rel = converter(ggc, ccar)
+        rel = converter(ggc, ccar, grade=not a.sem_grade, limiar=a.limiar)
         if a.ensaio:
             ccar.rollback()
         else:
