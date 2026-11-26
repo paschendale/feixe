@@ -99,6 +99,6 @@ def test_recusas_e_papeis(montar):
     assert r.despachar("POST", "/api/lotes/cq_decisao", {}, corpo)[0] == 200  # a observação é opcional
     corpo = {"lotes": [1], "decisao": "talvez", "observacao": "x", "previa": False}
     assert r.despachar("POST", "/api/lotes/cq_decisao", {}, corpo)[0] == 400
-    r, _ = montar({"papeis": ["apm"], "uf": "DF", "perfis": []})
+    r, _ = montar({"papeis": ["operador"], "uf": "DF", "perfis": []})
     assert r.despachar("POST", "/api/lotes/cq_decisao", {}, {"lotes": [1], "decisao": "aprovar"})[0] == 403
     assert r.despachar("GET", "/api/cq_planos/7", {}, None)[0] == 403

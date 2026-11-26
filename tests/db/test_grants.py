@@ -1,6 +1,6 @@
 """A4: GRANTs gerados para as roles escolhidas pela DBA. Roda nos dois bancos, dentro de transações desfeitas.
 
-Nesta versão o banco não tem RLS: quem tem os GRANTs vê e altera todas as UFs, e os papéis (APM, avaliador,
+Nesta versão o banco não tem RLS: quem tem os GRANTs vê e altera todas as UFs, e os papéis (operador, avaliador,
 supervisor, gerente) são decididos pelo plugin a partir do SGBC. Usa as roles de teste de scripts/dev/roles_teste.sql,
 criadas dentro da transação, e troca de usuário com SET LOCAL ROLE.
 """

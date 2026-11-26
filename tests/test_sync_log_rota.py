@@ -80,7 +80,7 @@ def test_filtros_invalidos_dao_400(montar, q):
 
 
 def test_so_supervisor_ve_os_conflitos_da_unidade(montar):
-    for papeis in (["apm"], ["avaliador"], ["gerente"], []):
+    for papeis in (["operador"], ["avaliador"], ["gerente"], []):
         r, ch = montar(papeis)
         assert r.despachar("GET", "/api/sync_log", {}, None)[0] == 403
         assert r.despachar("GET", "/api/sync_log/contagem", {}, None)[0] == 403
@@ -118,7 +118,7 @@ def test_quem_executa_ve_as_proprias_recusas_e_conflitos_perdidos_sem_colegas(mo
     _registrar(ws, "recusado", {"itens": ["k2"], "repetido": True})  # repetição: não aparece de novo
     _registrar(ws, "aplicado", {**base, "itens": ["k3"]})
     _registrar(ws, "conflito_vencido", {**base, "itens": ["k4"]})
-    r, _ = montar(["apm"])
+    r, _ = montar(["operador"])
     status, obj = r.despachar("GET", "/api/sync_log/meus", {"fuso": "UTC"}, None)
     assert status == 200
     assert [i["resultado"] for i in obj["itens"]] == ["recusado", "conflito_perdido"]

@@ -42,7 +42,7 @@ def test_busca_de_folhas_pela_camada_de_dados():
     assert status == 200 and obj["itens"][0]["cd_mi"] == "2534"
     assert chamadas[-1][1] == ("%25%", "%25%", "%25%", "25", "25%", "25%", 5)
     assert r.despachar("GET", "/api/folhas", {"limite": "5000"}, None)[0] == 200 and chamadas[-1][1] == (1000,)
-    ctx._eu = {"papeis": ["apm"], "uf": "DF", "perfis": []}
+    ctx._eu = {"papeis": ["operador"], "uf": "DF", "perfis": []}
     assert r.despachar("GET", "/api/folhas", {}, None)[0] == 403
 
 

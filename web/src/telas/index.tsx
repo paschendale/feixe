@@ -21,7 +21,7 @@ export type Tela = {
 const TELAS: Tela[] = [
   { id: 'inicio', rotulo: 'Início', papeis: [], componente: Inicio },
   { id: 'supervisao', rotulo: 'Supervisão', papeis: ['supervisor', 'gerente'], componente: Supervisao },
-  { id: 'execucao', rotulo: 'Execução', papeis: ['apm', 'avaliador', 'supervisor'], componente: Execucao },
+  { id: 'execucao', rotulo: 'Execução', papeis: ['operador', 'avaliador', 'supervisor'], componente: Execucao },
   { id: 'catalogo', rotulo: 'Catálogo', papeis: [], componente: Catalogo },
   { id: 'sobre', rotulo: 'Sobre', papeis: [], oculta: true, componente: Sobre },
   // Vitrine do design system, fora do menu.

@@ -51,7 +51,7 @@ def test_uf_da_lotacao(lotacao, uf):
 def test_papel_por_perfil_do_sgbc():
     assert {p: papeis.papel_do_perfil(p) for p in "SOVCI"} == {
         "S": "supervisor",
-        "O": "apm",
+        "O": "operador",
         "V": "avaliador",
         "C": "consulta",
         "I": None,
@@ -66,18 +66,18 @@ def test_montar_com_perfis_e_gerente():
     ]
     eu = papeis.montar("u_1234567", _conta(), perfis, {"equipe": "GGC-DF", "gerente": True, "ativo": True})
     assert eu["nome"] == "Fulana de Tal" and eu["uf"] == "DF" and eu["elegivel"]
-    assert eu["papeis"] == ["gerente", "supervisor", "avaliador", "apm"]
+    assert eu["papeis"] == ["gerente", "supervisor", "avaliador", "operador"]
     assert eu["papel"] == "gerente" and eu["papel_rotulo"] == "Gerente"
     assert eu["equipe"] == "GGC-DF"
-    assert [p["papel"] for p in eu["perfis"]] == ["supervisor", "apm", None]
+    assert [p["papel"] for p in eu["perfis"]] == ["supervisor", "operador", None]
 
 
 @pytest.mark.parametrize(
     "perfil,papeis_esperados",
     [
-        ("S", ["supervisor", "avaliador", "apm"]),
-        ("V", ["avaliador", "apm"]),
-        ("O", ["apm"]),
+        ("S", ["supervisor", "avaliador", "operador"]),
+        ("V", ["avaliador", "operador"]),
+        ("O", ["operador"]),
         ("C", ["consulta"]),
         ("I", []),
     ],
@@ -97,7 +97,7 @@ def test_perfis_que_cobrem():
 
 def test_gbc_e_lotacao_rj_como_qualquer_outra():
     eu = papeis.montar("u_1", _conta(dsc_lotacao="RJ"), [{"cod_projeto": 5, "projeto": "BC100", "perfil": "O"}], None)
-    assert eu["uf"] == "RJ" and eu["papel"] == "apm" and eu["gerente"] is False and eu["equipe"] is None
+    assert eu["uf"] == "RJ" and eu["papel"] == "operador" and eu["gerente"] is False and eu["equipe"] is None
 
 
 def test_uf_nula_continua_identificada():

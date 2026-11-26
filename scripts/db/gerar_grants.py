@@ -15,8 +15,8 @@ atualização, que agrupa SELECT, INSERT, UPDATE e DELETE nas tabelas, e uma rol
 Nenhuma role é criada: o script só concede privilégios às que vierem nas listas. Reaplicar depois de cada migração
 nova (tabela nova precisa de GRANT) e quando uma role nova precisar de acesso; GRANT repetido não tem efeito.
 
-Todas as roles de atualização recebem o mesmo acesso. O banco não distingue papéis nem UFs nesta versão: quem é APM,
-avaliador, supervisor ou gerente é decidido pelo plugin, a partir dos perfis do SGBC (mapcartctrl) e de
+Todas as roles de atualização recebem o mesmo acesso. O banco não distingue papéis nem UFs nesta versão: quem é
+operador, avaliador, supervisor ou gerente é decidido pelo plugin, a partir dos perfis do SGBC (mapcartctrl) e de
 usuario_feixe, e não pelas roles do banco.
 """
 

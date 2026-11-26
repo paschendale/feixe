@@ -63,7 +63,7 @@ def test_amostras_e_avaliar(montar, cq):  # noqa: F811
 
 
 def test_ocorrencia_registrar_editar_ciente_e_apagar(montar, cq):  # noqa: F811
-    r, ch = montar(["avaliador", "apm"])
+    r, ch = montar(["avaliador", "operador"])
     status, obj = r.despachar(
         "POST", "/api/inspecoes", {}, {"x": -47.89, "y": -15.79, "id_carga_trabalho": 4001, "anotacao": "trecho"}
     )
@@ -96,5 +96,5 @@ def test_ocorrencias_da_folha_para_o_supervisor(montar, monkeypatch):
     r, _ = montar(["supervisor"])
     status, obj = r.despachar("GET", "/api/lotes/5/ocorrencias", {}, None)
     assert status == 200 and obj["id_lote"] == 5 and visto == {"uf": "DF", "id_lote": 5}
-    r, _ = montar(["apm"])
+    r, _ = montar(["operador"])
     assert r.despachar("GET", "/api/lotes/5/ocorrencias", {}, None)[0] == 403

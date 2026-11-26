@@ -256,18 +256,18 @@ def b1(amb, usuario, senha):
             assert len(camada.actions().actions()) == 1, camada.name()
             cfg = camada.editFormConfig()
             assert all(cfg.readOnly(i) for i in range(len(camada.fields()))), camada.name()
-        ok("formulários, dicas e ações: APM com situação e progresso; supervisor só leitura, com abrir no Feixe")
+        ok("formulários, dicas e ações: operador com situação e progresso; supervisor só leitura, com abrir no Feixe")
 
-        apm = camadas.montar(amb, authcfg, {"uf": "DF", "papeis": ["apm"]}, [], None, exe, ws.caminho)
+        apm = camadas.montar(amb, authcfg, {"uf": "DF", "papeis": ["operador"]}, [], None, exe, ws.caminho)
         assert apm["modo"] == "execucao" and [c["nome"] for c in apm["camadas"]] == ["Minhas cargas", "Meus lotes"]
         try:
             camadas.modo("supervisao")
-            raise AssertionError("APM entrou no modo supervisão")
+            raise AssertionError("operador entrou no modo supervisão")
         except RuntimeError:
             pass
         r = camadas.montar(amb, authcfg, eu, resp, sup, exe, ws.caminho)
         feixe = raiz.findGroup("Feixe")
-        ok("APM só tem Execução; o modo supervisão é recusado")
+        ok("operador só tem Execução; o modo supervisão é recusado")
 
         minhas = camadas.camada_minhas()
         assert minhas.renderer().type() == "RuleRenderer"
@@ -334,7 +334,7 @@ def b2(amb, usuario, senha):
     sinc = Sincronizacao(lambda: ws, lambda: db.transacao(amb, usuario, senha, timeout_conexao=5))
     try:
         assert sinc.sincronizar()["estado"] == "ok"
-        camadas.montar(amb, config.authcfg_id(amb), {"uf": "DF", "papeis": ["apm"]}, [], None, [], ws.caminho)
+        camadas.montar(amb, config.authcfg_id(amb), {"uf": "DF", "papeis": ["operador"]}, [], None, [], ws.caminho)
         focadas = []
         ctx = Contexto(
             transacao=lambda: db.transacao(amb, usuario, senha),

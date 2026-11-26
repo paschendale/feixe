@@ -56,7 +56,7 @@ Scripts auxiliares (na raiz do repositório): `scripts/db/aplicar.py` (aplica as
 
 ### Acesso
 
-Nesta versão o banco não restringe linhas: quem tem os GRANTs lê e altera os dados do Feixe de todas as GGCs. Todas as roles de atualização recebem o mesmo acesso: leitura e escrita nas tabelas do Feixe, exceto `schema_version` e `fase`, que são só de leitura. As roles de consulta só leem, inclusive as views. Quem é APM, avaliador, supervisor ou gerente é decidido pelo plugin, a partir dos perfis do SGBC em `mapcartctrl` e da tabela `mapcartacomp.usuario_feixe`, e não pelas roles do banco.
+Nesta versão o banco não restringe linhas: quem tem os GRANTs lê e altera os dados do Feixe de todas as GGCs. Todas as roles de atualização recebem o mesmo acesso: leitura e escrita nas tabelas do Feixe, exceto `schema_version` e `fase`, que são só de leitura. As roles de consulta só leem, inclusive as views. Quem é operador, avaliador, supervisor ou gerente é decidido pelo plugin, a partir dos perfis do SGBC em `mapcartctrl` e da tabela `mapcartacomp.usuario_feixe`, e não pelas roles do banco.
 
 As views `vw_*` (menos `vw_carga_supervisao`, só leitura e limitada pela RLS por UF) filtram pelo usuário conectado e são editáveis (por RULE): quem continuar operando direto no QGIS conclui cargas e avalia amostras por elas, como hoje no `*_apoio`. Inserir ocorrência pela `vw_cq_inspecao` exige o campo `uuid` preenchido (no QGIS, valor padrão `uuid()`); o banco nunca gera uuid.
 

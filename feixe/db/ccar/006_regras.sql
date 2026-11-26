@@ -200,7 +200,7 @@ LANGUAGE sql STABLE AS $$
      LIMIT 1
 $$;
 
--- Nome do elemento de qualidade (a medida no SGBC). Com os direitos do dono do schema: quem executa (APM, avaliador)
+-- Nome do elemento de qualidade (a medida no SGBC). Com os direitos do dono do schema: quem executa (operador, avaliador)
 -- pode não ter leitura em mapcartctrl.t_qua_medidadequalidade, e o pull do workspace e a ocorrência precisam do nome.
 CREATE OR REPLACE FUNCTION mapcartacomp.f_elemento_nome(p_medida integer) RETURNS text
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = mapcartacomp, public, pg_temp AS $$

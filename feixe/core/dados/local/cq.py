@@ -1,5 +1,5 @@
-"""CQ da execução sobre o workspace (D3a, D-111): o avaliador avalia as amostras e registra ocorrências; o APM autor
-da carga apontada dá ciência. Online ou offline, como as cargas: linha e outbox juntas, e o push leva à CCAR.
+"""CQ da execução sobre o workspace (D3a, D-111): o avaliador avalia as amostras e registra ocorrências; o operador
+autor da carga apontada dá ciência. Online ou offline, como as cargas: linha e outbox juntas, e o push leva à CCAR.
 
 Regras, as mesmas que o push confere de novo na CCAR (D-122):
 
@@ -341,7 +341,7 @@ def apagar(ex, uuid: str) -> Dict:
 
 
 def ciente(ex, uuid: str) -> Dict:
-    """Ciência do APM autor da carga apontada pela ocorrência (D-66). De novo, não faz nada."""
+    """Ciência do operador autor da carga apontada pela ocorrência (D-66). De novo, não faz nada."""
     linha = ex.um(
         "SELECT i.uuid, i.ciente_em, ca.responsavel AS autor FROM cq_inspecao i "
         "LEFT JOIN carga_trabalho ca ON ca.id = i.id_carga_avaliada WHERE i.uuid = ?",

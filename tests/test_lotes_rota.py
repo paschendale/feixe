@@ -64,7 +64,7 @@ def test_validacoes_e_papeis(montar):
     assert r.despachar("GET", "/api/lotes", {"status": "QUALQUER"}, None)[0] == 400
     r, _ = montar({**SUP, "uf": None})
     assert r.despachar("POST", "/api/lotes", {}, {"tipo": "folha", "id_fluxo": 1, "folhas": [1]})[0] == 403
-    r, _ = montar({**SUP, "papeis": ["apm"]})
+    r, _ = montar({**SUP, "papeis": ["operador"]})
     assert r.despachar("POST", "/api/lotes", {}, {"tipo": "folha", "id_fluxo": 1, "folhas": [1]})[0] == 403
 
 
@@ -92,5 +92,5 @@ def test_rotas_do_fluxo(montar, monkeypatch):
     novo = {"modo": "modelo", "nome": "DF LML", "cod_projeto": 5, "id_tema": 3}
     assert r.despachar("POST", "/api/fluxos", {}, novo)[0] == 200
     assert r.despachar("POST", "/api/fluxos", {}, {**novo, "cod_projeto": 2})[0] == 403  # perfil C no projeto 2
-    r, _ = montar({**SUP, "papeis": ["apm"]})
+    r, _ = montar({**SUP, "papeis": ["operador"]})
     assert r.despachar("POST", "/api/lote_etapas/7/iniciar", {}, corpo)[0] == 403

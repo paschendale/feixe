@@ -87,7 +87,7 @@ function SupervisorInicio() {
 export default function Inicio() {
   const { eu, tem, pronta } = useSessao()
   const supervisiona = tem('supervisor', 'gerente')
-  const executa = tem('apm', 'avaliador', 'supervisor')
+  const executa = tem('operador', 'avaliador', 'supervisor')
   const projetos = [...new Set((eu?.perfis ?? []).filter((p) => p.papel && p.papel !== 'consulta').map((p) => p.projeto))].slice(0, 3)
   return (
     <Conteudo largura={1200} className="gap-2 pt-8">

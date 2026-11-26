@@ -1,12 +1,13 @@
 """Identidade e papéis do usuário no Feixe, só a partir do SGBC (mapcartctrl) e de mapcartacomp.usuario_feixe.
 
-Nenhuma role do banco é consultada (D-57): quem é APM, avaliador, supervisor ou consulta sai do perfil do usuário
+Nenhuma role do banco é consultada (D-57): quem é operador, avaliador, supervisor ou consulta sai do perfil do usuário
 no projeto em `mapcartctrl.t_prd_perfil_usuarioprojeto`, gravado pelo SGBC; gerente e equipe são do Feixe.
 
-- Perfis do SGBC: S = supervisor, O = APM, V = avaliador, C = consulta. O perfil I (iniciador) não tem papel no
+- Perfis do SGBC: S = supervisor, O = operador, V = avaliador, C = consulta. O perfil I (iniciador) não tem papel no
   Feixe e aparece só como perfil bruto.
 - Os perfis são uma hierarquia (quem pode mais pode menos, confirmado com a DBA em 2026-11-26): S inclui V e O, V
-  inclui O. Quem tem S num projeto tem os papéis de supervisor, avaliador e APM; quem tem V, os de avaliador e APM.
+  inclui O. Quem tem S num projeto tem os papéis de supervisor, avaliador e operador; quem tem V, os de avaliador e
+  operador.
 - UF (unidade) = `t_usuario.dsc_lotacao`, quando é uma sigla de duas letras. A lotação RJ é a unidade da GBC e é
   tratada como qualquer outra (D-76). Lotação vazia ou fora do padrão dá UF nula, e o usuário continua sendo
   identificado.
@@ -22,19 +23,19 @@ from __future__ import annotations
 import re
 from typing import Callable, Dict, List, Optional, Tuple
 
-PAPEL_DO_PERFIL = {"S": "supervisor", "O": "apm", "V": "avaliador", "C": "consulta"}
+PAPEL_DO_PERFIL = {"S": "supervisor", "O": "operador", "V": "avaliador", "C": "consulta"}
 
 # Hierarquia dos perfis: cada perfil inclui os que vêm depois dele na lista.
 HIERARQUIA = ("S", "V", "O")
 
 # Do papel mais amplo ao mais restrito: o primeiro que a pessoa tem é o que o cabeçalho mostra.
-PRECEDENCIA = ("gerente", "supervisor", "avaliador", "apm", "consulta")
+PRECEDENCIA = ("gerente", "supervisor", "avaliador", "operador", "consulta")
 
 ROTULO = {
     "gerente": "Gerente",
     "supervisor": "Supervisor",
     "avaliador": "Avaliador",
-    "apm": "APM",
+    "operador": "Operador",
     "consulta": "Consulta",
 }
 
@@ -93,7 +94,7 @@ def perfis_que_cobrem(perfil: str) -> Tuple[str, ...]:
 
 
 def papeis_do_perfil(perfil: Optional[str]) -> List[str]:
-    """Papéis que um perfil dá, pela hierarquia: 'S' -> ['supervisor', 'avaliador', 'apm']."""
+    """Papéis que um perfil dá, pela hierarquia: 'S' -> ['supervisor', 'avaliador', 'operador']."""
     return [PAPEL_DO_PERFIL[x] for x in perfis_incluidos(perfil) if x in PAPEL_DO_PERFIL]
 
 

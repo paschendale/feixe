@@ -17,7 +17,7 @@ from ..api import ErroApi, campo, inteiro
 from .lotes import uf_de
 
 # Quem pode ter carga atribuída. Consulta só olha.
-EXECUTORES = ("apm", "avaliador", "supervisor")
+EXECUTORES = ("operador", "avaliador", "supervisor")
 
 
 def _no_qgis(ctx, nome: str, *args) -> None:

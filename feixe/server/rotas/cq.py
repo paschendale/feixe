@@ -106,7 +106,7 @@ def focar_amostra(ctx, id_amostra: int) -> Dict:
 
 
 def ciente(ctx, uuid: str) -> Dict:
-    """Ciência do APM numa ocorrência (rota e barra do Feixe): grava no workspace e avisa o painel e as camadas."""
+    """Ciência do operador numa ocorrência (rota e barra do Feixe): grava no workspace e avisa o painel e as camadas."""
     ctx.exigir_pronto()
     with ctx.local() as ex:
         res = lq.ciente(ex, uuid)

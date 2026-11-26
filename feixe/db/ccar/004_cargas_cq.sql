@@ -124,7 +124,7 @@ CREATE INDEX IF NOT EXISTS cq_amostra_plano_idx ON mapcartacomp.cq_amostra (id_c
 CREATE INDEX IF NOT EXISTS cq_amostra_atualizado_em_idx ON mapcartacomp.cq_amostra (uf, atualizado_em);
 
 -- Ocorrência de inspeção: ponto registrado pelo avaliador. "tratado" é marcado na correção de inspeção; "ciente" é a
--- ciência do APM que errou.
+-- ciência do operador que errou.
 CREATE TABLE IF NOT EXISTS mapcartacomp.cq_inspecao (
     id serial PRIMARY KEY,
     uuid uuid NOT NULL UNIQUE,
@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.cq_inspecao (
 );
 
 COMMENT ON COLUMN mapcartacomp.cq_inspecao.ciente_em IS
-    'Quando o APM autor da passagem avaliada deu ciência da ocorrência. Ciência não é correção: quem corrige é a '
+    'Quando o operador autor da passagem avaliada deu ciência da ocorrência. Ciência não é correção: quem corrige é a '
     'correção de inspeção ou a revisão seguinte.';
 
 COMMENT ON COLUMN mapcartacomp.cq_inspecao.id_carga_trabalho IS
@@ -160,7 +160,7 @@ COMMENT ON COLUMN mapcartacomp.cq_inspecao.id_lote_etapa IS
     'revisão seguinte fica às cegas (D-66): só vê as ocorrências se a sua passagem tem expor_ocorrencias.';
 COMMENT ON COLUMN mapcartacomp.cq_inspecao.id_carga_avaliada IS
     'Carga de produção que a ocorrência aponta: a que contém o ponto na passagem que conta revisão avaliada por esta '
-    'passagem de CQ (mesma revisão). O responsável dela é o APM autor, que dá ciência. Nula no INSERT = derivada '
+    'passagem de CQ (mesma revisão). O responsável dela é o operador autor, que dá ciência. Nula no INSERT = derivada '
     '(006), porque o avaliador pode registrar offline, sem as cargas dos outros no workspace.';
 COMMENT ON COLUMN mapcartacomp.cq_inspecao.elemento IS
     'Elemento de qualidade da ocorrência (nome da medida no SGBC, como na atividade de CQ). Aberto.';

@@ -1,5 +1,5 @@
 """D3a: o CQ da execução sobre o workspace (core/dados/local/cq.py), sem rede: avaliar a amostra (a carga de CQ conclui
-como pelo gatilho do banco), registrar, editar e apagar ocorrência, ciência do APM autor e a visibilidade do D-66.
+como pelo gatilho do banco), registrar, editar e apagar ocorrência, ciência do operador autor e a visibilidade do D-66.
 
 Cenário: o de tests/sync/conftest.py e, na folha 2534 (lote 1), a passagem de CQ 12 (revisão 1, em andamento) com o
 plano 801 e três cargas de CQ (4001 e 4002 minhas, 4003 de outro avaliador), a revisão seguinte (passagem 13, revisão

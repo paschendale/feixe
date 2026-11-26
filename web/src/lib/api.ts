@@ -67,7 +67,7 @@ export type Folha = {
   ymax: number
 }
 
-export type Papel = 'gerente' | 'supervisor' | 'avaliador' | 'apm' | 'consulta'
+export type Papel = 'gerente' | 'supervisor' | 'avaliador' | 'operador' | 'consulta'
 
 export type Eu = {
   conta: string

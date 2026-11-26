@@ -57,7 +57,7 @@ def _outbox(ws):
 
 
 def test_concluir_grava_no_workspace_acorda_a_sincronizacao_e_avisa(montar, ws):
-    _, ch = montar(["apm"])
+    _, ch = montar(["operador"])
     obj = rc.concluir(ch["ctx"], 1001)
     assert obj["carga"]["id"] == 1001 and obj["carga"]["concluido"] is True
     assert obj["progresso"] == {"id_lote_etapa": 11, "folha_revisao": "2534-1", "total": 3, "concluidas": 1}
@@ -68,13 +68,13 @@ def test_concluir_grava_no_workspace_acorda_a_sincronizacao_e_avisa(montar, ws):
 
 
 def test_recusa_de_desfazer_volta_como_409(montar):
-    r, _ = montar(["apm"])
+    r, _ = montar(["operador"])
     status, obj = r.despachar("POST", "/api/cargas/1001/desfazer", {}, None)
     assert status == 409 and "não está concluída" in obj["erro"]
 
 
 def test_proxima_foca_no_qgis_e_sem_pendente_devolve_nulo(montar):
-    r, ch = montar(["apm"])
+    r, ch = montar(["operador"])
     status, obj = r.despachar("POST", "/api/cargas/proxima", {}, {"referencia": 1001})
     assert status == 200 and obj["carga"]["id"] == 1002 and ch["qgis"] == ["focar_carga"]
     status, obj = r.despachar("POST", "/api/cargas/proxima", {}, {"referencia": 1001, "id_lote": 77})
@@ -82,13 +82,13 @@ def test_proxima_foca_no_qgis_e_sem_pendente_devolve_nulo(montar):
 
 
 def test_sem_qgis_concluir_funciona_e_zoom_nao(montar):
-    r, ch = montar(["apm"], com_qgis=False)
+    r, ch = montar(["operador"], com_qgis=False)
     assert rc.concluir(ch["ctx"], 1001)["carga"]["concluido"] is True
     assert r.despachar("POST", "/api/cargas/1001/zoom", {}, None)[0] == 503
 
 
 def test_lista_resumo_e_por_dia_do_workspace(montar):
-    r, ch = montar(["apm"])
+    r, ch = montar(["operador"])
     status, obj = r.despachar("GET", "/api/cargas", {"situacao": "pendente", "lote_etapa": "11"}, None)
     assert status == 200 and [c["id"] for c in obj["itens"]] == [1001, 1002, 1003]
     assert r.despachar("GET", "/api/cargas", {"situacao": "talvez"}, None)[0] == 400
@@ -104,7 +104,7 @@ def test_lista_resumo_e_por_dia_do_workspace(montar):
 def test_workspace_vazio_mostra_preparando_e_pede_o_pull(montar, tmp_path):
     vazio = Workspace.abrir("dev", USUARIO, "DF", raiz=str(tmp_path / "novo"))
     try:
-        r, ch = montar(["apm"], workspace=vazio)
+        r, ch = montar(["operador"], workspace=vazio)
         status, obj = r.despachar("GET", "/api/cargas/resumo", {}, None)
         assert status == 200 and obj["preparando"] is True and obj["passagens"] == []
         assert r.despachar("GET", "/api/cargas", {}, None)[1] == {"itens": [], "preparando": True}
@@ -117,7 +117,7 @@ def test_workspace_vazio_mostra_preparando_e_pede_o_pull(montar, tmp_path):
 
 
 def test_supervisao_sem_a_ccar_responde_na_hora_com_a_mensagem_certa(montar):
-    r, ch = montar(["supervisor", "apm"], online=lambda: False)
+    r, ch = montar(["supervisor", "operador"], online=lambda: False)
     status, obj = r.despachar("GET", "/api/equipe", {}, None)
     assert status == 503 and obj["erro"] == SEM_CCAR
     # A execução continua: o workspace não depende da CCAR.
@@ -139,10 +139,10 @@ def test_identidade_guardada_abre_a_execucao_offline():
     def consultar(sql, params=None):
         raise psycopg2.OperationalError("could not connect to server")
 
-    guardado = {"conta": USUARIO, "papeis": ["apm"], "uf": "DF"}
+    guardado = {"conta": USUARIO, "papeis": ["operador"], "uf": "DF"}
     ctx = Contexto(consultar=consultar, eu_guardado=lambda: guardado)
     status, eu = criar_roteador(ctx).despachar("GET", "/api/eu", {}, None)
-    assert status == 200 and eu["papeis"] == ["apm"] and eu["offline"] is True
+    assert status == 200 and eu["papeis"] == ["operador"] and eu["offline"] is True
     assert ctx._eu is None  # não fica guardada: quando a CCAR voltar, vale a de lá
     # Sem identidade guardada, a falha de conexão vira a mensagem de "precisa da CCAR".
     status, obj = criar_roteador(Contexto(consultar=consultar)).despachar("GET", "/api/eu", {}, None)
@@ -184,7 +184,7 @@ def test_offline_concluir_responde_na_hora_e_a_pendencia_aparece_no_estado(ws):
             acordar=trab.acordar,
             online=lambda: sinc.online,
         )
-        ctx._eu = {"papeis": ["apm"], "uf": "DF", "perfis": []}
+        ctx._eu = {"papeis": ["operador"], "uf": "DF", "perfis": []}
         r = criar_roteador(ctx)
         t0 = time.monotonic()
         assert rc.concluir(ctx, 1001)["carga"]["concluido"] is True and time.monotonic() - t0 < 0.5
@@ -210,7 +210,7 @@ def _ctx_edicao(ws, eventos=None, acordar=None):
         publicar=lambda e, d: (eventos if eventos is not None else []).append((e, d)),
         acordar=(acordar if acordar is not None else []).append,
     )
-    ctx._eu = {"papeis": ["apm"], "uf": "DF", "perfis": []}
+    ctx._eu = {"papeis": ["operador"], "uf": "DF", "perfis": []}
     return ctx
 
 

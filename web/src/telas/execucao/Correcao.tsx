@@ -91,7 +91,7 @@ function Tabela({ f, acoes }: { f: FolhaCorrecao; acoes: ReturnType<typeof useTr
           <th>Revisão</th>
           <th>Anotação</th>
           <th>Avaliador</th>
-          <th>Ciência do APM</th>
+          <th>Ciência do operador</th>
           <th>Situação</th>
           <th />
         </tr>
