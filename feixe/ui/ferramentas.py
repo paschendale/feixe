@@ -1,5 +1,5 @@
 """Ferramentas do Feixe no mapa do QGIS: escolher folhas pelo clique ou pelo retângulo e ler o polígono da seleção
-(B3)."""
+(B3); pôr o ponto de uma ocorrência (D3c)."""
 
 from __future__ import annotations
 
@@ -101,6 +101,56 @@ class FerramentaFolha(QgsMapTool):
 
     def deactivate(self):
         self._limpar_banda()
+        self._inicio = None
+        super().deactivate()
+
+
+class FerramentaPonto(QgsMapTool):
+    """Um ponto no mapa (Registrar ocorrência): o clique devolve as coordenadas em SIRGAS 2000 geográfico; arrastar
+    move o mapa, como a mão do QGIS, para não trocar de ferramenta entre uma ocorrência e outra. Fica ligada até a
+    pessoa trocar de ferramenta (Esc volta para a mão)."""
+
+    ARRASTO_MINIMO = 4  # pixels: menos que isso é clique
+
+    def __init__(self, canvas, ao_clicar: Callable[[float, float], None], ao_sair: Callable[[], None] = None):
+        super().__init__(canvas)
+        self._ao_clicar = ao_clicar
+        self._ao_sair = ao_sair
+        self._inicio = None
+        self._arrastou = False
+        self.setCursor(Qt.CrossCursor)
+
+    def canvasPressEvent(self, e):  # noqa: N802
+        if e.button() == Qt.LeftButton:
+            self._inicio = e.pos()
+            self._arrastou = False
+
+    def canvasMoveEvent(self, e):  # noqa: N802
+        if self._inicio is None or not (e.buttons() & Qt.LeftButton):
+            return
+        if not self._arrastou and (e.pos() - self._inicio).manhattanLength() < self.ARRASTO_MINIMO:
+            return
+        self._arrastou = True
+        self.canvas().panAction(e)
+
+    def canvasReleaseEvent(self, e):  # noqa: N802
+        if e.button() != Qt.LeftButton or self._inicio is None:
+            return
+        self._inicio = None
+        if self._arrastou:
+            self.canvas().panActionEnd(e.pos())
+            return
+        ponto = self.toMapCoordinates(e.pos())
+        origem = self.canvas().mapSettings().destinationCrs()
+        if origem != SIRGAS:
+            ponto = QgsCoordinateTransform(origem, SIRGAS, QgsProject.instance()).transform(ponto)
+        self._ao_clicar(ponto.x(), ponto.y())
+
+    def keyPressEvent(self, e):  # noqa: N802
+        if e.key() == Qt.Key_Escape and self._ao_sair is not None:
+            self._ao_sair()
+
+    def deactivate(self):
         self._inicio = None
         super().deactivate()
 

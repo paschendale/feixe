@@ -16,7 +16,7 @@ _LINHA = {"id_tema": 1, "tema": "Hidrografia", "fase": "aquisicao", "ordem_fase"
           "concluidas": 1}  # fmt: skip
 # Do workspace: as cargas abertas de u_apm são da atividade 100, na passagem 11.
 EXECUCAO = [{"chave": "a-100", "rotulo": "Aquisição BC100 - Hidrografia", "id_tema": 1, "tema": "Hidrografia",
-             "fase": "aquisicao", "atividades": [100]}]  # fmt: skip
+             "fase": "aquisicao", "atividades": [100], "expor_ocorrencias": False}]  # fmt: skip
 
 
 class _Ex(Executor):

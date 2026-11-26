@@ -22,3 +22,26 @@ def test_cq_agrupado_por_tema_e_ordem_sem_acento():
         ("CQ · Hidrografia", [5]),
         ("Aquisição BC100 - LML", [15]),
     ]
+
+
+def test_plano_execucao_cq_sempre_em_subgrupo_e_so_o_primeiro_elemento_ligado():
+    from feixe.core.dados.local.grupos import plano_execucao
+
+    elementos = [{"id_atividade": 6, "elemento": "Comissão"}, {"id_atividade": 5, "elemento": "Omissão"}]
+    cq = {"chave": "cq-1", "rotulo": "CQ · Hidrografia", "fase": "cq", "atividades": [5, 6], "elementos": elementos}
+    prod = {"chave": "a-1", "rotulo": "Aquisição BC100 - Hidrografia", "fase": "aquisicao", "atividades": [1]}
+    so_cq = plano_execucao([cq])
+    assert so_cq == [{"tipo": "cq", "rotulo": "CQ · Hidrografia", "atividades": [5, 6], "elementos": [
+        {"id_atividade": 6, "elemento": "Comissão", "visivel": True},
+        {"id_atividade": 5, "elemento": "Omissão", "visivel": False},
+    ]}]  # fmt: skip
+    # Uma atividade de produção só: sem subgrupo intermediário e sem filtro de atividade (D-102).
+    assert plano_execucao([prod]) == [{"tipo": "producao", "rotulo": None, "atividades": None, "correcoes": False}]
+    # Produção e CQ: cada uma no seu subgrupo; a revisão com "incluir correções" ganha Correções a fazer.
+    dois = plano_execucao([dict(prod, expor_ocorrencias=True), cq])
+    assert [(p["tipo"], p["rotulo"], p["atividades"]) for p in dois] == [
+        ("producao", "Aquisição BC100 - Hidrografia", [1]), ("cq", "CQ · Hidrografia", [5, 6]),
+    ]  # fmt: skip
+    assert dois[0]["correcoes"] is True
+    # Ninguém com carga aberta: Minhas cargas vazia, para a barra ter onde mostrar a próxima.
+    assert plano_execucao([]) == [{"tipo": "producao", "rotulo": None, "atividades": None, "correcoes": False}]

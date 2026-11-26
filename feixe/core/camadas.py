@@ -17,6 +17,13 @@ Execução (todos), do workspace:
   passa pelas regras da execução e pela outbox (`core/edicao.py`).
 - Minhas folhas: a view `vw_minhas_folhas` (só leitura), moldura e rótulo das folhas em que a pessoa tem cargas de
   passagens abertas.
+- CQ (D3c), num subgrupo "CQ · tema": por elemento (uma atividade de CQ por medida), Ocorrências - <elemento> (os
+  pontos de `cq_inspecao` nas minhas amostras, pino com a anotação curta) e Amostras - <elemento> (as minhas cargas de
+  CQ com o status da amostra pela view juntada `vw_minhas_amostras_info`: pendente, conforme, não conforme; a amostra
+  atual só com o contorno magenta com halo, como a carga atual). Só o primeiro elemento vem ligado. A avaliação não
+  passa pelo buffer do QGIS: Amostras é só leitura, e Conforme e Não conforme são ações da camada e da barra.
+- Ocorrências para ciência (o APM): as que apontam uma carga minha, ainda sem ciência; só quando houver alguma.
+  Correções a fazer: na revisão planejada com "incluir correções a serem feitas", as não tratadas da folha.
 
 Supervisão (só supervisor, e só com a CCAR respondendo), das passagens abertas dos lotes da UF:
 - Cargas por responsável: uma cor bem distinta por pessoa, estável entre uma montagem e outra.
@@ -58,6 +65,7 @@ from qgis.PyQt.QtGui import QColor
 from .ambiente import Ambiente
 from .dados.cargas import SQL_PASSAGENS_ATUAIS
 from .dados.local import SQL_ABERTAS
+from .dados.local import grupos as lgrupos
 
 GRUPO = "Feixe"
 PASTA_ESTILOS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "estilos")
@@ -109,12 +117,16 @@ def _camada(amb, authcfg, nome, tabela, chave, filtro="", estilo=None) -> QgsVec
 
 # --- camadas do workspace (C4) ----------------------------------------------------------------------------------------
 VW_CARGA_INFO, VW_MINHAS_FOLHAS = "vw_minhas_cargas_info", "vw_minhas_folhas"  # as views de sync/esquema.py
+VW_AMOSTRA_INFO, VW_OCORRENCIA_INFO = "vw_minhas_amostras_info", "vw_ocorrencias_info"
 _EU = "(SELECT valor FROM meta WHERE chave = 'usuario')"  # a conta do workspace, sem citar nada no filtro
 # Colunas técnicas do espelho, fora da tabela de atributos (o formulário já mostra só o que a pessoa usa).
 _OCULTAS = {
     "fid", "uuid", "id_lote_etapa", "id_atividade", "id_cq_plano", "uf", "responsavel", "geocodigo", "criado_em",
     "criado_por", "atualizado_em", "atualizado_por", "xmin", "ymin", "xmax", "ymax", "cx", "cy", "versao_base", "sujo",
     "id_lote", "situacao_etapa", "minhas_na_folha", "minhas_concluidas_na_folha",
+    # CQ (D3c)
+    "id_amostra", "id_carga_trabalho", "id_carga_avaliada", "id_carga_amostra", "tratado_por", "ciente_por",
+    "situacao_cq", "amostras_na_folha", "avaliadas_na_folha", "plano_letra", "plano_nivel", "plano_lqa",
 }  # fmt: skip
 
 
@@ -131,16 +143,26 @@ def do_workspace(camada) -> bool:
     return isinstance(camada, QgsVectorLayer) and camada.providerType() == "ogr"
 
 
+EDITAVEIS = ("minhas_cargas", "ocorrencias")  # papéis cuja edição vai pela outbox (`core/edicao.py`)
+
+
 def editavel_pelo_feixe(camada) -> bool:
-    """Minhas cargas do workspace: a edição dela vai pela outbox (`core/edicao.py`)."""
-    return do_workspace(camada) and camada.customProperty(_PAPEL) == "minhas_cargas"
+    """Minhas cargas e as ocorrências do avaliador, do workspace: a edição delas vai pela outbox
+    (`core/edicao.py`)."""
+    return do_workspace(camada) and camada.customProperty(_PAPEL) in EDITAVEIS
+
+
+def papel(camada) -> Optional[str]:
+    return camada.customProperty(_PAPEL) if isinstance(camada, QgsVectorLayer) else None
 
 
 def _filtro_minhas(atividades: Optional[List[int]] = None) -> str:
-    """Minhas cargas de passagens abertas (e das atividades do subgrupo), sobre o workspace."""
+    """Minhas cargas de passagens abertas (e das atividades do subgrupo), sobre o workspace. As cargas de CQ (as
+    amostras) ficam nas camadas do CQ."""
     extra = f" AND id_atividade IN ({_em(atividades)})" if atividades else ""
     return (
-        f"responsavel = {_EU} AND id_lote_etapa IN (SELECT id FROM lote_etapa WHERE situacao IN {SQL_ABERTAS}){extra}"
+        f"responsavel = {_EU} AND id_cq_plano IS NULL "
+        f"AND id_lote_etapa IN (SELECT id FROM lote_etapa WHERE situacao IN {SQL_ABERTAS}){extra}"
     )
 
 
@@ -154,13 +176,13 @@ def _filtro_minhas_folhas(atividades: Optional[List[int]] = None) -> str:
     )
 
 
-def _juntar_info(camada: QgsVectorLayer, info: QgsVectorLayer) -> None:
+def _juntar_info(camada: QgsVectorLayer, info: QgsVectorLayer, chave: str = "id") -> None:
     """Folha, etapa, atividade e progresso da pessoa na folha, da view, em memória (uma leitura da view por recarga;
     sem o cache, cada feição faria uma consulta e a tabela de atributos levaria dezenas de segundos)."""
     j = QgsVectorLayerJoinInfo()
     j.setJoinLayer(info)
-    j.setJoinFieldName("id")
-    j.setTargetFieldName("id")
+    j.setJoinFieldName(chave)
+    j.setTargetFieldName(chave)
     j.setPrefix("")
     j.setUsingMemoryCache(True)
     j.setEditable(False)
@@ -279,9 +301,102 @@ def carga_atual() -> Optional[int]:
         return None
 
 
+# --- CQ: amostras e ocorrências (D3c) --------------------------------------------------------------------------------
+VAR_AMOSTRA = "feixe_amostra_atual"  # a amostra atual (a carga de CQ), separada da carga atual da produção
+_AMOSTRA_ATUAL = f'coalesce("id" = to_int(@{VAR_AMOSTRA}), false)'
+PINO = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icones", "pino.svg")
+COR_OCORRENCIA = {"ocorrencias": "#FF3B30", "ocorrencias_ciencia": "#FF9F0A", "correcoes": "#FFD60A"}
+NOME_CIENCIA, NOME_CORRECOES = "Ocorrências para ciência", "Correções a fazer"
+
+
+def estilo_amostras(camada: QgsVectorLayer) -> None:
+    """No espírito do executor (D-101), para avaliar sobre a imagem: a amostra atual só com o contorno magenta com
+    halo; pendentes com hachura amarela espaçada; conformes com hachura verde densa; não conformes com hachura cruzada
+    vermelha, que se vê de longe. O status vem da view juntada (texto no OGR: `to_int`)."""
+    status = 'to_int("status")'
+    regras = [
+        ("Amostra atual", _AMOSTRA_ATUAL, _simbolo(_contorno("#FFFFFF", 2.0, 0.85), _contorno("#FF2BD6", 0.9)), True),
+        (
+            "Pendente", f'NOT {_AMOSTRA_ATUAL} AND "status" IS NULL',
+            _simbolo(_hachura("#FFD23F", 45, 3.0, 0.35, 0.9), _contorno("#FFD23F", 0.5)), True,
+        ),
+        (
+            "Conforme", f"NOT {_AMOSTRA_ATUAL} AND {status} = 1",
+            _simbolo(_hachura("#3DDC6A", -45, 1.6, 0.4, 0.9), _contorno("#3DDC6A", 0.5)), True,
+        ),
+        (
+            "Não conforme", f"NOT {_AMOSTRA_ATUAL} AND {status} = 0",
+            _simbolo(
+                _hachura("#FF5A4E", 45, 1.8, 0.4, 0.9), _hachura("#FF5A4E", -45, 1.8, 0.4, 0.9),
+                _contorno("#FF5A4E", 0.6),
+            ),
+            True,
+        ),
+    ]  # fmt: skip
+    camada.setRenderer(_regras(regras))
+
+
+def estilo_ocorrencias(camada: QgsVectorLayer, papel_: str) -> None:
+    """Pino (a ponta no ponto) com contorno branco e a anotação curta ao lado, com halo, para ler sobre a imagem. Cor
+    por quem olha: vermelho para o avaliador, laranja para ciência, amarelo para a lista de correção."""
+    from qgis.core import QgsMarkerSymbol, QgsMarkerSymbolLayer, QgsSvgMarkerSymbolLayer
+
+    pino = QgsSvgMarkerSymbolLayer(PINO, 7.0, 0)
+    pino.setFillColor(QColor(COR_OCORRENCIA.get(papel_, "#FF3B30")))
+    pino.setStrokeColor(QColor("#FFFFFF"))
+    pino.setStrokeWidth(0.4)
+    pino.setVerticalAnchorPoint(QgsMarkerSymbolLayer.Bottom)
+    simbolo = QgsMarkerSymbol()
+    simbolo.changeSymbolLayer(0, pino)
+    camada.setRenderer(QgsSingleSymbolRenderer(simbolo))
+    rot = QgsPalLayerSettings()
+    rot.isExpression = True
+    rot.fieldName = (
+        'CASE WHEN "anotacao" IS NULL OR trim("anotacao") = \'\' THEN "elemento" '
+        'WHEN length("anotacao") > 28 THEN left("anotacao", 27) || \'…\' ELSE "anotacao" END'
+    )
+    fmt = QgsTextFormat()
+    fmt.setSize(9)
+    fmt.setColor(QColor("#1B1B1B"))
+    buf = QgsTextBufferSettings()
+    buf.setEnabled(True)
+    buf.setSize(1.2)
+    buf.setColor(QColor("white"))
+    fmt.setBuffer(buf)
+    rot.setFormat(fmt)
+    rot.dist = 1.5
+    camada.setLabeling(QgsVectorLayerSimpleLabeling(rot))
+    camada.setLabelsEnabled(True)
+
+
+def definir_amostra_atual(id_carga: Optional[int]) -> None:
+    """Marca a amostra atual (variável do projeto; o estilo de Amostras lê dela) e redesenha as camadas de amostras,
+    sem a seleção (a seleção do QGIS pinta por cima do contorno)."""
+    QgsExpressionContextUtils.setProjectVariable(
+        QgsProject.instance(), VAR_AMOSTRA, "" if id_carga is None else id_carga
+    )
+    for camada in camadas_amostras():
+        camada.removeSelection()
+        camada.triggerRepaint()
+
+
+def amostra_atual() -> Optional[int]:
+    v = QgsExpressionContextUtils.projectScope(QgsProject.instance()).variable(VAR_AMOSTRA)
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
 EXECUCAO, SUPERVISAO = "Execução", "Supervisão"
 _PAPEL = "feixe/papel"  # propriedade da camada (e do subgrupo) que diz o que ela é, sem depender do nome
 PAPEL_INFO = "minhas_cargas_info"  # a view juntada a Minhas cargas, no projeto e fora da árvore
+PAPEL_INFO_AMOSTRA, PAPEL_INFO_OCORRENCIA = "amostras_info", "ocorrencias_info"  # as views juntadas do CQ
+_INFOS = {
+    PAPEL_INFO: (VW_CARGA_INFO, "Feixe · minhas cargas (folha e progresso)"),
+    PAPEL_INFO_AMOSTRA: (VW_AMOSTRA_INFO, "Feixe · amostras (status e plano)"),
+    PAPEL_INFO_OCORRENCIA: (VW_OCORRENCIA_INFO, "Feixe · ocorrências (folha e amostra)"),
+}
 MODOS = {"execucao": EXECUCAO, "supervisao": SUPERVISAO}  # modo de trabalho -> subgrupo do grupo Feixe
 
 
@@ -425,18 +540,42 @@ def montar(
         sub.addLayer(camada).setItemVisibilityChecked(visivel)
         carregadas.append(camada)
 
-    # A view de folha e progresso, juntada a cada Minhas cargas: no projeto (para a junção sobreviver a salvar e
-    # abrir o projeto), fora da árvore.
-    info = _camada_gpkg(gpkg, VW_CARGA_INFO, "Feixe · minhas cargas (folha e progresso)")
-    info.setCustomProperty(_PAPEL, PAPEL_INFO)
-    projeto.addMapLayer(info, False)
+    # As views juntadas (folha e progresso de Minhas cargas; status e plano das amostras; folha e amostra das
+    # ocorrências): no projeto (para a junção sobreviver a salvar e abrir o projeto), fora da árvore, e só as usadas.
+    infos = _Infos(gpkg)
 
     execucao = grupo.addGroup(EXECUCAO)
-    for g in grupos_execucao or [None]:
-        sub = execucao if len(grupos_execucao) <= 1 else execucao.addGroup(g["rotulo"])
-        atividades = g["atividades"] if g and len(grupos_execucao) > 1 else None
+    ciencia = camada_ciencia_nova(gpkg, infos)
+    if ciencia is not None:
+        por(execucao, ciencia, "ocorrencias_ciencia")
+    for spec in lgrupos.plano_execucao(grupos_execucao or []):
+        sub = execucao if spec["rotulo"] is None else execucao.addGroup(spec["rotulo"])
+        atividades = spec["atividades"]
+        if spec["tipo"] == "cq":
+            sub.setCustomProperty(_PAPEL, "cq")
+            for e in spec["elementos"]:
+                oc = _camada_ocorrencias(gpkg, infos, f"Ocorrências - {e['elemento']}", "ocorrencias",
+                                         lgrupos.filtro_ocorrencias(e["id_atividade"]))  # fmt: skip
+                por(sub, oc, "ocorrencias", e["visivel"])
+                am = _camada_gpkg(gpkg, "carga_trabalho", f"Amostras - {e['elemento']}",
+                                  lgrupos.filtro_amostras(e["id_atividade"]))  # fmt: skip
+                _juntar_info(am, infos.de(PAPEL_INFO_AMOSTRA))
+                estilo_amostras(am)
+                formularios.amostras(am)
+                _esconder_colunas(am)
+                am.setReadOnly(True)  # a avaliação vai pelas ações (camada e barra), nunca pelo buffer do QGIS
+                por(sub, am, "amostras", e["visivel"])
+            folhas = _camada_gpkg(gpkg, VW_MINHAS_FOLHAS, "Minhas folhas", _filtro_minhas_folhas(atividades))
+            _estilo_minhas_folhas(folhas)
+            formularios.folhas_cq(folhas)
+            por(sub, folhas, "minhas_folhas")
+            continue
+        if spec["correcoes"]:
+            corr = _camada_ocorrencias(gpkg, infos, NOME_CORRECOES, "correcoes",
+                                       lgrupos.filtro_correcoes(atividades))  # fmt: skip
+            por(sub, corr, "correcoes", _contar(corr) > 0)
         minhas = _camada_gpkg(gpkg, "carga_trabalho", "Minhas cargas", _filtro_minhas(atividades))
-        _juntar_info(minhas, info)
+        _juntar_info(minhas, infos.de(PAPEL_INFO))
         estilo_minhas(minhas)
         formularios.minhas_cargas(minhas)
         _esconder_colunas(minhas)
@@ -490,8 +629,88 @@ def montar(
 
 
 def _auxiliares() -> List[QgsVectorLayer]:
-    """Camadas do Feixe fora da árvore (a view juntada a Minhas cargas)."""
-    return [c for c in QgsProject.instance().mapLayers().values() if c.customProperty(_PAPEL) == PAPEL_INFO]
+    """Camadas do Feixe fora da árvore (as views juntadas)."""
+    return [c for c in QgsProject.instance().mapLayers().values() if c.customProperty(_PAPEL) in _INFOS]
+
+
+class _Infos:
+    """As views juntadas de uma montagem, criadas na primeira vez que uma camada pede (ou reaproveitadas do projeto,
+    quando a camada nasce depois da montagem: ocorrências para ciência que chegaram pela sincronização)."""
+
+    def __init__(self, gpkg: str):
+        self.gpkg = gpkg
+        self._camadas: Dict[str, QgsVectorLayer] = {}
+
+    def de(self, papel_: str) -> QgsVectorLayer:
+        if papel_ not in self._camadas:
+            existente = next((c for c in _auxiliares() if c.customProperty(_PAPEL) == papel_), None)
+            if existente is not None:
+                self._camadas[papel_] = existente
+            else:
+                vw, nome = _INFOS[papel_]
+                info = _camada_gpkg(self.gpkg, vw, nome)
+                info.setCustomProperty(_PAPEL, papel_)
+                QgsProject.instance().addMapLayer(info, False)
+                self._camadas[papel_] = info
+        return self._camadas[papel_]
+
+
+def _camada_ocorrencias(gpkg: str, infos: _Infos, nome: str, papel_: str, filtro: str) -> QgsVectorLayer:
+    from . import formularios
+
+    camada = _camada_gpkg(gpkg, "cq_inspecao", nome, filtro)
+    _juntar_info(camada, infos.de(PAPEL_INFO_OCORRENCIA), "uuid")
+    estilo_ocorrencias(camada, papel_)
+    formularios.ocorrencias(camada, papel_)
+    _esconder_colunas(camada)
+    if papel_ != "ocorrencias":
+        camada.setReadOnly(True)  # ciência e correção são só leitura; o Ciente é ação (camada e barra)
+    return camada
+
+
+def camada_ciencia_nova(gpkg: str, infos: Optional[_Infos] = None) -> Optional[QgsVectorLayer]:
+    """Ocorrências para ciência, só se houver alguma (o APM que nunca recebeu ocorrência não ganha camada vazia)."""
+    teste = _camada_gpkg(gpkg, "cq_inspecao", NOME_CIENCIA, lgrupos.FILTRO_CIENCIA)
+    if _contar(teste) == 0:
+        return None
+    return _camada_ocorrencias(gpkg, infos or _Infos(gpkg), NOME_CIENCIA, "ocorrencias_ciencia",
+                               lgrupos.FILTRO_CIENCIA)  # fmt: skip
+
+
+def garantir_ciencia() -> bool:
+    """Depois de uma sincronização: se chegaram ocorrências para a minha ciência e a camada não existe (não havia
+    nenhuma ao montar), ela entra no topo da Execução, ligada. Volta True se criou."""
+    grupo = QgsProject.instance().layerTreeRoot().findGroup(GRUPO)
+    execucao = grupo.findGroup(EXECUCAO) if grupo is not None else None
+    if execucao is None or camada_ciencia() is not None:
+        return False
+    gpkg = _gpkg_do_grupo()
+    if gpkg is None:
+        return False
+    camada = camada_ciencia_nova(gpkg)
+    if camada is None:
+        return False
+    camada.setCustomProperty(_PAPEL, "ocorrencias_ciencia")
+    QgsProject.instance().addMapLayer(camada, False)
+    execucao.insertLayer(0, camada).setItemVisibilityChecked(True)
+    return True
+
+
+def ligar(camada) -> None:
+    """Liga a camada na árvore (a de ciência, quando chegam ocorrências)."""
+    if camada is None:
+        return
+    no = QgsProject.instance().layerTreeRoot().findLayer(camada.id())
+    if no is not None:
+        no.setItemVisibilityChecked(True)
+
+
+def _gpkg_do_grupo() -> Optional[str]:
+    grupo = QgsProject.instance().layerTreeRoot().findGroup(GRUPO)
+    for no in grupo.findLayers() if grupo is not None else []:
+        if do_workspace(no.layer()):
+            return no.layer().source().split("|")[0]
+    return None
 
 
 def modo_atual() -> Optional[str]:
@@ -540,6 +759,63 @@ def camada_minhas() -> Optional[QgsVectorLayer]:
     return camadas[0] if camadas else None
 
 
+def camadas_do_papel(*papeis: str) -> List[QgsVectorLayer]:
+    grupo = QgsProject.instance().layerTreeRoot().findGroup(GRUPO)
+    if grupo is None:
+        return []
+    return [n.layer() for n in grupo.findLayers() if n.layer() is not None and papel(n.layer()) in papeis]
+
+
+def camadas_amostras() -> List[QgsVectorLayer]:
+    return camadas_do_papel("amostras")
+
+
+def camada_ciencia() -> Optional[QgsVectorLayer]:
+    camadas = camadas_do_papel("ocorrencias_ciencia")
+    return camadas[0] if camadas else None
+
+
+def camada_com_amostra(id_carga: int) -> Optional[QgsVectorLayer]:
+    for camada in camadas_amostras():
+        if next(camada.getFeatures(f'"id" = {int(id_carga)}'), None) is not None:
+            return camada
+    return None
+
+
+def amostra_selecionada() -> Optional[int]:
+    """Id da carga de CQ da primeira amostra selecionada (a escolha à mão vale mais que a atual)."""
+    for camada in camadas_amostras():
+        for f in camada.getSelectedFeatures():
+            return int(f["id"])
+    return None
+
+
+def amostra_no_ponto(x: float, y: float) -> Optional[int]:
+    """A amostra minha (carga de CQ de passagem aberta) que contém o ponto, em SIRGAS 2000 geográfico: a atual, se o
+    ponto cai nela; senão a que estiver sob o clique. Fora de todas: None."""
+    from qgis.core import QgsGeometry, QgsPointXY, QgsRectangle
+
+    ponto = QgsGeometry.fromPointXY(QgsPointXY(x, y))
+    pedido = QgsFeatureRequest().setFilterRect(QgsRectangle(x, y, x, y))
+    achadas = []
+    for camada in camadas_amostras():
+        for f in camada.getFeatures(pedido):
+            if f.hasGeometry() and f.geometry().intersects(ponto):
+                achadas.append(int(f["id"]))
+    atual = amostra_atual()
+    if atual in achadas:
+        return atual
+    return achadas[0] if achadas else None
+
+
+def ocorrencia_selecionada(*papeis: str) -> Optional[str]:
+    """Uuid da primeira ocorrência selecionada nas camadas dos papéis (a ciência: Ocorrências para ciência)."""
+    for camada in camadas_do_papel(*(papeis or ("ocorrencias_ciencia",))):
+        for f in camada.getSelectedFeatures():
+            return str(f["uuid"])
+    return None
+
+
 def camada_com_carga(id_carga: int) -> Optional[QgsVectorLayer]:
     for camada in camadas_minhas():
         if next(camada.getFeatures(f'"id" = {int(id_carga)}'), None) is not None:
@@ -575,7 +851,9 @@ def recarregar_cargas(so_workspace: bool = False) -> None:
 
 
 def _renovar_juncoes(camada: QgsVectorLayer, renovadas: set) -> None:
-    """A junção em memória não vê a view mudar: relê a view (uma vez por recarga) e refaz a junção."""
+    """A junção em memória não vê a view mudar: relê a view (uma vez por recarga) e refaz a junção com uma
+    `QgsVectorLayerJoinInfo` nova. Devolver a cópia de `vectorJoins()` não serve: ela leva o cache antigo marcado como
+    limpo, e o QGIS não relê a view (os valores juntados ficavam os da montagem)."""
     for j in camada.vectorJoins():
         info = j.joinLayer()
         if info is None:
@@ -584,7 +862,7 @@ def _renovar_juncoes(camada: QgsVectorLayer, renovadas: set) -> None:
             info.dataProvider().reloadData()
             renovadas.add(info.id())
         camada.removeJoin(j.joinLayerId())
-        camada.addJoin(j)
+        _juntar_info(camada, info, j.targetFieldName())
 
 
 def cargas_selecionadas() -> Dict:

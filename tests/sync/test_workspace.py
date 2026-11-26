@@ -339,6 +339,9 @@ def test_esquema_3_ganha_as_colunas_do_cq_e_rele_as_linhas_limpas(ws):
                                           "responsavel": USUARIO})  # fmt: skip
     conn = ws.conn
     conn.execute("BEGIN IMMEDIATE")
+    for vw in (esquema.VW_AMOSTRA_INFO, esquema.VW_OCORRENCIA_INFO):  # do esquema 6 (D3c); usam as colunas do 4
+        conn.execute(f"DROP VIEW {vw}")
+        conn.execute("DELETE FROM gpkg_contents WHERE table_name = ?", (vw,))
     for indice in ("cq_inspecao_carga_idx", "cq_inspecao_carga_avaliada_idx", "cq_inspecao_lote_etapa_idx"):
         conn.execute(f"DROP INDEX {indice}")
     for tabela, colunas in esquema._COLUNAS_V4.items():

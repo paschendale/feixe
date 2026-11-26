@@ -15,17 +15,22 @@ from qgis.PyQt.QtWidgets import QLabel, QMessageBox
 from .core import ambiente as ambmod
 from .core import camadas, config, db, dispatch, edicao, log
 from .core.dados import ErroDados
+from .core.dados.local import cargas as lc
+from .core.dados.local import cq as lq
+from .core.dados.local import grupos as lgrupos
 from .core.versao import raiz_plugin, versao_plugin
 from .server.api import Contexto, ErroApi, criar_roteador
 from .server.http import ServidorLocal
 from .server.rotas import camadas as rotas_camadas
 from .server.rotas import cargas as rotas_cargas
+from .server.rotas import cq as rotas_cq
 from .server.sse import Broker
 from .sync import workspace as wsmod
 from .sync.sincronizar import Sincronizacao, aviso_de_rede, hora_local
 from .sync.trabalhador import Trabalhador
-from .ui.barra import BarraFeixe, DialogoCredenciais
-from .ui.ferramentas import FerramentaFolha, SemSelecao, selecao_wkt
+from .ui import regras
+from .ui.barra import BarraFeixe, DialogoCredenciais, pedir_anotacao, pedir_observacao
+from .ui.ferramentas import FerramentaFolha, FerramentaPonto, SemSelecao, selecao_wkt
 
 
 class _Sinais(QObject):
@@ -47,9 +52,7 @@ class FeixePlugin:
         self.broker = Broker()
         # Ações que as rotas pedem ao QGIS, por nome; cada item da fase B registra as suas. Rodam na thread principal.
         self.acoes_qgis = {
-            "montar_camadas": lambda eu, responsaveis, supervisao, execucao, gpkg: camadas.montar(
-                self.amb, config.authcfg_id(self.amb), eu, responsaveis, supervisao, execucao, gpkg
-            ),
+            "montar_camadas": self._montar_no_qgis,
             "focar_carga": self.focar_carga,
             "ferramenta_folhas": self.ligar_ferramenta_folhas,
             "marcar_folhas": self.marcar_folhas,
@@ -58,10 +61,16 @@ class FeixePlugin:
             "cargas_geradas": self.cargas_geradas,
             "selecao_wkt": self.selecao_wkt,
             "cargas_mudaram": self.cargas_mudaram,
+            "focar_amostra": self.focar_amostra,
         }
         self.barra = None
         self.rotulo_status = None
         self.ferramenta_folha = None
+        self.ferramenta_ponto = None  # Registrar ocorrência (D3c)
+        # Diálogos mínimos do CQ, trocáveis nos testes (headless não abre diálogo).
+        self.pedir_observacao = lambda atual="": pedir_observacao(self.iface.mainWindow(), atual)
+        self.pedir_anotacao = lambda elemento="", folha="": pedir_anotacao(self.iface.mainWindow(), elemento, folha)
+        self._cq = None  # último estado do CQ visto pela barra (amostras, pendentes, ciência)
         self._malha = None  # {no_feixe, escolhidas} da malha de escolher folhas, enquanto ela está no mapa
         # Cargas puladas, por passagem (id_lote_etapa), na ordem em que foram puladas. Só na memória (D-102): voltam
         # quando o QGIS reabre ou quando acabam as não puladas da folha.
@@ -107,6 +116,11 @@ class FeixePlugin:
         self.barra.proxima.connect(self.proxima_carga)
         self.barra.pular.connect(self.pular_carga)
         self.barra.concluir.connect(self.concluir_carga)
+        self.barra.proxima_amostra.connect(self.proxima_amostra)
+        self.barra.conforme.connect(lambda: self.avaliar_amostra(None, 1))
+        self.barra.nao_conforme.connect(lambda: self.nao_conforme(None))
+        self.barra.ocorrencia.connect(self.ligar_ferramenta_ocorrencia)
+        self.barra.ciente.connect(lambda: self.ciente(None))
         self.iface.addToolBar(self.barra)
         self.barra.show()  # se a pessoa escondeu a barra, abrir o QGIS de novo a traz de volta
         # Atalhos configuráveis em Configurações > Atalhos de teclado (o QGIS aplica o que a pessoa salvou).
@@ -124,6 +138,7 @@ class FeixePlugin:
         self._ligar_edicao(list(QgsProject.instance().mapLayers().values()))
         self._abrir_workspace_gravado()
         self.iniciar_servidor()
+        self._atualizar_cq()  # as ações do CQ na barra, pelo workspace gravado (offline também)
         self.trabalhador.iniciar()
         self.verificar_rede()
         self._timer.start()
@@ -137,6 +152,8 @@ class FeixePlugin:
         self._desligar_edicao()
         self.trabalhador.parar()
         self.fim_folhas()
+        if self.ferramenta_ponto is not None and self.iface.mapCanvas().mapTool() is self.ferramenta_ponto:
+            self.iface.actionPan().trigger()
         if self.servidor:
             self.servidor.parar()
             self.servidor = None
@@ -154,6 +171,12 @@ class FeixePlugin:
             self.rotulo_status.deleteLater()
             self.rotulo_status = None
         dispatch.encerrar()
+
+    def _montar_no_qgis(self, eu, responsaveis, supervisao, execucao, gpkg):
+        """A montagem pedida pela barra ou pelo painel: o grupo Feixe e, junto, as ações do CQ na barra."""
+        r = camadas.montar(self.amb, config.authcfg_id(self.amb), eu, responsaveis, supervisao, execucao, gpkg)
+        self._atualizar_cq()
+        return r
 
     # --- servidor local ------------------------------------------------------------------------
     def iniciar_servidor(self):
@@ -354,6 +377,7 @@ class FeixePlugin:
             # O push levou e o pull trouxe: as camadas do workspace mostram o que veio da CCAR (outra pessoa, o
             # supervisor, a recusa que desfez o local) e as da supervisão, o que o push gravou lá.
             camadas.recarregar_cargas()
+            self._atualizar_cq()
         for aviso in est.get("avisos") or []:
             self.iface.messageBar().pushMessage("Feixe", aviso, Qgis.Warning, 10)
 
@@ -449,7 +473,8 @@ class FeixePlugin:
         voltam à rotação antes de passar para outra folha."""
 
         def excluir():
-            return [i for ids in self.puladas.values() for i in ids]
+            # As amostras de CQ andam por "Próxima amostra", não por "Próxima carga".
+            return [i for ids in self.puladas.values() for i in ids] + self._ler(lgrupos.cargas_cq_pendentes, [])
 
         le, lote = self._passagem_atual
         if id_lote is None and self.puladas.get(le):
@@ -552,8 +577,17 @@ class FeixePlugin:
     def focar_carga(self, carga, progresso):
         """Faz dela a carga atual (contorno magenta) sem mudar a escala de quem trabalha: se ela já está inteira na
         tela, o mapa não se move; senão, centraliza nela. Depois pisca a carga para chamar o olho (D-102)."""
+        if camadas.camada_com_amostra(carga["id"]) is not None:
+            # Uma carga de CQ (o painel pede "focar_carga" também para a amostra): vira a amostra atual.
+            self.focar_amostra(carga, progresso)
+            return
         camadas.definir_atual(carga["id"])
         self._passagem_atual = (carga.get("id_lote_etapa"), carga.get("id_lote"))
+        self._enquadrar(carga, camadas.camada_com_carga(carga["id"]))
+        self.mostrar_progresso(progresso, False)
+
+    def _enquadrar(self, carga, camada):
+        """Sem mudar a escala (D-102): centraliza só se a carga não está inteira na tela; depois pisca a carga."""
         canvas = self.iface.mapCanvas()
         destino = canvas.mapSettings().destinationCrs()
         ret = QgsRectangle(carga["xmin"], carga["ymin"], carga["xmax"], carga["ymax"])
@@ -563,18 +597,231 @@ class FeixePlugin:
         if not canvas.extent().contains(ret):
             canvas.setCenter(ret.center())
             canvas.refresh()
-        camada = camadas.camada_com_carga(carga["id"])
         if camada is not None:
             f = next(camada.getFeatures(f'"id" = {int(carga["id"])}'), None)
             if f is not None:
                 canvas.flashFeatureIds(camada, [f.id()])
-        self.mostrar_progresso(progresso)
 
     def cargas_mudaram(self, progresso, so_workspace=False):
         """Uma rota mudou cargas: na execução (`so_workspace`), as camadas do workspace mostram já, online ou offline;
         na supervisão (na CCAR), todas releem."""
         camadas.recarregar_cargas(so_workspace)
         self.mostrar_progresso(progresso)
+        self._atualizar_cq()
+
+    # --- CQ: amostras, ocorrências e ciência (D3c) ----------------------------------------------------------------
+    # Tudo pelo workspace (D-140), com as funções de `core/dados/local/cq.py` e as rotas de `server/rotas/cq.py`: a
+    # barra e as ações das camadas fazem o mesmo que o painel. Cada escrita relê só as camadas do workspace e acorda a
+    # sincronização. Na thread principal (a barra, as ações e o `ctx.qgis` chegam todos por ela).
+    def _ler(self, fn, padrao=None, *args):
+        """Leitura do workspace já aberto (sem abrir nada nem ir à CCAR: serve à barra, a qualquer momento)."""
+        if self._ws is None:
+            return padrao
+        try:
+            with self._ws.leitura() as ex:
+                return fn(ex, *args)
+        except Exception as e:  # noqa: BLE001 - o workspace ainda não preparado não impede a barra
+            log.erro(f"{getattr(fn, '__name__', fn)}: {e}")
+            return padrao
+
+    def _atualizar_cq(self):
+        """A barra mostra as ações do CQ só para quem tem o que fazer; ocorrências para ciência que chegaram (pela
+        sincronização) ganham a camada, ligada, e um aviso que diz o que fazer."""
+        est = self._ler(lgrupos.estado_cq, {}) or {}
+        antes, self._cq = self._cq, est
+        if self.barra:
+            self.barra.mostrar_cq(est)
+        n = est.get("ciencia") or 0
+        if not n:
+            return
+        nova = camadas.garantir_ciencia()
+        if not nova and not (antes or {}).get("ciencia"):
+            camadas.ligar(camadas.camada_ciencia())
+        if antes is not None and n > (antes.get("ciencia") or 0):
+            self.iface.messageBar().pushMessage(
+                "Feixe",
+                f"{'Chegou 1 ocorrência' if n == 1 else f'Há {n} ocorrências'} do CQ numa carga sua, na camada "
+                "Ocorrências para ciência. Leia e marque Ciente (barra do Feixe).",
+                Qgis.Info,
+                10,
+            )
+
+    def _para_cq(self) -> bool:
+        """Garante as camadas e o modo executar para quem avalia; sem amostras, diz e não segue."""
+        if not self._pronto():
+            return False
+        if not camadas.camadas_amostras() and self.montar_camadas() is None:
+            return False
+        if camadas.modo_atual() != "execucao":
+            self.trocar_modo("execucao")
+        if not camadas.camadas_amostras():
+            self.iface.messageBar().pushMessage(
+                "Feixe", "Você não tem amostras de CQ em passagens abertas.", Qgis.Info, 5
+            )
+            return False
+        return True
+
+    @staticmethod
+    def _proxima_amostra(ctx, referencia):
+        ctx.exigir_pronto()
+        with ctx.leitura() as ex:
+            r = lq.proxima(ex, referencia)
+            progresso = lc.progresso(ex, r["carga"]["id_lote_etapa"]) if r else None
+        if r:
+            ctx.qgis("focar_amostra", r["carga"], progresso)
+        return {"carga": r["carga"] if r else None, "amostra": r["amostra"] if r else None, "progresso": progresso}
+
+    def proxima_amostra(self):
+        if not self._para_cq():
+            return None
+        r = self._executar(self._proxima_amostra, camadas.amostra_selecionada() or camadas.amostra_atual())
+        if r is not None and r["carga"] is None:
+            self.iface.messageBar().pushMessage(
+                "Feixe", f"Nenhuma amostra pendente. {regras.FIM_DAS_AMOSTRAS}", Qgis.Info, 8
+            )
+        return r
+
+    def focar_amostra(self, carga, progresso):
+        """Faz dela a amostra atual (contorno magenta em Amostras), sem mudar a escala, e pisca."""
+        camadas.definir_amostra_atual(carga["id"])
+        self._enquadrar(carga, camadas.camada_com_amostra(carga["id"]))
+        self.mostrar_progresso(progresso, True)
+
+    def trabalhar_na_amostra(self, id_carga):
+        """Ação da camada Amostras: esta vira a amostra atual."""
+        if not self._para_cq():
+            return
+        r = self._executar(rotas_cargas.uma, int(id_carga))
+        if r is not None:
+            progresso = self._ler(lc.progresso, None, r["id_lote_etapa"])
+            self.focar_amostra(r, progresso)
+
+    @staticmethod
+    def _avaliar(ctx, id_carga, status, observacao):
+        with ctx.leitura() as ex:
+            a = lq.amostra_da_carga(ex, id_carga)
+        if a is None:
+            raise ErroDados("esta carga não é uma amostra de CQ", 404)
+        return rotas_cq.avaliar(ctx, a["id"], status, observacao)
+
+    def avaliar_amostra(self, id_carga=None, status=1, observacao=lq._NADA):
+        """Conforme e Não conforme (barra e ação da camada): avalia a amostra atual, ou a selecionada, ou a da ação, e
+        já vai para a próxima (D-136); na última, diz que acabou e o que vem depois."""
+        if not self._para_cq():
+            return None
+        id_carga = id_carga or camadas.amostra_selecionada() or camadas.amostra_atual()
+        if id_carga is None:
+            self.iface.messageBar().pushMessage(
+                "Feixe", "Nenhuma amostra atual: use Próxima amostra ou selecione uma em Amostras.", Qgis.Info, 6
+            )
+            return None
+        r = self._executar(self._avaliar, int(id_carga), int(status), observacao)
+        if r is None:
+            return None
+        self.iface.messageBar().pushMessage("Feixe", regras.mensagem_avaliada(r), Qgis.Success, 6)
+        prox = r.get("proxima")
+        if prox and prox.get("carga"):
+            self.focar_amostra(prox["carga"], self._ler(lc.progresso, None, prox["carga"]["id_lote_etapa"]))
+        else:
+            camadas.definir_amostra_atual(None)
+            self.mostrar_progresso(r.get("progresso"), True)
+        return r
+
+    def nao_conforme(self, id_carga=None):
+        """Não conforme com uma observação curta opcional (diálogo mínimo; cancelar não avalia)."""
+        if not self._para_cq():
+            return None
+        id_carga = id_carga or camadas.amostra_selecionada() or camadas.amostra_atual()
+        atual = self._ler(lq.amostra_da_carga, None, int(id_carga)) if id_carga else None
+        obs = self.pedir_observacao((atual or {}).get("observacao") or "")
+        if obs is None:
+            return None
+        return self.avaliar_amostra(id_carga, 0, obs)
+
+    def ligar_ferramenta_ocorrencia(self):
+        """Barra: liga (ou desliga, se já ligada) a ferramenta de ponto para registrar ocorrências."""
+        canvas = self.iface.mapCanvas()
+        if self.ferramenta_ponto is not None and canvas.mapTool() is self.ferramenta_ponto:
+            self.iface.actionPan().trigger()
+            return
+        if not self._para_cq():
+            if self.barra:
+                self.barra.acao_ocorrencia.setChecked(False)
+            return
+        if self.ferramenta_ponto is None:
+            self.ferramenta_ponto = FerramentaPonto(
+                canvas, self.ocorrencia_no_ponto, lambda: self.iface.actionPan().trigger()
+            )
+            if self.barra:
+                self.ferramenta_ponto.setAction(self.barra.acao_ocorrencia)
+        canvas.setMapTool(self.ferramenta_ponto)
+        self.iface.messageBar().pushMessage(
+            "Feixe",
+            "Clique dentro da amostra para registrar a ocorrência no ponto. Arrastar move o mapa; Esc desliga.",
+            Qgis.Info,
+            6,
+        )
+
+    def ocorrencia_no_ponto(self, x, y):
+        """Clique da ferramenta (SIRGAS 2000 geográfico): o ponto vai na amostra atual, se cai nela, ou na amostra sob
+        o clique; fora de todas as minhas, recusa com o motivo. A anotação vem de um diálogo mínimo."""
+        id_carga = camadas.amostra_no_ponto(x, y)
+        if id_carga is None:
+            self.iface.messageBar().pushMessage("Feixe", regras.FORA_DAS_AMOSTRAS, Qgis.Warning, 8)
+            return None
+        a = self._ler(lq.amostra_da_carga, None, id_carga) or {}
+        anotacao = self.pedir_anotacao(a.get("elemento") or "", a.get("folha_revisao") or "")
+        if anotacao is None:
+            return None
+        r = self._executar(rotas_cq.registrar_ocorrencia, x, y, id_carga, anotacao or None)
+        if r is None:
+            return None
+        camadas.definir_amostra_atual(id_carga)
+        self.iface.messageBar().pushMessage("Feixe", regras.mensagem_ocorrencia(r), Qgis.Success, 6)
+        return r
+
+    @staticmethod
+    def _ciente(ctx, uuid):
+        ctx.exigir_pronto()
+        with ctx.local() as ex:
+            r = lq.ciente(ex, uuid)
+        rotas_cq._mudou_cq(ctx, {"ocorrencia": uuid, "ciente": True})
+        return r
+
+    def ciente(self, uuid=None):
+        """Ciente (barra e ação da camada) na ocorrência selecionada em Ocorrências para ciência. Sem seleção, não dá
+        ciência às cegas: seleciona e mostra a primeira, para a pessoa ler e confirmar."""
+        if not self._pronto():
+            return None
+        uuid = uuid or camadas.ocorrencia_selecionada("ocorrencias_ciencia")
+        if uuid is None:
+            camada = camadas.camada_ciencia()
+            f = next(camada.getFeatures(), None) if camada is not None else None
+            if f is None:
+                self.iface.messageBar().pushMessage(
+                    "Feixe", "Nenhuma ocorrência esperando a sua ciência.", Qgis.Info, 5
+                )
+                return None
+            camada.selectByIds([f.id()])
+            p = f.geometry().asPoint()
+            self._enquadrar({"id": f["id"] or 0, "xmin": p.x(), "ymin": p.y(), "xmax": p.x(), "ymax": p.y()}, None)
+            self.iface.mapCanvas().flashFeatureIds(camada, [f.id()])
+            anotacao = f["anotacao"] if f["anotacao"] not in (None, "") else "(sem anotação)"
+            self.iface.messageBar().pushMessage(
+                "Feixe",
+                f"Ocorrência de {f['elemento']}: {anotacao}. Leia no mapa e clique Ciente de novo para registrar.",
+                Qgis.Info,
+                10,
+            )
+            return None
+        r = self._executar(self._ciente, str(uuid))
+        if r is None:
+            return None
+        restantes = (self._cq or {}).get("ciencia") or 0
+        self.iface.messageBar().pushMessage(
+            "Feixe", regras.mensagem_ciente(r["ocorrencia"], restantes), Qgis.Success, 6
+        )
+        return r
 
     # --- edição pela tabela de atributos e pelo formulário (C4) ---------------------------------------------------
     def _ligar_edicao(self, novas):
@@ -600,6 +847,9 @@ class FeixePlugin:
     def _antes_de_gravar(self, camada):
         """O QGIS vai gravar a edição de Minhas cargas: a mudança sai do buffer (o OGR não grava nada) e vai pelo
         caminho da barra, com as regras e a outbox (`core/edicao.py`)."""
+        if camadas.papel(camada) == "ocorrencias":
+            self._antes_de_gravar_ocorrencias(camada)
+            return
         desejadas, outras = edicao.ler(camada)
         if not edicao.esvaziar(camada):
             log.erro("edição de Minhas cargas: o buffer não esvaziou; o workspace vai recusar a gravação do OGR")
@@ -622,6 +872,39 @@ class FeixePlugin:
         # Depois do commit (a camada ainda está no meio dele): as camadas do workspace mostram o que ficou valendo.
         QTimer.singleShot(0, lambda: self._depois_de_gravar(camada, r))
 
+    @staticmethod
+    def _editar_ocorrencia(ctx, uuid, anotacao):
+        """Sem tocar no QGIS: a camada está no meio do commit (quem chama recarrega depois)."""
+        ctx.exigir_pronto()
+        with ctx.local() as ex:
+            r = lq.editar(ex, uuid, anotacao)
+        ctx.publicar("cq", {"ocorrencia": uuid})
+        return r
+
+    def _antes_de_gravar_ocorrencias(self, camada):
+        """Ocorrências do avaliador (D3c): só a anotação muda pelo QGIS, e vai por `lq.editar` (só a própria, com a
+        passagem de CQ aberta); o resto sai do buffer com aviso."""
+        desejadas, outras = edicao.ler(camada, "anotacao", "uuid", edicao.texto)
+        if not edicao.esvaziar(camada):
+            log.erro("edição de ocorrências: o buffer não esvaziou; o workspace vai recusar a gravação do OGR")
+        if outras:
+            self.iface.messageBar().pushMessage(
+                "Feixe",
+                "Nas ocorrências só a anotação muda pelo QGIS; as outras mudanças foram desfeitas. Para um ponto novo, "
+                "use Registrar ocorrência na barra do Feixe.",
+                Qgis.Info,
+                8,
+            )
+        feitas = 0
+        if desejadas and self._pronto():
+            for uuid, anotacao in desejadas.items():
+                if self._executar(self._editar_ocorrencia, uuid, anotacao) is not None:
+                    feitas += 1
+        if feitas:
+            texto = "Anotação gravada." if feitas == 1 else f"{feitas} anotações gravadas."
+            self.iface.messageBar().pushMessage("Feixe", texto, Qgis.Success, 4)
+        QTimer.singleShot(0, lambda: self._depois_de_gravar(camada, None))
+
     def _depois_de_gravar(self, camada, r):
         camadas.recarregar_cargas(so_workspace=True)
         if camada.isEditable():
@@ -632,10 +915,13 @@ class FeixePlugin:
         if r and r.get("progresso"):
             self.mostrar_progresso(r["progresso"])
 
-    def mostrar_progresso(self, progresso):
+    def mostrar_progresso(self, progresso, cq=None):
+        """Barra de status: "Feixe · 2534-1 · 35/93" nas cargas, "Feixe · CQ 2534-1 · 7/20 amostras" no CQ (sem
+        `cq`, pela fase da passagem)."""
         if self.rotulo_status and progresso:
-            p = progresso
-            self.rotulo_status.setText(f"Feixe · {p['folha_revisao']} · {p['concluidas']}/{p['total']}")
+            if cq is None:
+                cq = bool(self._ler(lgrupos.e_cq, False, progresso.get("id_lote_etapa")))
+            self.rotulo_status.setText(regras.texto_status(progresso, cq))
 
     # --- ferramentas de mapa do supervisor (B3, B4) ---------------------------------------------
     def ligar_ferramenta_folhas(self, folhas, no_feixe, escolhidas):

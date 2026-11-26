@@ -48,8 +48,12 @@ def _campo_expressao(camada: QgsVectorLayer, nome: str, rotulo: str, expressao: 
 Item = Union[str, Tuple]
 
 
-def _formulario(camada: QgsVectorLayer, grupos: List[Tuple], editaveis: Tuple[str, ...] = ()) -> None:
-    """Formulário em grupos (arrastar e soltar), só com os campos listados; o resto fica fora. Só `editaveis` editam."""
+def _formulario(
+    camada: QgsVectorLayer, grupos: List[Tuple], editaveis: Tuple[str, ...] = (), acoes: Tuple = ()
+) -> None:
+    """Formulário em grupos (arrastar e soltar), só com os campos listados; o resto fica fora. Só `editaveis` editam.
+    `acoes` (QgsAction já na camada) viram botões num grupo "Ações" no fim, onde o QGIS tem o widget de ação no
+    formulário (`QgsAttributeEditorAction`); sem ele, continuam no menu de ações do identificar e do clique direito."""
     cfg = camada.editFormConfig()
     cfg.setLayout(QgsEditFormConfig.TabLayout)
     cfg.clearTabs()
@@ -65,18 +69,29 @@ def _formulario(camada: QgsVectorLayer, grupos: List[Tuple], editaveis: Tuple[st
         for nome in campos:
             g.addChildElement(QgsAttributeEditorField(nome, camada.fields().indexOf(nome), g))
         aba.addChildElement(g)
+    if acoes:
+        try:
+            from qgis.core import QgsAttributeEditorAction
+        except ImportError:  # QGIS sem o widget de ação no formulário
+            QgsAttributeEditorAction = None  # noqa: N806
+        if QgsAttributeEditorAction is not None:
+            g = QgsAttributeEditorContainer("Ações", aba)
+            g.setIsGroupBox(True)
+            for a in acoes:
+                g.addChildElement(QgsAttributeEditorAction(a, g))
+            aba.addChildElement(g)
     cfg.addTab(aba)
     for i, f in enumerate(camada.fields()):
         cfg.setReadOnly(i, f.name() not in editaveis)
     camada.setEditFormConfig(cfg)
 
 
-def _acao(camada: QgsVectorLayer, titulo: str, chamada: str) -> None:
+def _acao(camada: QgsVectorLayer, titulo: str, chamada: str) -> QgsAction:
     """Ação Python da camada (clique direito no formulário, identificar e tabela; ferramenta de ações no mapa)."""
     codigo = f"from qgis.utils import plugins\nplugins['feixe'].{chamada}"
-    camada.actions().addAction(
-        QgsAction(QgsAction.GenericPython, titulo, codigo, "", False, titulo, {"Feature", "Canvas"})
-    )
+    acao = QgsAction(QgsAction.GenericPython, titulo, codigo, "", False, titulo, {"Feature", "Canvas", "Form"})
+    camada.actions().addAction(acao)
+    return acao
 
 
 # --- APM: Minhas cargas -----------------------------------------------------------------------------------------------
@@ -207,3 +222,117 @@ def folhas_supervisao(camada: QgsVectorLayer) -> None:
         "[% coalesce(\"responsavel_nome\", 'sem responsável') %]"
     )
     _acao(camada, "Abrir no Feixe", 'abrir_folha([% "id_lote" %])')
+
+
+# --- CQ: amostras do avaliador (D3c) ----------------------------------------------------------------------------------
+# A camada é a `carga_trabalho` do workspace (as minhas cargas de CQ) com a view `vw_minhas_amostras_info` juntada pelo
+# `id`; tudo só leitura (a camada também): avaliar é ação da camada e da barra, que vão pela outbox (D-127).
+_STATUS_AMOSTRA = (
+    "CASE WHEN \"status\" IS NULL THEN 'pendente' WHEN to_int(\"status\") = 1 THEN 'conforme' ELSE 'não conforme' END"
+)
+
+
+def amostras(camada: QgsVectorLayer) -> None:
+    dias = _DIAS.format(c="avaliado_em")
+    _campo_expressao(
+        camada, "status_txt", "Situação",
+        f"{_STATUS_AMOSTRA} || CASE WHEN \"avaliado_em\" IS NOT NULL THEN ' em ' || "
+        f"format_date(\"avaliado_em\", 'dd/MM/yyyy HH:mm') || CASE WHEN {dias} = 0 THEN ' (hoje)' "
+        f"WHEN {dias} = 1 THEN ' (ontem)' ELSE ' (há ' || {dias} || ' dias)' END ELSE '' END",
+    )  # fmt: skip
+    _campo_expressao(camada, "folha_txt", "Folha", '"folha_revisao" || \' · \' || "tema"')
+    _campo_expressao(
+        camada, "plano_txt", "Plano",
+        "'n = ' || to_int(\"plano_n\") || ', Ac = ' || to_int(\"plano_ac\") || "
+        "coalesce(' (letra ' || \"plano_letra\" || ', nível ' || \"plano_nivel\" || ', LQA ' || "
+        "format_number(\"plano_lqa\", 1) || '%)', '')",
+    )  # fmt: skip
+    _campo_expressao(
+        camada, "progresso_txt", "Minhas amostras na folha",
+        "to_int(\"avaliadas_na_folha\") || ' de ' || to_int(\"amostras_na_folha\") || ' avaliadas'",
+    )  # fmt: skip
+    _campo_expressao(
+        camada, "ocorrencias_txt", "Ocorrências",
+        "CASE WHEN to_int(\"ocorrencias\") = 0 THEN 'nenhuma' WHEN to_int(\"ocorrencias\") = 1 THEN '1 ocorrência' "
+        "ELSE to_int(\"ocorrencias\") || ' ocorrências' END",
+    )  # fmt: skip
+    for campo, rotulo in (("elemento", "Elemento"), ("observacao", "Observação"), ("etapa", "Etapa"),
+                          ("geocodigo", "Geocódigo da célula"), ("id", "Carga nº")):  # fmt: skip
+        camada.setFieldAlias(camada.fields().indexOf(campo), rotulo)
+    acoes = (
+        _acao(camada, "Trabalhar nesta amostra", 'trabalhar_na_amostra([% "id" %])'),
+        _acao(camada, "Conforme", 'avaliar_amostra([% "id" %], 1)'),
+        _acao(camada, "Não conforme…", 'nao_conforme([% "id" %])'),
+    )
+    _formulario(
+        camada,
+        [
+            ("Amostra", ["elemento", "status_txt", "observacao", "ocorrencias_txt"], None, False),
+            ("Folha", ["folha_txt", "etapa", "plano_txt", "progresso_txt"], None, False),
+            ("Detalhes", ["geocodigo", "id"], None, True),
+        ],
+        acoes=acoes,
+    )
+    camada.setDisplayExpression("'Amostra · ' || \"elemento\" || ' · ' || \"folha_revisao\"")
+    camada.setMapTipTemplate(
+        f'<b>[% "folha_revisao" %]</b> · [% "elemento" %] · [% {_STATUS_AMOSTRA} %]'
+        '<br>Plano: n = [% to_int("plano_n") %], Ac = [% to_int("plano_ac") %] · '
+        '[% to_int("avaliadas_na_folha") %] de [% to_int("amostras_na_folha") %] avaliadas'
+    )
+
+
+def folhas_cq(camada: QgsVectorLayer) -> None:
+    """Minhas folhas no subgrupo do CQ: a moldura das folhas em avaliação, só com folha, tema e etapa."""
+    _campo_expressao(camada, "etapa_txt", "Etapa", f"\"etapa\" || ' · ' || {_SITUACAO.format(c='situacao')}")
+    camada.setFieldAlias(camada.fields().indexOf("folha_revisao"), "Folha")
+    camada.setFieldAlias(camada.fields().indexOf("tema"), "Tema")
+    _formulario(camada, [("Folha", ["folha_revisao", "tema", "etapa_txt"], None, False)])
+    camada.setDisplayExpression("'Folha · ' || \"folha_revisao\"")
+    camada.setMapTipTemplate('<b>[% "folha_revisao" %]</b> · [% "tema" %] · [% "etapa" %]')
+
+
+# --- CQ: ocorrências (D3c) --------------------------------------------------------------------------------------------
+# A camada é a `cq_inspecao` do workspace, com a view `vw_ocorrencias_info` juntada pelo `uuid` (a registrada offline
+# ainda não tem id da CCAR). Do avaliador (`ocorrencias`): só a anotação edita, e a gravação sai do buffer do QGIS e
+# vai pela outbox (`core/edicao.py`). Para ciência (o APM autor) e correção (a revisão com "incluir correções"): tudo só
+# leitura; o Ciente é ação.
+def ocorrencias(camada: QgsVectorLayer, papel: str) -> None:
+    _campo_expressao(camada, "folha_txt", "Folha", "\"folha_revisao\" || coalesce(' · ' || \"tema\", '')")
+    _campo_expressao(
+        camada, "amostra_txt", "Amostra",
+        "coalesce('célula ' || \"amostra_geocodigo\", 'carga ' || to_int(\"id_carga_amostra\"), '—')",
+    )  # fmt: skip
+    _campo_expressao(
+        camada, "registrada_txt", "Registrada",
+        "coalesce(\"responsavel\", '') || coalesce(' em ' || format_date(\"criado_em\", 'dd/MM/yyyy HH:mm'), "
+        "' (ainda não enviada)')",
+    )  # fmt: skip
+    _campo_expressao(
+        camada, "ciencia_txt", "Ciência",
+        "CASE WHEN \"ciente_em\" IS NULL THEN 'ainda sem ciência' "
+        "ELSE 'ciente em ' || format_date(\"ciente_em\", 'dd/MM/yyyy HH:mm') END",
+    )  # fmt: skip
+    for campo, rotulo in (("anotacao", "Anotação"), ("elemento", "Elemento"), ("responsavel", "Avaliador")):
+        camada.setFieldAlias(camada.fields().indexOf(campo), rotulo)
+    acoes: Tuple = ()
+    if papel == "ocorrencias":
+        grupos = [
+            ("Ocorrência", ["anotacao"], None, False),
+            ("Onde", ["elemento", "folha_txt", "amostra_txt"], None, False),
+            ("Detalhes", ["registrada_txt", "ciencia_txt"], None, True),
+        ]
+        editaveis: Tuple[str, ...] = ("anotacao",)
+    else:
+        grupos = [
+            ("Ocorrência", ["anotacao", "elemento"], None, False),
+            ("Onde", ["folha_txt", "amostra_txt"], None, False),
+            ("Avaliação", ["responsavel", "registrada_txt", "ciencia_txt"], None, False),
+        ]
+        editaveis = ()
+        if papel == "ocorrencias_ciencia":
+            acoes = (_acao(camada, "Ciente", "ciente('[% \"uuid\" %]')"),)
+    _formulario(camada, grupos, editaveis=editaveis, acoes=acoes)
+    camada.setDisplayExpression("'Ocorrência · ' || \"elemento\" || ' · ' || \"folha_revisao\"")
+    camada.setMapTipTemplate(
+        '<b>[% "elemento" %]</b> · [% "folha_revisao" %]<br>[% coalesce("anotacao", \'(sem anotação)\') %]'
+    )

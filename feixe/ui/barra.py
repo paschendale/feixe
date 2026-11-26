@@ -2,8 +2,9 @@
 
 Da esquerda para a direita: 1. conectar (o ponto diz o estado da conexão; a dica diz conta e modo), 2. carregar
 camadas (o clique carrega; a seta troca o modo de trabalho, Executar ou Supervisionar), 3. abrir o Feixe no
-navegador (o ícone tem a seta de link externo), 4. próxima carga, 5. pular carga, 6. concluir carga. Tudo o mais
-vive no painel web; a barra é Qt puro e deve continuar pequena.
+navegador (o ícone tem a seta de link externo), 4. próxima carga, 5. pular carga, 6. concluir carga. Depois, só para
+quem tem amostras de CQ (D3c): próxima amostra, conforme, não conforme e registrar ocorrência; e, só com ocorrência
+esperando a ciência, Ciente. Tudo o mais vive no painel web; a barra é Qt puro e deve continuar pequena.
 
 Toda ação tem nome próprio (objectName) e é registrada no QGIS pelo plugin, com atalho padrão que a pessoa troca em
 Configurações > Atalhos de teclado. A dica de cada botão mostra o atalho em uso.
@@ -22,6 +23,7 @@ from qgis.PyQt.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMenu,
@@ -30,6 +32,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.ambiente import Ambiente
+from . import regras
 
 PASTA_ICONES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icones")
 
@@ -90,6 +93,11 @@ class BarraFeixe(QToolBar):
     proxima = pyqtSignal()
     pular = pyqtSignal()
     concluir = pyqtSignal()
+    proxima_amostra = pyqtSignal()
+    conforme = pyqtSignal()
+    nao_conforme = pyqtSignal()
+    ocorrencia = pyqtSignal()
+    ciente = pyqtSignal()
 
     # Atalhos padrão (livres no QGIS 3.40: o QGIS não usa Alt+Shift). Configuráveis no QGIS.
     ATALHOS: Dict[str, str] = {
@@ -102,6 +110,11 @@ class BarraFeixe(QToolBar):
         "proxima": "Alt+Shift+N",
         "pular": "Alt+Shift+P",
         "concluir": "Alt+Shift+C",
+        "proxima_amostra": "Alt+Shift+M",
+        "conforme": "Alt+Shift+K",
+        "nao_conforme": "Alt+Shift+X",
+        "ocorrencia": "Alt+Shift+O",
+        "ciente": "Alt+Shift+I",
     }
 
     TEXTO_SINCRONIZAR = (
@@ -171,6 +184,41 @@ class BarraFeixe(QToolBar):
         self.addAction(self.acao_proxima)
         self.addAction(self.acao_pular)
         self.addAction(self.acao_concluir)
+
+        # CQ (D3c): só aparecem para quem tem o que fazer (`mostrar_cq`), na barra e no menu Complementos > Feixe.
+        self.acoes_cq: Dict[str, QAction] = {
+            "proxima_amostra": self._acao(
+                "proxima_amostra", "proxima_amostra", "Próxima amostra",
+                "Vai para a sua próxima amostra de CQ pendente: ela vira a amostra atual (contorno magenta em "
+                "Amostras) e o mapa a enquadra, sem mudar a escala.", self.proxima_amostra,
+            ),
+            "conforme": self._acao(
+                "conforme", "conforme", "Conforme",
+                "Avalia a amostra atual (ou a selecionada em Amostras) como conforme e já vai para a próxima.",
+                self.conforme,
+            ),
+            "nao_conforme": self._acao(
+                "nao_conforme", "nao_conforme", "Não conforme",
+                "Avalia a amostra atual (ou a selecionada) como não conforme, com uma observação curta opcional, e já "
+                "vai para a próxima.", self.nao_conforme,
+            ),
+            "ocorrencia": self._acao(
+                "ocorrencia", "ocorrencia", "Registrar ocorrência",
+                "Liga a ferramenta de ponto: clique dentro da amostra para registrar a ocorrência ali, com uma "
+                "anotação. Fica ligada para a próxima; Esc ou outra ferramenta desliga.", self.ocorrencia,
+            ),
+            "ciente": self._acao(
+                "ciente", "ciente", "Ciente",
+                "Dá ciência da ocorrência selecionada em Ocorrências para ciência (ou da primeira, sem seleção): o "
+                "avaliador encontrou isto numa carga sua.", self.ciente,
+            ),
+        }  # fmt: skip
+        self.acao_ocorrencia = self.acoes_cq["ocorrencia"]
+        self.acao_ocorrencia.setCheckable(True)
+        self.separador_cq = self.addSeparator()
+        for a in self.acoes_cq.values():
+            self.addAction(a)
+        self.mostrar_cq({})
         self.mostrar_estado("sem_conta")
 
     # --- montagem -------------------------------------------------------------------------------
@@ -208,7 +256,17 @@ class BarraFeixe(QToolBar):
     def todas_acoes(self) -> List[QAction]:
         """Para o plugin registrar no QGIS (atalhos configuráveis) e no menu Complementos > Feixe."""
         return [self.acao_conta, self.acao_verificar, self.acao_camadas, *self.acoes_modo.values(),
-                self.acao_painel, self.acao_proxima, self.acao_pular, self.acao_concluir]  # fmt: skip
+                self.acao_painel, self.acao_proxima, self.acao_pular, self.acao_concluir,
+                *self.acoes_cq.values()]  # fmt: skip
+
+    def mostrar_cq(self, estado: Optional[Dict]) -> Dict[str, bool]:
+        """Mostra as ações do CQ conforme o estado (amostras e ocorrências para ciência, `regras.acoes_visiveis`). A
+        ação escondida some também do menu e o atalho dela não dispara."""
+        vis = regras.acoes_visiveis(estado)
+        for chave, a in self.acoes_cq.items():
+            a.setVisible(vis[chave])
+        self.separador_cq.setVisible(any(vis.values()))
+        return vis
 
     def mostrar_modo(self, chave: Optional[str]) -> None:
         """Marca no menu o modo ligado (None: grupo Feixe ausente)."""
@@ -243,6 +301,21 @@ class BarraFeixe(QToolBar):
         self._sincronizacao = texto
         self._dicas[self.acao_verificar] = ("Sincronizar agora", f"{texto}<br>{self.TEXTO_SINCRONIZAR}")
         self._atualizar_dica(self.acao_verificar)
+
+
+def pedir_observacao(parent=None) -> Optional[str]:
+    """Não conforme: observação curta opcional. None = cancelou (nada é avaliado); texto vazio = sem observação."""
+    texto, ok = QInputDialog.getText(parent, "Não conforme", "Observação (opcional):", QLineEdit.Normal, "")
+    return texto.strip() if ok else None
+
+
+def pedir_anotacao(parent=None, elemento: str = "", folha: str = "") -> Optional[str]:
+    """Registrar ocorrência: a anotação (o que está errado ali). None = cancelou (nada é registrado)."""
+    onde = " · ".join(p for p in (elemento, folha) if p)
+    texto, ok = QInputDialog.getMultiLineText(
+        parent, "Registrar ocorrência", f"Anotação{f' ({onde})' if onde else ''}:", ""
+    )
+    return texto.strip() if ok else None
 
 
 class DialogoCredenciais(QDialog):
