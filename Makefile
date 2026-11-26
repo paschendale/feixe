@@ -33,7 +33,7 @@ web-dev:
 	cd web && pnpm dev
 
 ambiente-dev:
-	python3 -c "import json; d=json.load(open('config/ambientes.json'))['dev']; json.dump(d, open('feixe/ambiente.json','w'), indent=2)"
+	python3 scripts/dev/ambiente_dev.py feixe/ambiente.json
 
 deploy-local: ambiente-dev
 	mkdir -p $(QGIS_PLUGINS)

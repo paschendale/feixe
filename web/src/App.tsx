@@ -42,7 +42,7 @@ function BotaoCamadas() {
   )
 }
 
-// Primeiro e último nome: "Victor dos Santos Marotta" -> "VM".
+// Primeiro e último nome: "Fulana de Tal" -> "FT".
 function iniciais(nome: string) {
   const partes = nome.trim().split(/\s+/)
   return ((partes[0]?.[0] ?? '') + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase()

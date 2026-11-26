@@ -13,7 +13,6 @@ Tudo o que grava no banco é apagado no fim de cada seção.
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import shutil
 import sys
@@ -37,6 +36,7 @@ if os.path.isdir(_PROJ):
 from feixe.core import ambiente, config, db  # noqa: E402
 from feixe.core.dados import ErroDados, novo_uuid  # noqa: E402
 from qgis.core import QgsApplication  # noqa: E402
+from scripts.dev.ambiente_dev import carregar as ambiente_dev_dict  # noqa: E402
 
 SECOES = {}
 S = "mapcartacomp"
@@ -60,8 +60,7 @@ def credencial_dev():
 
 
 def ambiente_dev():
-    with open(os.path.join(RAIZ, "config", "ambientes.json"), encoding="utf-8") as f:
-        return ambiente.de_dict(json.load(f)["dev"])
+    return ambiente.de_dict(ambiente_dev_dict())
 
 
 def ok(msg):

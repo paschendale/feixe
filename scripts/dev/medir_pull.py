@@ -3,7 +3,7 @@
 
 Uso, no Mac, pelo caminho do plugin:
     /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 scripts/dev/medir_pull.py [vezes]
-ou em qualquer Python 3.9+ só com psycopg2 (ex.: num container no disbelief):
+ou em qualquer Python 3.9+ só com psycopg2 (ex.: num container no host de dev):
     python3 scripts/dev/medir_pull.py [vezes]
 
 Mede, em workspaces novos numa pasta temporária (apagada no fim):
@@ -18,7 +18,6 @@ Só lê o banco: nada é gravado na CCAR.
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import shutil
 import statistics
@@ -36,6 +35,7 @@ from feixe.core.dados import ExecutorPg  # noqa: E402
 from feixe.sync import pull  # noqa: E402
 from feixe.sync.sincronizar import Sincronizacao  # noqa: E402
 from feixe.sync.workspace import Workspace  # noqa: E402
+from scripts.dev.ambiente_dev import carregar as ambiente_dev_dict  # noqa: E402
 
 try:
     from feixe.core import ambiente, db
@@ -59,8 +59,7 @@ CONTA, SENHA = urllib.parse.unquote(_u.username), urllib.parse.unquote(_u.passwo
 
 
 def ambiente_dev(**mudar):
-    with open(os.path.join(RAIZ, "config", "ambientes.json"), encoding="utf-8") as f:
-        d = json.load(f)["dev"]
+    d = ambiente_dev_dict()
     d.update(mudar)
     return ambiente.de_dict(d)
 

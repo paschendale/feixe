@@ -19,7 +19,7 @@ MOTIVOS_ESPERADOS = {
     "referência de massa d'água (não executado)",
     "revisão X (fora da conta)",
     "demonstração (SHOW)",
-    "lote de teste (u_3448274)",
+    "lote de teste (rótulo com conta de usuário)",
     "mais da metade da área fora da folha do rótulo",
     "CQ de ADE sem amostra (planejamento incompleto)",
     "CQ sem amostra",

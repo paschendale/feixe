@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Executa no disbelief. Restaura um dump parcial (alguns schemas) num dos bancos de dev, substituindo esses schemas.
+# Executa no host de dev. Restaura um dump parcial (alguns schemas) num dos bancos de dev, substituindo esses schemas.
 # Os schemas listados são removidos (CASCADE) antes; o resto do banco fica como está.
 #
 # Uso: FEIXE_DB_PASSWORD=... restaurar_recorte.sh <feixe-ggc|feixe-ccar> <dump> <pre.sql> <post.sql> <schema,...>

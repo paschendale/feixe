@@ -1,10 +1,10 @@
 {
-  "_comentario": "Banco de cada ambiente, chumbado no build. `make deploy-local` usa `dev`; o release usa o segredo FEIXE_AMBIENTE_HML ou FEIXE_AMBIENTE_PROD (JSON com os mesmos campos) conforme a tag seja rc ou final. Os hosts da CCAR não ficam no repositório.",
+  "_comentario": "Banco de cada ambiente, chumbado no build. `make deploy-local` usa `dev`; o release usa o segredo FEIXE_AMBIENTE_HML ou FEIXE_AMBIENTE_PROD (JSON com os mesmos campos) conforme a tag seja rc ou final. Os hosts da CCAR não ficam no repositório. Em dev, host, porta e banco vêm da URL FEIXE_CCAR do .dev.env (scripts/dev/ambiente_dev.py); sem ela, fica localhost.",
   "dev": {
     "nome": "dev",
     "rotulo": "Desenvolvimento",
     "cor": "#b45309",
-    "host": "disbelief",
+    "host": "localhost",
     "porta": 5434,
     "banco": "gisdb_edgv30",
     "sslmode": "prefer"
