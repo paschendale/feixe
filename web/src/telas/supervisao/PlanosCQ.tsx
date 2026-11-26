@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { Barra, Colunas, COR, RotuloEstavel } from '@/components/painel'
+import { Barra, Colunas, COR, LinkSeta, RotuloEstavel } from '@/components/painel'
 import type { PlanoCQ, PlanosCQ as Planos, PreviaCQ } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { lista, num, plural } from '@/lib/formato'
@@ -294,6 +294,16 @@ export function PlanosCQ({ idLoteEtapa, folha, distribuir }: { idLoteEtapa: numb
           <Button size="sm" className="self-start font-semibold" onClick={() => setDialogo({ alvos: porArea.map((a) => ({ id_atividade: a.id_atividade, nome: a.elemento ?? a.atividade })), refazer: false, inicial: dados.padrao })}>
             Criar os planos de CQ
           </Button>
+        </div>
+      )}
+      {aberta && !dados.planos.length && !dados.sem_plano.length && (
+        <div className="flex flex-col gap-2 rounded-lg bg-[#EEF3FA] px-3.5 py-3 text-[13px] text-[#1C2F4A]">
+          <span>
+            <b>Próximo passo: escolher as medidas de CQ desta etapa.</b> A etapa não tem atividade de CQ no fluxo, então não há o que sortear. Em Supervisão › Fluxos, acrescente as medidas a inspecionar; depois, os planos se criam aqui.
+          </span>
+          <LinkSeta href="#/supervisao/fluxos" className="self-start">
+            Abrir os fluxos
+          </LinkSeta>
         </div>
       )}
       {porFeicao.length > 0 && (

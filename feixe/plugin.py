@@ -659,18 +659,18 @@ class FeixePlugin:
             )
 
     def _para_cq(self) -> bool:
-        """Garante as camadas e o modo executar para quem avalia; sem amostras, diz e não segue."""
+        """Garante as camadas e o modo avaliar para quem avalia; sem amostras, diz e não segue."""
         if not self._pronto():
             return False
         if not camadas.camadas_amostras() and self.montar_camadas() is None:
             return False
-        if camadas.modo_atual() != "execucao":
-            self.trocar_modo("execucao")
         if not camadas.camadas_amostras():
             self.iface.messageBar().pushMessage(
                 "Feixe", "Você não tem amostras de CQ em passagens abertas.", Qgis.Info, 5
             )
             return False
+        if camadas.modo_atual() != "cq":
+            self.trocar_modo("cq")
         return True
 
     @staticmethod
@@ -1122,7 +1122,8 @@ class FeixePlugin:
         return r
 
     def trocar_modo(self, chave):
-        """Seta do botão de camadas: liga o subgrupo do modo (Execução ou Supervisão). Carrega antes se precisar."""
+        """Seta do botão de camadas: liga o subgrupo do modo (Execução, Controle de qualidade ou Supervisão). Carrega
+        antes se precisar."""
         if camadas.modo_atual() is None and self.montar_camadas() is None:
             self.barra.mostrar_modo(camadas.modo_atual())
             return

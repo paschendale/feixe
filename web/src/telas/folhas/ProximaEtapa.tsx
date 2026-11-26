@@ -117,7 +117,7 @@ export function ProximaEtapa({ lotes, fechar }: { lotes: number[]; fechar: (aber
         )}
         {validos.length > 0 && (
           <label className="flex flex-col gap-1.5 text-[13px] text-texto-2">
-            Observação (obrigatória, vai para o histórico de cada folha)
+            Observação (opcional, vai para o histórico de cada folha)
             <Textarea rows={2} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, segue para a revisão" className="text-sm text-foreground" />
           </label>
         )}
@@ -125,7 +125,7 @@ export function ProximaEtapa({ lotes, fechar }: { lotes: number[]; fechar: (aber
           <Button variant="outline" onClick={() => fechar()}>
             Cancelar
           </Button>
-          <Button className="font-semibold" disabled={!validos.length || !obs.trim() || ocupado} onClick={confirmar}>
+          <Button className="font-semibold" disabled={!validos.length || ocupado} onClick={confirmar}>
             <RotuloEstavel ocupado={ocupado} rotulo={`Abrir ${unica ?? 'a próxima etapa'} em ${plural(validos.length, 'folha', 'folhas')}`} rotuloOcupado="Abrindo…" />
           </Button>
         </DialogFooter>

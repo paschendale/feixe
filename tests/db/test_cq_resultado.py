@@ -164,9 +164,6 @@ def test_aprovar_reprovada_so_com_confirmacao_e_abre_a_proxima(amb):
     assert p["resultado"] == "reprovado" and p["proxima"] == "Etapa correcao_inspecao" and "confirmação" in p["aviso"]
     with pytest.raises(ErroDados, match="confirme"):
         df.decidir_cq(ex, "DF", cen.lote, "aprovar", "conferido com o avaliador")
-    with pytest.raises(ErroDados, match="observação"):
-        df.decidir_cq(ex, "DF", cen.lote, "aprovar", " ", forcar=True)
-
     d = df.decidir_cq(ex, "DF", cen.lote, "aprovar", "comissão em área urbana, aceito", forcar=True)
     le = ex.um("SELECT situacao, resultado, concluida_em FROM mapcartacomp.lote_etapa WHERE id = %s", (le_cq,))
     assert (le["situacao"], le["resultado"]) == ("concluida", "aprovada") and le["concluida_em"]

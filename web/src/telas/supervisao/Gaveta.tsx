@@ -233,7 +233,7 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
         </p>
       )}
       <label className="flex flex-col gap-1.5 text-[13px] text-texto-2">
-        Observação (fica no histórico; obrigatória)
+        Observação (opcional, fica no histórico)
         <Textarea rows={3} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, segue para o CQ" className="text-sm text-foreground" />
       </label>
       {outra && (
@@ -262,7 +262,7 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
             </Button>
             <Button
               size="sm"
-              disabled={ocupado || !obs.trim() || !etapa}
+              disabled={ocupado || !etapa}
               onClick={() => rodar({ titulo: 'Abrir etapa', passos: [{ caminho: `/api/lotes/${lote.id}/passagens`, corpo: { id_fluxo_etapa: etapa, expor_ocorrencias: expor } }] })}
             >
               Abrir etapa
@@ -284,7 +284,7 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
             </>
           )}
           {botoes.map((b, i) => (
-            <Button key={b.titulo} variant={i === 0 && !cqAberto ? 'default' : 'outline'} className={i === 0 && !cqAberto ? 'font-semibold' : ''} disabled={ocupado || !obs.trim()} onClick={() => rodar(b)}>
+            <Button key={b.titulo} variant={i === 0 && !cqAberto ? 'default' : 'outline'} className={i === 0 && !cqAberto ? 'font-semibold' : ''} disabled={ocupado} onClick={() => rodar(b)}>
               {b.titulo}
             </Button>
           ))}

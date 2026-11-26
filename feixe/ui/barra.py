@@ -1,7 +1,7 @@
 """Barra do Feixe dentro do QGIS: guia o usuário na ordem do trabalho, só com ícones.
 
 Da esquerda para a direita: 1. conectar (o ponto diz o estado da conexão; a dica diz conta e modo), 2. carregar
-camadas (o clique carrega; a seta troca o modo de trabalho, Executar ou Supervisionar), 3. abrir o Feixe no
+camadas (o clique carrega; a seta troca o modo de trabalho: Executar, Avaliar ou Supervisionar), 3. abrir o Feixe no
 navegador (o ícone tem a seta de link externo), 4. próxima carga, 5. pular carga, 6. concluir carga. Depois, só para
 quem tem amostras de CQ (D3c): próxima amostra, conforme, não conforme e registrar ocorrência; só com ocorrência
 esperando a ciência, Ciente; e, só para quem está com uma folha na correção de inspeção (D5), próxima ocorrência e
@@ -44,6 +44,13 @@ MODOS: List[Tuple[str, str, str, str]] = [
         "Executar",
         "modo_execucao",
         "Mostra só o subgrupo Execução: Minhas cargas e Minhas folhas, para trabalhar sobre a imagem.",
+    ),
+    (
+        "cq",
+        "Avaliar",
+        "modo_cq",
+        "Só para quem tem amostras de CQ. Mostra só o subgrupo Controle de qualidade: as amostras e as ocorrências "
+        "de cada elemento.",
     ),
     (
         "supervisao",
@@ -108,6 +115,7 @@ class BarraFeixe(QToolBar):
         "verificar": "Alt+Shift+V",
         "camadas": "Alt+Shift+L",
         "modo_execucao": "Alt+Shift+E",
+        "modo_cq": "Alt+Shift+Q",
         "modo_supervisao": "Alt+Shift+S",
         "abrir": "Alt+Shift+F",
         "proxima": "Alt+Shift+N",
@@ -148,8 +156,9 @@ class BarraFeixe(QToolBar):
         # 2. Camadas: o clique carrega (ou recarrega) o grupo Feixe; a seta troca o modo de trabalho.
         self.acao_camadas = self._acao(
             "camadas", "camadas", "Carregar as camadas do Feixe",
-            "Monta o grupo Feixe no projeto com as camadas do seu papel, organizadas por tarefa: Execução e, para "
-            "supervisor, Supervisão. Carregar de novo relê o banco e substitui o grupo. Na seta, troque o modo.",
+            "Monta o grupo Feixe no projeto com as camadas do seu papel, organizadas por tarefa: Execução, Controle de "
+            "qualidade (quem avalia) e Supervisão (supervisor). Carregar de novo relê o banco e substitui o grupo. Na "
+            "seta, troque o modo.",
             self.camadas,
         )  # fmt: skip
         self.acoes_modo: Dict[str, QAction] = {}

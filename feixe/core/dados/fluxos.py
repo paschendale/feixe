@@ -1,5 +1,5 @@
 """Fluxos da GGC e o andar da folha pelas etapas (B6). Nada avança sozinho: toda mudança é ação do supervisor, com
-observação, registrada em lote_etapa_hist. O plugin só sugere a próxima etapa.
+observação opcional, registrada em lote_etapa_hist. O plugin só sugere a próxima etapa.
 
 Modelo de passagem: cada lote tem no máximo uma passagem aberta (pendente ou em andamento). Avançar, repetir uma
 etapa repetível ou voltar a uma etapa anterior é o mesmo gesto: abrir uma nova passagem numa etapa do fluxo.
@@ -271,11 +271,9 @@ def _hist(ex: Executor, id_lote_etapa: int, acao: str, observacao: str) -> None:
     )
 
 
-def _obs(observacao: Optional[str]) -> str:
-    o = (observacao or "").strip()
-    if not o:
-        raise ErroDados("escreva uma observação: toda mudança de etapa fica no histórico da folha", 400)
-    return o
+def _obs(observacao: Optional[str]) -> Optional[str]:
+    """A observação é sempre opcional: a mudança de etapa fica no histórico com ou sem ela."""
+    return (observacao or "").strip() or None
 
 
 def _passagem(ex: Executor, id_lote_etapa: int, uf: str) -> Dict:
@@ -618,7 +616,7 @@ def previa_cq(ex: Executor, uf: str, ids: List[int], decisao: str) -> Dict:
     return {"itens": [_item_cq(r, res.get(r["id_lote_etapa"]), decisao, uf) for r in linhas]}
 
 
-def _texto_cq(decisao: str, item: Dict, obs: str) -> str:
+def _texto_cq(decisao: str, item: Dict, obs: Optional[str]) -> str:
     """A linha do histórico: a decisão, o resultado por elemento e a observação do supervisor."""
     if decisao == "aprovar":
         cabeca = "Aprovada no CQ"
@@ -633,7 +631,7 @@ def _texto_cq(decisao: str, item: Dict, obs: str) -> str:
     corpo = f": {item['resumo']}" if item["resumo"] else ""
     if item["faltam"]:
         corpo += f" ({item['faltam']} sem avaliação)"
-    return f"{cabeca}{corpo}. {obs}"
+    return f"{cabeca}{corpo}." + (f" {obs}" if obs else "")
 
 
 def decidir_cq(

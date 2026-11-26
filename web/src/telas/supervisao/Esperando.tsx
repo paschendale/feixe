@@ -222,10 +222,10 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
       {!fim && (
         <div className="flex flex-wrap items-end gap-2.5 border-t pt-4">
           <label className="flex min-w-[280px] flex-1 flex-col gap-1.5 text-[13px] text-texto-2">
-            Observação (obrigatória, vai para o histórico de cada folha)
+            Observação (opcional, vai para o histórico de cada folha)
             <Input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, CQ por amostragem" className="text-sm text-foreground" />
           </label>
-          <Button className="font-semibold" disabled={ocupado || !marcadas.size || !obs.trim()} onClick={abrir}>
+          <Button className="font-semibold" disabled={ocupado || !marcadas.size} onClick={abrir}>
             {marcadas.size ? `Abrir ${g.proxima} em ${plural(marcadas.size, 'folha', 'folhas')}` : `Abrir ${g.proxima}`}
           </Button>
           <Button variant="outline" onClick={() => setMarcadas(tudo ? new Set() : new Set(g.folhas.map((f) => f.id_lote)))}>

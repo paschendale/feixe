@@ -4,7 +4,7 @@ A execução lê o workspace local (C4, D-111): as camadas de quem executa abrem
 offline e mostram na hora o que a pessoa fez (a conclusão local, antes do push). A supervisão lê a CCAR, com a mesma
 credencial do Authentication Manager (authcfg). Roda na thread principal (mexe no projeto e na árvore de camadas).
 
-Dois subgrupos, um por modo de trabalho; só um fica ligado (a barra troca o modo, sem recarregar):
+Três subgrupos, um por modo de trabalho; só um fica ligado (a barra troca o modo, sem recarregar):
 
 Execução (todos), do workspace:
 - Minhas cargas: a tabela `carga_trabalho` do workspace, filtrada pela conta do workspace e pelas passagens abertas,
@@ -17,17 +17,19 @@ Execução (todos), do workspace:
   passa pelas regras da execução e pela outbox (`core/edicao.py`).
 - Minhas folhas: a view `vw_minhas_folhas` (só leitura), moldura e rótulo das folhas em que a pessoa tem cargas de
   passagens abertas.
-- CQ (D3c), num subgrupo "CQ · tema": por elemento (uma atividade de CQ por medida), Ocorrências - <elemento> (os
-  pontos de `cq_inspecao` nas minhas amostras, pino com a anotação curta) e Amostras - <elemento> (as minhas cargas de
-  CQ com o status da amostra pela view juntada `vw_minhas_amostras_info`: pendente, conforme, não conforme; a amostra
-  atual só com o contorno magenta com halo, como a carga atual). Só o primeiro elemento vem ligado. A avaliação não
-  passa pelo buffer do QGIS: Amostras é só leitura, e Conforme e Não conforme são ações da camada e da barra.
 - Ocorrências para ciência (o APM): as que apontam uma carga minha, ainda sem ciência; só quando houver alguma.
   Correções a fazer: na revisão planejada com "incluir correções a serem feitas", as não tratadas da folha.
 - Correção de inspeção (D5), num subgrupo "Correção · tema": Ocorrências pendentes (as não tratadas da folha, de
   todas as revisões; a ocorrência atual com o pino maior em magenta), Ocorrências tratadas (desligada) e Minhas
   folhas; Minhas cargas só se a etapa tem cargas pela grade além da carga da folha, que nunca aparece (é a folha
   inteira). Só leitura: Tratada e Desfazer são ações da camada e da barra.
+
+Controle de qualidade (só quem avalia), do workspace, um subgrupo "CQ · tema" por tema: por elemento (uma atividade de
+  CQ por medida), Ocorrências - <elemento> (os pontos de `cq_inspecao` nas minhas amostras, pino com a anotação curta)
+  e Amostras - <elemento> (as minhas cargas de CQ com o status da amostra pela view juntada `vw_minhas_amostras_info`:
+  pendente, conforme, não conforme; a amostra atual só com o contorno magenta com halo, como a carga atual). Só o
+  primeiro elemento vem ligado. A avaliação não passa pelo buffer do QGIS: Amostras é só leitura, e Conforme e Não
+  conforme são ações da camada e da barra.
 
 Supervisão (só supervisor, e só com a CCAR respondendo), das passagens abertas dos lotes da UF:
 - Cargas por responsável: uma cor bem distinta por pessoa, estável entre uma montagem e outra.
@@ -435,7 +437,7 @@ def camada_com_ocorrencia(uuid: str, *papeis: str) -> Optional[QgsVectorLayer]:
     return None
 
 
-EXECUCAO, SUPERVISAO = "Execução", "Supervisão"
+EXECUCAO, CONTROLE, SUPERVISAO = "Execução", "Controle de qualidade", "Supervisão"
 _PAPEL = "feixe/papel"  # propriedade da camada (e do subgrupo) que diz o que ela é, sem depender do nome
 PAPEL_INFO = "minhas_cargas_info"  # a view juntada a Minhas cargas, no projeto e fora da árvore
 PAPEL_INFO_AMOSTRA, PAPEL_INFO_OCORRENCIA = "amostras_info", "ocorrencias_info"  # as views juntadas do CQ
@@ -444,7 +446,11 @@ _INFOS = {
     PAPEL_INFO_AMOSTRA: (VW_AMOSTRA_INFO, "Feixe · amostras (status e plano)"),
     PAPEL_INFO_OCORRENCIA: (VW_OCORRENCIA_INFO, "Feixe · ocorrências (folha e amostra)"),
 }
-MODOS = {"execucao": EXECUCAO, "supervisao": SUPERVISAO}  # modo de trabalho -> subgrupo do grupo Feixe
+MODOS = {"execucao": EXECUCAO, "cq": CONTROLE, "supervisao": SUPERVISAO}  # modo de trabalho -> subgrupo do Feixe
+_SEM_MODO = {
+    "cq": "você não tem amostras de CQ em passagens abertas",
+    "supervisao": "o modo supervisão é só para supervisor",
+}
 
 
 def _em(ids: List[int]) -> str:
@@ -592,11 +598,17 @@ def montar(
     infos = _Infos(gpkg)
 
     execucao = grupo.addGroup(EXECUCAO)
+    controle = None  # o subgrupo do CQ só existe para quem tem amostras
     ciencia = camada_ciencia_nova(gpkg, infos)
     if ciencia is not None:
         por(execucao, ciencia, "ocorrencias_ciencia")
     for spec in lgrupos.plano_execucao(grupos_execucao or []):
-        sub = execucao if spec["rotulo"] is None else execucao.addGroup(spec["rotulo"])
+        if spec["tipo"] == "cq":
+            controle = controle or grupo.addGroup(CONTROLE)
+            pai = controle
+        else:
+            pai = execucao
+        sub = pai if spec["rotulo"] is None else pai.addGroup(spec["rotulo"])
         atividades = spec["atividades"]
         if spec["tipo"] == "correcao":
             # Correção de inspeção (D5): as ocorrências da folha, de todas as revisões; as tratadas desligadas.
@@ -687,7 +699,14 @@ def montar(
             visivel = ligado is not None and sub is ligado[0]
             sub.setItemVisibilityChecked(visivel)
             sub.setExpanded(visivel)
-    escolhido = modo("supervisao" if supervisor else "execucao")
+    # O modo inicial é o do papel: supervisão para o supervisor; CQ para quem só tem amostras a avaliar.
+    if supervisor:
+        inicial = "supervisao"
+    elif controle is not None and not execucao.findLayers():
+        inicial = "cq"
+    else:
+        inicial = "execucao"
+    escolhido = modo(inicial)
     return {
         "modo": escolhido,
         "grupos": {"execucao": [g["rotulo"] for g in grupos_execucao],
@@ -782,7 +801,7 @@ def _gpkg_do_grupo() -> Optional[str]:
 
 
 def modo_atual() -> Optional[str]:
-    """Modo ligado agora (execucao ou supervisao), pela visibilidade dos subgrupos; None sem o grupo Feixe."""
+    """Modo ligado agora (execucao, cq ou supervisao), pela visibilidade dos subgrupos; None sem o grupo Feixe."""
     grupo = QgsProject.instance().layerTreeRoot().findGroup(GRUPO)
     if grupo is None:
         return None
@@ -794,12 +813,12 @@ def modo_atual() -> Optional[str]:
 
 
 def modo(chave: str) -> str:
-    """Liga o subgrupo do modo e desliga (e recolhe) o outro. Só visibilidade: nada é recarregado do banco."""
+    """Liga o subgrupo do modo e desliga (e recolhe) os outros. Só visibilidade: nada é recarregado do banco."""
     grupo = QgsProject.instance().layerTreeRoot().findGroup(GRUPO)
     if grupo is None:
         raise RuntimeError("carregue as camadas do Feixe primeiro")
     if grupo.findGroup(MODOS[chave]) is None:
-        raise RuntimeError("o modo supervisão é só para supervisor")
+        raise RuntimeError(_SEM_MODO.get(chave, "modo sem camadas"))
     for outra, nome in MODOS.items():
         sub = grupo.findGroup(nome)
         if sub is not None:

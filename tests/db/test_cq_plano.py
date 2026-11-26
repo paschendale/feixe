@@ -154,6 +154,19 @@ def test_etapa_sem_padrao_fica_a_iniciar_com_o_proximo_passo(amb):
     assert len(dq.planos(ex, "DF", le)["sem_plano"]) == len(cen.ativ_cq) - 1
 
 
+def test_cq_sem_atividade_de_cq_fica_a_iniciar_e_aponta_os_fluxos(amb):
+    # Etapa de CQ sem nenhuma medida no fluxo (o LML do DF no dev): nada a sortear, e começar sem amostras deixava a
+    # folha "em andamento" sem nada a fazer. Fica a iniciar, com o próximo passo.
+    cen, ex = amb
+    cen.cur.execute("DELETE FROM mapcartacomp.fluxo_etapa_atividade WHERE id_fluxo_etapa = %s", (cen.etapa["cq"],))
+    le = cen.passagem("cq")
+    r = dc.preparar(ex, "DF", [le])
+    assert r["geradas"] == [] and r["iniciadas"] == []
+    (aviso,) = r["avisos"]
+    assert "não tem atividade de CQ" in aviso["aviso"] and "Fluxos" in aviso["aviso"]
+    assert ex.um("SELECT situacao FROM mapcartacomp.lote_etapa WHERE id = %s", (le,))["situacao"] == "pendente"
+
+
 def test_refazer_so_antes_de_avaliar_ou_distribuir(amb):
     cen, ex = amb
     le = cen.passagem("cq")

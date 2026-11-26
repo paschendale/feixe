@@ -84,7 +84,7 @@ export function ElementoCQ({ p, compacto = false }: { p: ResultadoPlano; compact
 
 const folhas = (xs: ItemDecisaoCQ[]) => (xs.length <= 8 ? lista(xs.map((i) => i.folha_revisao)) : `${lista(xs.slice(0, 6).map((i) => i.folha_revisao))} e mais ${num(xs.length - 6)}`)
 
-// Aprovar ou Nova revisão no CQ (D4), em uma ou várias folhas, com prévia, observação obrigatória e o aviso explícito
+// Aprovar ou Nova revisão no CQ (D4), em uma ou várias folhas, com prévia, observação opcional e o aviso explícito
 // quando se aprova uma folha reprovada. Aprovar conclui o CQ e abre a etapa seguinte; Nova revisão conclui o CQ como
 // reprovada e abre a revisão seguinte (folha-N+1), às cegas ou com as correções a fazer (D-66). Depois, o Distribuir.
 export function DecidirCQ({
@@ -222,7 +222,7 @@ export function DecidirCQ({
               </label>
             )}
             <label className="flex flex-col gap-1.5 text-[13px] text-texto-2">
-              Observação (obrigatória, vai para o histórico de cada folha com o resultado por elemento)
+              Observação (opcional; o resultado por elemento vai para o histórico de cada folha de todo jeito)
               <Textarea rows={2} value={obs} onChange={(e) => setObs(e.target.value)} placeholder={aprovar ? 'Ex.: dentro do aceito, segue para a correção de inspeção' : 'Ex.: comissão acima do aceito, revisar a folha toda'} className="text-sm text-foreground" />
             </label>
           </div>
@@ -231,7 +231,7 @@ export function DecidirCQ({
           <Button variant="outline" onClick={() => fechar()}>
             Cancelar
           </Button>
-          <Button className="font-semibold" disabled={!validos.length || !obs.trim() || ocupado || (pedeConfirmacao && !forcar)} onClick={confirmar}>
+          <Button className="font-semibold" disabled={!validos.length || ocupado || (pedeConfirmacao && !forcar)} onClick={confirmar}>
             <RotuloEstavel ocupado={ocupado} rotulo={rotulo} rotuloOcupado="Gravando…" />
           </Button>
         </DialogFooter>

@@ -30,8 +30,6 @@ def montar(monkeypatch):
 
     def decidir_cq(ex, uf, id_lote, decisao, obs, forcar=False, expor=False):
         ch["chamadas"].append(("decidir", uf, id_lote, decisao, obs, forcar, expor))
-        if not obs.strip():
-            raise ErroDados("escreva uma observação", 400)
         if id_lote == 2:
             raise ErroDados("2534-1: reprovada no CQ; para aprovar assim mesmo, confirme o aviso")
         nova = None if id_lote == 3 else 100 + id_lote
@@ -98,7 +96,7 @@ def test_recusas_e_papeis(montar):
     r, ch = montar(SUP)
     assert r.despachar("POST", "/api/lotes/cq_decisao", {}, {"lotes": [], "decisao": "aprovar"})[0] == 400
     corpo = {"lotes": [1], "decisao": "aprovar", "observacao": " ", "previa": False}
-    assert r.despachar("POST", "/api/lotes/cq_decisao", {}, corpo)[0] == 400
+    assert r.despachar("POST", "/api/lotes/cq_decisao", {}, corpo)[0] == 200  # a observação é opcional
     corpo = {"lotes": [1], "decisao": "talvez", "observacao": "x", "previa": False}
     assert r.despachar("POST", "/api/lotes/cq_decisao", {}, corpo)[0] == 400
     r, _ = montar({"papeis": ["apm"], "uf": "DF", "perfis": []})

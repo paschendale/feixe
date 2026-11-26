@@ -4,7 +4,6 @@ serem só os do cenário. Transações desfeitas, nos dois bancos (9.6 e 17)."""
 from __future__ import annotations
 
 import pytest
-from feixe.core.dados import ErroDados
 from feixe.core.dados import fluxos as df
 from feixe.core.dados import lotes as dl
 from feixe.core.dados import painel as dp
@@ -78,12 +77,12 @@ def test_abrir_proximas_em_lote(amb):  # noqa: F811
     h = df.historico(ex, a)[0]
     assert (h["acao"], h["observacao"]) == ("abrir", "em lote")
 
-    # Outra UF não abre; observação vazia é recusada como na gaveta.
+    # Outra UF não abre; a observação é opcional.
     assert df.acao(ex, "GO", le, "iniciar", OBS)["revisao_atual"] == 2  # conta revisão, como pela gaveta
     df.acao(ex, "GO", le, "concluir", OBS)
     assert df.abrir_proximas(ex, "DF", [a], "x")["erros"][0]["erro"].startswith("lote não encontrado")
-    with pytest.raises(ErroDados):
-        df.abrir_proximas(ex, "GO", [a], "  ")
+    df.acao(ex, "GO", _aberta(ex, b), "concluir", "  ")
+    assert df.historico(ex, b)[0]["acao"] == "concluir" and df.historico(ex, b)[0]["observacao"] is None
 
 
 def test_depois_de_pular_a_seguinte_e_a_que_vem_depois_da_pulada(amb):  # noqa: F811

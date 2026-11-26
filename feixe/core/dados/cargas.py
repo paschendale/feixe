@@ -73,6 +73,13 @@ def preparar(ex: Executor, uf: str, ids_lote_etapa: List[int]) -> Dict:
             continue
         if p["fase"] == "cq" and p["cq"]:
             amostrar.append(p)
+        elif p["fase"] == "cq":
+            # CQ sem atividade de CQ na etapa: nada a sortear, e começar sem amostras não leva a lugar nenhum. Fica a
+            # iniciar, com o próximo passo (a gaveta diz o mesmo).
+            avisos.append({**_ident(p), "aviso": (
+                f"a etapa {p['etapa']} não tem atividade de CQ no fluxo: escolha as medidas a inspecionar em Fluxos "
+                "e crie os planos na gaveta da folha"
+            )})  # fmt: skip
         elif p["fase"] == "correcao_inspecao" and not p["grade"]:
             # Correção de inspeção (D5): quem varre as ocorrências é quem recebe a folha. Sem atividade pela grade, a
             # carga é a folha inteira, e ela vai a alguém pelo Distribuir de sempre; nada a tratar, a etapa começa

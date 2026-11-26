@@ -461,10 +461,14 @@ def d3c(amb, usuario, senha):
 
         plugin = plugin_de(ws, {"conta": usuario, "uf": "DF", "papeis": ["avaliador"], "perfis": []})
         projeto.layersAdded.connect(plugin._ligar_edicao)
-        rotas_camadas.montar(plugin.ctx)
+        montado = rotas_camadas.montar(plugin.ctx)
         plugin._atualizar_cq()  # no plugin, a montagem pelo QGIS já faz (`_montar_no_qgis`)
-        execucao = projeto.layerTreeRoot().findGroup("Feixe").findGroup("Execução")
-        (sub,) = [g for g in execucao.children() if g.name() == f"CQ · verificar_d3a_{tag}"]
+        # O CQ tem o seu modo (Avaliar): quem só avalia já entra nele, e o subgrupo fica fora da Execução.
+        assert montado["modo"] == "cq" == camadas.modo_atual(), montado["modo"]
+        controle = projeto.layerTreeRoot().findGroup("Feixe").findGroup("Controle de qualidade")
+        (sub,) = [g for g in controle.children() if g.name() == f"CQ · verificar_d3a_{tag}"]
+        assert not projeto.layerTreeRoot().findGroup("Feixe").findGroup("Execução").findGroup(sub.name())
+        ok("modo Avaliar ligado, com o subgrupo do CQ em Controle de qualidade")
         nomes = [(n.name(), n.itemVisibilityChecked()) for n in sub.children()]
         assert nomes == [
             ("Ocorrências - Comissão", True),

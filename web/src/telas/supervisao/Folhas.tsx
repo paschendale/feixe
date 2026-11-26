@@ -258,7 +258,7 @@ export default function Folhas() {
                         </span>
                       </div>
                     ) : (
-                      <span className="text-muted-foreground">sem cargas</span>
+                      <span className="text-muted-foreground">{grupo?.fase === 'cq' && aberta ? 'sem amostras: veja na folha o próximo passo' : 'sem cargas'}</span>
                     )}
                   </td>
                   <td className="truncate px-2 py-3" title={x?.responsaveis.join(', ')}>{x?.responsaveis.length ? lista(x.responsaveis.map((n) => n.split(' ')[0])) : <span className="text-muted-foreground">—</span>}</td>
