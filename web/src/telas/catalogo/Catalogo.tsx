@@ -143,6 +143,48 @@ function Temas({ dados, gerente }: { dados: TCatalogo; gerente: boolean }) {
   )
 }
 
+// Elementos de qualidade do CQ (D-152): o catálogo da GCQ que as atividades de CQ usam, uma atividade por elemento.
+// Só leitura em todos os papéis: na v0 o catálogo muda por SQL (seed do A8). O nome vem do SGBC.
+function Elementos({ dados }: { dados: TCatalogo }) {
+  const usos = (id: number) => dados.atividades.filter((a) => a.id_medidadequalidade === id)
+  const fracao = (x: number) => `${Number(x).toLocaleString('pt-BR')}%`
+  return (
+    <>
+      <p className="max-w-[820px] text-nota text-muted-foreground">
+        Os elementos de qualidade que o CQ inspeciona, no vocabulário da GCQ. Cada atividade de CQ do catálogo mede um elemento, e o plano de amostragem de cada folha usa a fração crítica do elemento quando a etapa do fluxo não define outra. Mantidos pela CCAR; aqui, só leitura.
+      </p>
+      <Tabela fixa>
+        <Colunas larguras={[undefined, 130, 150, 260, 110]} />
+        <thead>
+          <tr>
+            <th>Elemento</th>
+            <th>Núcleo da GCQ</th>
+            <th className="text-right">Fração crítica padrão</th>
+            <th>Atividades de CQ</th>
+            <th>Situação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {dados.elementos_cq.map((e) => {
+            const as = usos(e.id)
+            return (
+              <tr key={e.id}>
+                <td className="font-medium">{e.nome}</td>
+                <td>{e.nucleo ? <Selo tom="info">núcleo</Selo> : <span className="text-muted-foreground">não</span>}</td>
+                <td className="tab text-right">{fracao(e.fracao_critica)}</td>
+                <td className="truncate" title={as.map((a) => a.nome).join('\n')}>
+                  {as.length ? `${plural(as.length, 'atividade', 'atividades')} · ${[...new Set(as.map((a) => a.tema))].join(', ')}` : <span className="text-muted-foreground">nenhuma</span>}
+                </td>
+                <td>{e.ativo ? 'ativo' : <Selo>inativo</Selo>}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </Tabela>
+    </>
+  )
+}
+
 // Catálogo nacional (B7), mantido pela CCAR: todos veem; só o gerente cria e altera (D-87).
 export default function Catalogo() {
   const { tem } = useSessao()
@@ -150,7 +192,7 @@ export default function Catalogo() {
   const gerente = tem('gerente')
   const { dados, erro } = useApi<TCatalogo>('/api/catalogo', ['atividade'])
   const [form, setForm] = useState<{ atividade: Atividade | null } | null>(null)
-  const aba = rota.partes[0] === 'temas' ? 'temas' : 'atividades'
+  const aba = rota.partes[0] === 'temas' || rota.partes[0] === 'elementos' ? rota.partes[0] : 'atividades'
   return (
     <>
       <CabecalhoModulo
@@ -160,12 +202,13 @@ export default function Catalogo() {
         abas={[
           { id: 'atividades', rotulo: 'Atividades', href: href('catalogo/atividades') },
           { id: 'temas', rotulo: 'Temas', href: href('catalogo/temas') },
-          { id: 'elementos', rotulo: 'Elementos de CQ · fase D', desabilitada: true },
+          { id: 'elementos', rotulo: 'Elementos de CQ', href: href('catalogo/elementos') },
         ]}
       />
       <Conteudo largura={1240}>
         {!dados && <Carregando erro={erro} />}
         {dados && aba === 'temas' && <Temas dados={dados} gerente={gerente} />}
+        {dados && aba === 'elementos' && <Elementos dados={dados} />}
         {dados && aba === 'atividades' && (
           <>
             <div className="flex flex-wrap items-center justify-between gap-4">
