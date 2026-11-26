@@ -67,6 +67,29 @@ def ok(msg):
     print(f"  ok  {msg}")
 
 
+def sem_ddl_concorrente(amb, usuario, senha):
+    """Recusa rodar enquanto outra sessão aplica o DDL do `mapcartacomp` na CCAR de dev. Os testes de banco (`make
+    test-db`) reexecutam as migrações inteiras dentro de uma transação desfeita (`tests/db/migracoes.py`), com trava
+    exclusiva em tabelas e views; as camadas PostGIS do QGIS (Folhas lê a `ctrl_lote`) entram em deadlock com ela e
+    saem inválidas ("camada 'Folhas' inválida"). Não é defeito do plugin: em homologação e produção ninguém aplica DDL
+    no meio do expediente. Amostra a trava algumas vezes, porque cada teste a segura só enquanto roda."""
+    import time
+
+    sql = (
+        "SELECT count(*) AS n FROM pg_locks k JOIN pg_class c ON c.oid = k.relation "
+        "JOIN pg_namespace s ON s.oid = c.relnamespace WHERE s.nspname = 'mapcartacomp' "
+        "AND k.mode = 'AccessExclusiveLock' AND k.pid <> pg_backend_pid()"
+    )
+    for _ in range(6):
+        with db.transacao(amb, usuario, senha) as ex:
+            if ex.um(sql)["n"]:
+                raise SystemExit(
+                    "outra sessão está aplicando o DDL do mapcartacomp na CCAR de dev (os testes de banco, make "
+                    "test-db?): as camadas PostGIS entrariam em deadlock com ela. Rode depois que ela terminar."
+                )
+        time.sleep(0.25)
+
+
 @secao("b0")
 def b0(amb, usuario, senha):
     """Transação da camada de dados: commit ao sair, rollback em erro."""
@@ -532,6 +555,8 @@ def main():
         amb = ambiente_dev()
         usuario, senha = credencial_dev()
         config.salvar_credenciais(amb, usuario, senha)
+        if "b1" in pedidas:
+            sem_ddl_concorrente(amb, usuario, senha)
         for nome in pedidas:
             print(f"{nome}: {SECOES[nome].__doc__.strip()}")
             SECOES[nome](amb, usuario, senha)

@@ -27,13 +27,21 @@ _SITUACAO = (
     "CASE WHEN \"{c}\" = 'pendente' THEN 'a iniciar' WHEN \"{c}\" = 'em_andamento' THEN 'em andamento' "
     "WHEN \"{c}\" = 'concluida' THEN 'concluída' ELSE \"{c}\" END"
 )
-_DIAS = 'to_int((epoch(now()) - epoch("{c}")) / 86400000)'
+# Dias de calendário entre a data e hoje, no fuso da estação (0 = hoje, 1 = ontem), como o "hoje" do painel.
+_DIAS = 'to_int(day(age(to_date(now()), to_date(datetime_from_epoch(epoch("{c}"))))))'
+
+
+def _data_hora(campo: str, formato: str = "dd/MM/yyyy HH:mm") -> str:
+    """Data e hora no fuso da estação. O workspace e a CCAR guardam UTC, e o `format_date` do QGIS escreve a hora no
+    fuso em que o valor chegou (UTC, no GeoPackage); `datetime_from_epoch` devolve a hora local. Vale também para o
+    texto ISO com `Z` das views do workspace, que o `epoch` lê com o fuso."""
+    return f"format_date(datetime_from_epoch(epoch(\"{campo}\")), '{formato}')"
 
 
 def _quando_concluida() -> str:
     dias = _DIAS.format(c="concluido_em")
     return (
-        "CASE WHEN \"concluido\" THEN 'concluída em ' || format_date(\"concluido_em\", 'dd/MM/yyyy HH:mm') || "
+        f"CASE WHEN \"concluido\" THEN 'concluída em ' || {_data_hora('concluido_em')} || "
         f"CASE WHEN {dias} = 0 THEN ' (hoje)' WHEN {dias} = 1 THEN ' (ontem)' "
         f"ELSE ' (há ' || {dias} || ' dias)' END ELSE 'pendente' END"
     )
@@ -191,7 +199,7 @@ def folhas_supervisao(camada: QgsVectorLayer) -> None:
     )  # fmt: skip
     _campo_expressao(
         camada, "inicio_txt", "Início",
-        f"format_date(\"inicio\", 'dd/MM/yyyy') || ' (há ' || {_DIAS.format(c='inicio')} || ' dias)'",
+        f"{_data_hora('inicio', 'dd/MM/yyyy')} || ' (há ' || {_DIAS.format(c='inicio')} || ' dias)'",
     )  # fmt: skip
     _campo_expressao(
         camada, "ocorrencias_txt", "Ocorrências tratadas", '"ocorrencias_tratadas" || \' de \' || "ocorrencias"'
@@ -237,7 +245,7 @@ def amostras(camada: QgsVectorLayer) -> None:
     _campo_expressao(
         camada, "status_txt", "Situação",
         f"{_STATUS_AMOSTRA} || CASE WHEN \"avaliado_em\" IS NOT NULL THEN ' em ' || "
-        f"format_date(\"avaliado_em\", 'dd/MM/yyyy HH:mm') || CASE WHEN {dias} = 0 THEN ' (hoje)' "
+        f"{_data_hora('avaliado_em')} || CASE WHEN {dias} = 0 THEN ' (hoje)' "
         f"WHEN {dias} = 1 THEN ' (ontem)' ELSE ' (há ' || {dias} || ' dias)' END ELSE '' END",
     )  # fmt: skip
     _campo_expressao(camada, "folha_txt", "Folha", '"folha_revisao" || \' · \' || "tema"')
@@ -304,13 +312,13 @@ def ocorrencias(camada: QgsVectorLayer, papel: str) -> None:
     )  # fmt: skip
     _campo_expressao(
         camada, "registrada_txt", "Registrada",
-        "coalesce(\"responsavel\", '') || coalesce(' em ' || format_date(\"criado_em\", 'dd/MM/yyyy HH:mm'), "
+        f"coalesce(\"responsavel\", '') || coalesce(' em ' || {_data_hora('criado_em')}, "
         "' (ainda não enviada)')",
     )  # fmt: skip
     _campo_expressao(
         camada, "ciencia_txt", "Ciência",
         "CASE WHEN \"ciente_em\" IS NULL THEN 'ainda sem ciência' "
-        "ELSE 'ciente em ' || format_date(\"ciente_em\", 'dd/MM/yyyy HH:mm') END",
+        f"ELSE 'ciente em ' || {_data_hora('ciente_em')} END",
     )  # fmt: skip
     for campo, rotulo in (("anotacao", "Anotação"), ("elemento", "Elemento"), ("responsavel", "Avaliador")):
         camada.setFieldAlias(camada.fields().indexOf(campo), rotulo)
@@ -328,7 +336,7 @@ def ocorrencias(camada: QgsVectorLayer, papel: str) -> None:
         camada.setFieldAlias(camada.fields().indexOf("folha_revisao"), "Revisão avaliada")
         _campo_expressao(
             camada, "tratada_txt", "Tratada",
-            "CASE WHEN \"tratado\" THEN 'tratada em ' || format_date(\"tratado_em\", 'dd/MM/yyyy HH:mm') || "
+            f"CASE WHEN \"tratado\" THEN 'tratada em ' || {_data_hora('tratado_em')} || "
             "coalesce(' por ' || \"tratado_por\", '') ELSE 'por tratar' END",
         )  # fmt: skip
         grupos = [
