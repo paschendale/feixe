@@ -38,9 +38,9 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
   const [cqAgora, setCqAgora] = useState(false)
 
   useEffect(() => {
-    if (!lotes.length) return
     setDados(null)
     setCqAgora(false)
+    if (!lotes.length) return
     enviar<SugestaoDistribuicao>('/api/distribuir/sugestao', { lotes })
       .then((d) => {
         setDados(d)
@@ -112,7 +112,8 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
     }
   }
 
-  if (dados && lotesCq.length && (cqAgora || !daProducao.length)) return <DistribuirCQ lotes={lotesCq} fechar={fechar} />
+  // Fechado (sem folhas), o diálogo do CQ fecha junto: ele abre a partir de `dados`, que é de antes de fechar.
+  if (lotes.length && dados && lotesCq.length && (cqAgora || !daProducao.length)) return <DistribuirCQ lotes={lotesCq} fechar={fechar} />
 
   return (
     <Dialog open={lotes.length > 0} onOpenChange={(v) => !v && fechar(false)}>
