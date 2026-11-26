@@ -285,10 +285,11 @@ class BarraFeixe(QToolBar):
                 self.acao_painel, self.acao_proxima, self.acao_pular, self.acao_concluir,
                 *self.acoes_cq.values()]  # fmt: skip
 
-    def mostrar_cq(self, estado: Optional[Dict]) -> Dict[str, bool]:
-        """Mostra as ações do CQ conforme o estado (amostras e ocorrências para ciência, `regras.acoes_visiveis`). A
-        ação escondida some também do menu e o atalho dela não dispara."""
-        vis = regras.acoes_visiveis(estado)
+    def mostrar_cq(self, estado: Optional[Dict], modo: Optional[str] = None) -> Dict[str, bool]:
+        """Mostra as ações do CQ conforme o estado (amostras e ocorrências para ciência) e o modo (as do avaliador só no
+        modo Avaliar), por `regras.acoes_visiveis`. A ação escondida some também do menu e o atalho dela não
+        dispara."""
+        vis = regras.acoes_visiveis(estado, modo)
         for chave, a in self.acoes_cq.items():
             a.setVisible(vis[chave])
         self.separador_cq.setVisible(any(vis.values()))

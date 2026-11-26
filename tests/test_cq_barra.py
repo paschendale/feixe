@@ -9,8 +9,12 @@ def test_acoes_do_avaliador_so_com_amostras_e_ciente_so_com_ocorrencia():
         "proxima_amostra": False, "conforme": False, "nao_conforme": False, "ocorrencia": False, "ciente": False,
         "proxima_ocorrencia": False, "tratada": False,
     }  # fmt: skip
-    avaliador = regras.acoes_visiveis({"amostras": 20, "pendentes": 0, "ciencia": 0})
+    avaliador = regras.acoes_visiveis({"amostras": 20, "pendentes": 0, "ciencia": 0}, "cq")
     assert all(avaliador[a] for a in regras.ACOES_AVALIADOR) and not avaliador["ciente"]
+    # D-148: a barra de avaliação só no modo Avaliar (o grupo Controle de qualidade ligado).
+    for modo in (None, "execucao", "supervisao"):
+        fora = regras.acoes_visiveis({"amostras": 20}, modo)
+        assert not any(fora[a] for a in regras.ACOES_AVALIADOR)
     apm = regras.acoes_visiveis({"amostras": 0, "pendentes": 0, "ciencia": 2})
     assert apm["ciente"] and not any(apm[a] for a in regras.ACOES_AVALIADOR)
     assert regras.acoes_visiveis(None)["ciente"] is False

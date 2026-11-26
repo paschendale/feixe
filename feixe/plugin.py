@@ -139,6 +139,7 @@ class FeixePlugin:
         # projeto (ao montar, ou ao abrir um projeto salvo com o grupo Feixe) passa a gravar pela outbox.
         QgsProject.instance().layersAdded.connect(self._ligar_edicao)
         self._ligar_edicao(list(QgsProject.instance().mapLayers().values()))
+        QgsProject.instance().layerTreeRoot().visibilityChanged.connect(self._mostrar_barra_cq)
         self._abrir_workspace_gravado()
         self.iniciar_servidor()
         self._atualizar_cq()  # as ações do CQ na barra, pelo workspace gravado (offline também)
@@ -152,6 +153,8 @@ class FeixePlugin:
         self._timer.stop()
         with contextlib.suppress(TypeError):  # o initGui parou antes de ligar (ambiente inválido)
             QgsProject.instance().layersAdded.disconnect(self._ligar_edicao)
+        with contextlib.suppress(TypeError):
+            QgsProject.instance().layerTreeRoot().visibilityChanged.disconnect(self._mostrar_barra_cq)
         self._desligar_edicao()
         self.trabalhador.parar()
         self.fim_folhas()
@@ -579,8 +582,7 @@ class FeixePlugin:
         QDesktopServices.openUrl(QUrl(f"{self.servidor.url_abertura}#/supervisao/folhas/{int(id_lote)}"))
 
     def focar_carga(self, carga, progresso):
-        """Faz dela a carga atual (contorno magenta) sem mudar a escala de quem trabalha: se ela já está inteira na
-        tela, o mapa não se move; senão, centraliza nela. Depois pisca a carga para chamar o olho (D-102)."""
+        """Faz dela a carga atual (contorno magenta), o mapa vai até ela, na extensão dela (D-148), e pisca."""
         if camadas.camada_com_amostra(carga["id"]) is not None:
             # Uma carga de CQ (o painel pede "focar_carga" também para a amostra): vira a amostra atual.
             self.focar_amostra(carga, progresso)
@@ -591,16 +593,17 @@ class FeixePlugin:
         self.mostrar_progresso(progresso, False)
 
     def _enquadrar(self, carga, camada):
-        """Sem mudar a escala (D-102): centraliza só se a carga não está inteira na tela; depois pisca a carga."""
+        """Zoom na extensão da carga (ou da amostra), com uma folga de 10% em volta, e pisca (D-148; antes, no D-102,
+        o mapa só centralizava, sem mudar a escala)."""
         canvas = self.iface.mapCanvas()
         destino = canvas.mapSettings().destinationCrs()
         ret = QgsRectangle(carga["xmin"], carga["ymin"], carga["xmax"], carga["ymax"])
         origem = QgsCoordinateReferenceSystem("EPSG:4674")
         if origem != destino:
             ret = QgsCoordinateTransform(origem, destino, QgsProject.instance()).transformBoundingBox(ret)
-        if not canvas.extent().contains(ret):
-            canvas.setCenter(ret.center())
-            canvas.refresh()
+        ret.scale(1.1)
+        canvas.setExtent(ret)
+        canvas.refresh()
         if camada is not None:
             f = next(camada.getFeatures(f'"id" = {int(carga["id"])}'), None)
             if f is not None:
@@ -633,8 +636,7 @@ class FeixePlugin:
         sincronização) ganham a camada, ligada, e um aviso que diz o que fazer."""
         est = self._ler(lgrupos.estado_cq, {}) or {}
         antes, self._cq = self._cq, est
-        if self.barra:
-            self.barra.mostrar_cq(est)
+        self._mostrar_barra_cq()
         if est.get("correcao") and antes is not None and not antes.get("correcao"):
             self.iface.messageBar().pushMessage(
                 "Feixe",
@@ -657,6 +659,14 @@ class FeixePlugin:
                 Qgis.Info,
                 10,
             )
+
+    def _mostrar_barra_cq(self, *_):
+        """As ações do avaliador aparecem só com o grupo Controle de qualidade ligado (modo Avaliar, D-148): ao trocar
+        o modo pela barra e também ao ligar ou desligar o grupo à mão na árvore de camadas."""
+        if self.barra:
+            modo = camadas.modo_atual()
+            self.barra.mostrar_cq(self._cq or {}, modo)
+            self.barra.mostrar_modo(modo)
 
     def _para_cq(self) -> bool:
         """Garante as camadas e o modo avaliar para quem avalia; sem amostras, diz e não segue."""
@@ -694,7 +704,7 @@ class FeixePlugin:
         return r
 
     def focar_amostra(self, carga, progresso):
-        """Faz dela a amostra atual (contorno magenta em Amostras), sem mudar a escala, e pisca."""
+        """Faz dela a amostra atual (contorno magenta em Amostras, com o elemento no rótulo), zoom nela e pisca."""
         camadas.definir_amostra_atual(carga["id"])
         self._enquadrar(carga, camadas.camada_com_amostra(carga["id"]))
         self.mostrar_progresso(progresso, True)
@@ -1131,7 +1141,7 @@ class FeixePlugin:
             camadas.modo(chave)
         except RuntimeError as e:
             self.iface.messageBar().pushMessage("Feixe", str(e).capitalize() + ".", Qgis.Info, 5)
-        self.barra.mostrar_modo(camadas.modo_atual())
+        self._mostrar_barra_cq()
 
     def acao_qgis(self, nome, *args):
         """Ponte das rotas para o QGIS: despacha a ação registrada para a thread principal e espera o resultado."""

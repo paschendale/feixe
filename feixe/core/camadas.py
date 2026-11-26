@@ -46,6 +46,7 @@ import re
 from typing import Dict, List, Optional
 
 from qgis.core import (
+    Qgis,
     QgsDataSourceUri,
     QgsExpressionContextUtils,
     QgsFeatureRequest,
@@ -347,6 +348,27 @@ def estilo_amostras(camada: QgsVectorLayer) -> None:
         ),
     ]  # fmt: skip
     camada.setRenderer(_regras(regras))
+    # O elemento que se avalia agora, escrito na amostra atual (D-148): grande, magenta com halo branco, no centro.
+    rot = QgsPalLayerSettings()
+    rot.isExpression = True
+    rot.fieldName = f"CASE WHEN {_AMOSTRA_ATUAL} THEN 'Avaliando: ' || \"elemento\" END"
+    # O enum mudou de lugar (QgsPalLayerSettings.Placement no 3.22; Qgis.LabelPlacement a partir do 3.26).
+    lp = getattr(Qgis, "LabelPlacement", None)
+    rot.placement = lp.OverPoint if lp is not None else QgsPalLayerSettings.Placement.OverPoint
+    fmt = QgsTextFormat()
+    fmt.setSize(12)
+    fmt.setColor(QColor("#FF2BD6"))
+    fonte = fmt.font()
+    fonte.setBold(True)
+    fmt.setFont(fonte)
+    buf = QgsTextBufferSettings()
+    buf.setEnabled(True)
+    buf.setSize(1.6)
+    buf.setColor(QColor("white"))
+    fmt.setBuffer(buf)
+    rot.setFormat(fmt)
+    camada.setLabeling(QgsVectorLayerSimpleLabeling(rot))
+    camada.setLabelsEnabled(True)
 
 
 def estilo_ocorrencias(camada: QgsVectorLayer, papel_: str) -> None:

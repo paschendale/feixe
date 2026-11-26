@@ -311,7 +311,7 @@ class _Canvas:
         self.s.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:4674"))
         self.s.setOutputSize(QSize(800, 600))
         self.s.setExtent(QgsRectangle(-60, -30, -59.9, -29.9))  # longe de tudo: o primeiro zoom centraliza
-        self.centros, self.piscadas, self.ferramenta = [], [], None
+        self.centros, self.piscadas, self.ferramenta, self.extensoes = [], [], None, []
 
     def mapSettings(self):  # noqa: N802
         return self.s
@@ -326,6 +326,10 @@ class _Canvas:
         w, h = e.width() / 2, e.height() / 2
         self.s.setExtent(QgsRectangle(p.x() - w, p.y() - h, p.x() + w, p.y() + h))
         self.centros.append((p.x(), p.y()))
+
+    def setExtent(self, ret):  # noqa: N802
+        self.s.setExtent(ret)
+        self.extensoes.append(ret)
 
     def refresh(self):
         pass
@@ -498,13 +502,26 @@ def d3c(amb, usuario, senha):
         acoes = {a.name() for a in am.actions().actions()}
         assert acoes == {"Trabalhar nesta amostra", "Conforme", "Não conforme…"}, acoes
         ok(f"Amostras: só leitura, estilo por status e formulário sem erro: {textos}")
-        assert regras.acoes_visiveis(plugin._cq)["conforme"] and plugin._cq["pendentes"] == 4, plugin._cq
-        ok(f"a barra mostra as ações do avaliador ({plugin._cq})")
+        assert regras.acoes_visiveis(plugin._cq, camadas.modo_atual())["conforme"] and plugin._cq["pendentes"] == 4
+        camadas.modo("execucao")
+        assert not regras.acoes_visiveis(plugin._cq, camadas.modo_atual())["conforme"]
+        camadas.modo("cq")
+        ok(f"a barra mostra as ações do avaliador só no modo Avaliar ({plugin._cq})")
+        assert am.labelsEnabled() and "Avaliando" in am.labeling().settings().fieldName
+        ok("Amostras com o rótulo do elemento na amostra atual")
 
         # --- próxima, conforme, não conforme pela barra ------------------------------------------------------------
         r = plugin.proxima_amostra()
         primeira = camadas.amostra_atual()
         assert r["carga"]["id"] == primeira and plugin.iface.canvas.piscadas[-1][0].startswith("Amostras - "), r
+        # Zoom na extensão da amostra, com 10% de folga (D-148).
+        from qgis.core import QgsRectangle
+
+        c = r["carga"]
+        ext = plugin.iface.canvas.extensoes[-1]
+        assert abs(ext.width() - 1.1 * (c["xmax"] - c["xmin"])) < 1e-6 and ext.contains(
+            QgsRectangle(c["xmin"], c["ymin"], c["xmax"], c["ymax"])
+        ), ext.toString()
         assert plugin.rotulo_status.texto.startswith("Feixe · CQ ") and "/4 amostras" in plugin.rotulo_status.texto
         ok(f"próxima amostra: #{primeira} é a atual, o mapa foi até ela e piscou; {plugin.rotulo_status.texto!r}")
 

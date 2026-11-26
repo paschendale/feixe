@@ -11,11 +11,12 @@ ACAO_CIENTE = "ciente"
 ACOES_CORRECAO = ("proxima_ocorrencia", "tratada")  # correção de inspeção (D5)
 
 
-def acoes_visiveis(estado: Optional[Dict]) -> Dict[str, bool]:
+def acoes_visiveis(estado: Optional[Dict], modo: Optional[str] = None) -> Dict[str, bool]:
     """As do avaliador só para quem tem amostras em passagens abertas (avaliadas ou não: trocar a avaliação e
-    registrar ocorrência valem enquanto a passagem está aberta); o Ciente só com ocorrência à espera da ciência."""
+    registrar ocorrência valem enquanto a passagem está aberta) e está no modo Avaliar, com o grupo Controle de
+    qualidade ligado (D-148); o Ciente só com ocorrência à espera da ciência."""
     estado = estado or {}
-    avaliador = (estado.get("amostras") or 0) > 0
+    avaliador = (estado.get("amostras") or 0) > 0 and modo == "cq"
     vis = dict.fromkeys(ACOES_AVALIADOR, avaliador)
     vis[ACAO_CIENTE] = (estado.get("ciencia") or 0) > 0
     # Correção de inspeção: para quem está com uma folha na correção aberta (mesmo com tudo tratado: desmarcar vale
