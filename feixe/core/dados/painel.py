@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from . import Executor
+from . import cq as dcq
 from . import fluxos as df
 from .grupos import _agrupar
 
@@ -83,6 +84,9 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
         g["na_fila"] = 0
     lotes: Dict[int, Dict] = {}
     pessoas: Dict[str, Dict] = {}
+    # Amostras de CQ sem avaliador, por atividade (elemento): o "Precisa de você" do Início (D3d). Separadas das cargas
+    # de produção a atribuir (D-101), que nunca contam amostra.
+    sem_avaliador: Dict[int, Dict] = {}
     for c in _cargas(ex, uf):
         fase, id_tema = fase_da_atividade.get(c["id_atividade"], (None, None))
         g = por_chave.get(_chave(fase, id_tema, c["id_atividade"])) if fase else None
@@ -98,6 +102,13 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
                 g["na_fila"] += pendentes
             else:
                 g["a_atribuir"] += pendentes
+                if fase == "cq" and pendentes:
+                    s = sem_avaliador.setdefault(
+                        c["id_atividade"], {"id_atividade": c["id_atividade"], "chave": g["chave"], "amostras": 0,
+                                            "lotes": set()},
+                    )  # fmt: skip
+                    s["amostras"] += pendentes
+                    s["lotes"].add(c["id_lote"])
         lote = lotes.setdefault(c["id_lote"], {"responsaveis": {}, "a_atribuir": 0, "na_fila": 0, "ultima": None})
         lote["ultima"] = _mais_recente(lote["ultima"], c["ultima"])
         if c["responsavel"]:
@@ -105,7 +116,7 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
             p = pessoas.setdefault(
                 c["responsavel"],
                 {"conta": c["responsavel"], "nome": c["nome"], "pendentes": 0, "concluidas_7d": 0, "ultima": None,
-                 "grupos": set(), "lotes": set()},
+                 "grupos": set(), "lotes": set(), "por_grupo": {}},
             )  # fmt: skip
             p["pendentes"] += pendentes
             p["concluidas_7d"] += c["concluidas_7d"]
@@ -113,6 +124,8 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
             if g and pendentes:
                 p["grupos"].add(g["chave"])
                 p["lotes"].add(c["id_lote"])
+                # Pendentes por atividade em produção: a Equipe diz "12 amostras" no CQ e "30 cargas" na produção.
+                p["por_grupo"][g["chave"]] = p["por_grupo"].get(g["chave"], 0) + pendentes
         elif c["id_lote"] in fila:
             lote["na_fila"] += pendentes
         else:
@@ -160,20 +173,59 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
         "lotes": detalhe_lotes,
         "pessoas": sorted(pessoas.values(), key=lambda p: p["nome"]),
         "status": {r["status_nacional"]: r["n"] for r in status},
+        "amostras_sem_avaliador": _sem_avaliador(ex, sem_avaliador, membros),
+    }
+
+
+def _sem_avaliador(ex: Executor, por_atividade: Dict[int, Dict], membros: List[Dict]) -> List[Dict]:
+    """As amostras sem avaliador por atividade de CQ, com o nome do elemento (`f_elemento_nome`, como no pull)."""
+    if not por_atividade:
+        return []
+    nomes = {m["id_atividade"]: (m["atividade"], m["tema"]) for m in membros}
+    elementos = {
+        r["id"]: r["elemento"]
+        for r in ex.todos(
+            "SELECT a.id, mapcartacomp.f_elemento_nome(a.id_medidadequalidade) AS elemento "
+            "FROM mapcartacomp.atividade a WHERE a.id = ANY(%s)",
+            (sorted(por_atividade),),
+        )
+    }
+    saida = []
+    for ativ, s in por_atividade.items():
+        nome, tema = nomes.get(ativ, (None, None))
+        saida.append(
+            {**s, "atividade": nome, "tema": tema, "elemento": elementos.get(ativ), "lotes": sorted(s["lotes"])}
+        )
+    return sorted(saida, key=lambda s: (s["chave"], -s["amostras"], s["elemento"] or s["atividade"] or ""))
+
+
+def nomes(ex: Executor, contas: List[str]) -> Dict[str, str]:
+    """Nome de cada conta no SGBC (`mapcartctrl.t_usuario`); conta sem cadastro fica de fora."""
+    if not contas:
+        return {}
+    return {
+        r["conta"]: r["nome"]
+        for r in ex.todos(
+            "SELECT nom_contausuario AS conta, nom_usuario::text AS nome FROM mapcartctrl.t_usuario "
+            "WHERE nom_contausuario = ANY(%s)",
+            (sorted(set(contas)),),
+        )
+        if r["nome"]
     }
 
 
 def esperando(ex: Executor, uf: str) -> List[Dict]:
     """Folhas cuja última etapa terminou (concluída ou pulada, ou em andamento com todas as cargas concluídas) e que só
-    andam quando o supervisor abrir a próxima.
+    andam quando o supervisor abrir a próxima. No CQ, todas as amostras avaliadas: a folha vem com o resultado
+    (`cq.resultados`) e espera Aprovar ou Nova revisão (D4).
 
     Agrupadas pela decisão: tema, etapa que terminou e a próxima do fluxo (nula = fim do fluxo). Folha já CONCLUIDA
     para a CCAR fica de fora.
     """
     linhas = ex.todos(
-        "SELECT l.id AS id_lote, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, "
-        "l.id_tema, t.nome AS tema, fe.id AS id_etapa, fe.nome AS etapa, le.situacao, "
-        "coalesce(le.concluida_em, le.atualizado_em) AS desde, l.id_fluxo, fl.nome AS fluxo, "
+        "SELECT l.id AS id_lote, l.tipo, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, "
+        "l.id_tema, t.nome AS tema, fe.id AS id_etapa, fe.nome AS etapa, le.situacao, le.id AS id_lote_etapa, "
+        "fe.fase, le.resultado, coalesce(le.concluida_em, le.atualizado_em) AS desde, l.id_fluxo, fl.nome AS fluxo, "
         "n.id AS id_proxima, n.nome AS proxima "
         "FROM mapcartacomp.lote l "
         f"JOIN mapcartacomp.lote_etapa le ON le.id = {df._ULTIMA} "
@@ -189,11 +241,16 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
         (uf,),
     )
     # E as que terminaram as cargas (D-109): etapa em andamento com todas as cargas concluídas. Para o supervisor é a
-    # mesma decisão; abrir a próxima conclui a etapa (`fluxos.avancar`).
+    # mesma decisão; abrir a próxima conclui a etapa (`fluxos.avancar`). Na correção de inspeção (D5), os dois
+    # critérios juntos: todas as ocorrências da folha tratadas (de todas as revisões) e todas as cargas concluídas (a
+    # carga da folha conclui sozinha com a última tratada; carga pela grade, quem a tem conclui); sem carga nenhuma
+    # (nada a tratar ao abrir), basta não ter ocorrência por tratar.
     linhas += ex.todos(
-        "SELECT l.id AS id_lote, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, "
-        "l.id_tema, t.nome AS tema, fe.id AS id_etapa, fe.nome AS etapa, le.situacao, "
-        "(SELECT max(c.concluido_em) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id) AS desde, "
+        "SELECT l.id AS id_lote, l.tipo, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, "
+        "l.id_tema, t.nome AS tema, fe.id AS id_etapa, fe.nome AS etapa, le.situacao, le.id AS id_lote_etapa, "
+        "fe.fase, le.resultado, "
+        "coalesce((SELECT max(c.concluido_em) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id), "
+        "(SELECT max(i.tratado_em) FROM mapcartacomp.cq_inspecao i WHERE i.id_lote = l.id), le.iniciada_em) AS desde, "
         "l.id_fluxo, fl.nome AS fluxo, n.id AS id_proxima, n.nome AS proxima "
         "FROM mapcartacomp.lote l "
         "JOIN mapcartacomp.lote_etapa le ON le.id_lote = l.id AND le.situacao = 'em_andamento' "
@@ -203,28 +260,52 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
         "LEFT JOIN LATERAL (SELECT x.id, x.nome FROM mapcartacomp.fluxo_etapa x WHERE x.id_fluxo = l.id_fluxo "
         "AND x.ordem > fe.ordem ORDER BY x.ordem LIMIT 1) n ON true "
         "WHERE l.uf = %s AND fe.fase <> 'envio_gcq' "
-        "AND EXISTS (SELECT 1 FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id) "
+        "AND (fe.fase = 'correcao_inspecao' OR EXISTS (SELECT 1 FROM mapcartacomp.carga_trabalho c "
+        "WHERE c.id_lote_etapa = le.id)) "
         "AND NOT EXISTS (SELECT 1 FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id "
-        "AND NOT c.concluido) ORDER BY t.nome, fe.ordem, folha_revisao",
+        "AND NOT c.concluido) "
+        "AND (fe.fase <> 'correcao_inspecao' OR NOT EXISTS (SELECT 1 FROM mapcartacomp.cq_inspecao i "
+        "WHERE i.id_lote = l.id AND NOT i.tratado)) ORDER BY t.nome, fe.ordem, folha_revisao",
         (uf,),
     )
+    # CQ (D4): a folha com o CQ avaliado espera a decisão sobre o resultado (Aprovar ou Nova revisão), e as folhas com
+    # o mesmo resultado ficam juntas, para decidir em lote. CQ já decidido (aprovado no fim do fluxo) é só fim do fluxo.
+    for r in linhas:
+        if r["fase"] == "cq" and r["resultado"]:
+            r["fase"] = None
+    res = dcq.resultados(ex, [r["id_lote_etapa"] for r in linhas if r["fase"] == "cq"])
+    # Correção (D5): quantas ocorrências a folha teve e foram tratadas, para a frase do grupo.
+    tratadas = {
+        o["id_lote"]: o["n"]
+        for o in ex.todos(
+            "SELECT id_lote, count(*) AS n FROM mapcartacomp.cq_inspecao WHERE id_lote = ANY(%s) AND tratado "
+            "GROUP BY id_lote",
+            ([r["id_lote"] for r in linhas if r["fase"] == "correcao_inspecao"],),
+        )
+    } if any(r["fase"] == "correcao_inspecao" for r in linhas) else {}  # fmt: skip
     grupos: Dict[tuple, Dict] = {}
     for r in linhas:
+        cq = res.get(r["id_lote_etapa"]) if r["fase"] == "cq" else None
+        resultado = cq["resultado"] if cq else None
         g = grupos.setdefault(
-            (r["id_tema"], r["id_etapa"], r["id_proxima"]),
+            (r["id_tema"], r["id_etapa"], r["id_proxima"], resultado),
             {"tema": r["tema"], "etapa": r["etapa"], "fluxo": r["fluxo"], "id_proxima": r["id_proxima"],
-             "proxima": r["proxima"], "folhas": [], "desde": None, "ate": None},
+             "proxima": r["proxima"], "fase": r["fase"], "resultado": resultado, "folhas": [], "desde": None,
+             "ate": None},
         )  # fmt: skip
         g["folhas"].append(
             {
                 "id_lote": r["id_lote"],
                 "folha_revisao": r["folha_revisao"],
+                "tipo": r["tipo"],
                 "situacao": r["situacao"],
                 "desde": r["desde"],
+                "cq": cq,
+                "ocorrencias_tratadas": tratadas.get(r["id_lote"], 0) if r["fase"] == "correcao_inspecao" else None,
             }
         )
         if r["desde"] is not None:
             g["desde"] = r["desde"] if g["desde"] is None else min(g["desde"], r["desde"])
             g["ate"] = r["desde"] if g["ate"] is None else max(g["ate"], r["desde"])
-    # Fim do fluxo por último: é outra decisão (encerrar a folha), não abrir a próxima.
-    return sorted(grupos.values(), key=lambda g: (g["id_proxima"] is None, -len(g["folhas"])))
+    # Fim do fluxo por último: é outra decisão (encerrar a folha), não abrir a próxima. O CQ decide mesmo no fim.
+    return sorted(grupos.values(), key=lambda g: (g["id_proxima"] is None and g["fase"] != "cq", -len(g["folhas"])))

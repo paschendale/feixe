@@ -46,3 +46,15 @@ def converter(linha: Optional[Dict[str, Any]], datas: Iterable[str] = (), bools:
         if c in linha and linha[c] is not None:
             linha[c] = bool(linha[c])
     return linha
+
+
+def carga_da_folha(c: str = "c") -> str:
+    """Condição SQL (SQLite) da carga que é a folha inteira na correção de inspeção (D5): numa passagem de correção, a
+    carga de atividade que não é pela grade. Ela não se conclui à mão: conclui quando todas as ocorrências da folha
+    estão tratadas (como `mapcartacomp.f_correcao_derivar_um`). `c` vazio: colunas sem prefixo (filtro de camada)."""
+    p = f"{c}." if c else ""
+    return (
+        f"({p}id_lote_etapa IN (SELECT le_f.id FROM lote_etapa le_f JOIN fluxo_etapa fe_f "
+        "ON fe_f.id = le_f.id_fluxo_etapa WHERE fe_f.fase = 'correcao_inspecao') "
+        f"AND {p}id_atividade IN (SELECT a_f.id FROM atividade a_f WHERE coalesce(a_f.geracao, 'manual') <> 'grade'))"
+    )

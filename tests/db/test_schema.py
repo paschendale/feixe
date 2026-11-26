@@ -172,6 +172,7 @@ def test_chaves_estrangeiras(banco):
         ("mapcartacomp.cq_amostra", "mapcartacomp.carga_trabalho"),
         ("mapcartacomp.cq_inspecao", "mapcartacomp.lote"),
         ("mapcartacomp.cq_inspecao", "mapcartacomp.carga_trabalho"),
+        ("mapcartacomp.cq_inspecao", "mapcartacomp.lote_etapa"),
     }
     assert esperadas <= fks, esperadas - fks
 

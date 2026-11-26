@@ -112,7 +112,6 @@ def test_regras_do_andar(amb):
     ])  # fmt: skip
     lote, e = _folha(ex, "DF", fluxo)
     le = _aberta(ex, lote)
-    assert "observação" in _recusa(ex, df.acao, "DF", le, "iniciar", "  ").mensagem
     assert "obrigatória" in _recusa(ex, df.acao, "DF", le, "pular", OBS).mensagem
     assert "só se conclui" in _recusa(ex, df.acao, "DF", le, "concluir", OBS).mensagem
     assert _recusa(ex, df.acao, "GO", le, "iniciar", OBS).status == 404

@@ -1,5 +1,5 @@
 import type { Fluxo } from '@/lib/api'
-import { Label } from '@/components/ui/label'
+import { Campo } from '@/components/ds'
 import { Select } from '@/components/ui/select'
 import { useApi } from '@/lib/useApi'
 
@@ -9,13 +9,16 @@ export function EscolherFluxo({ valor, mudar }: { valor: number | null; mudar: (
   const itens = dados?.itens ?? []
   const atual = itens.find((f) => f.id === valor)
   return (
-    <div className="grid gap-1.5">
-      <Label htmlFor="fluxo">Fluxo</Label>
-      <Select
-        id="fluxo"
-        value={valor ?? ''}
-        onChange={(e) => mudar(itens.find((f) => f.id === Number(e.target.value)) ?? null)}
-      >
+    <Campo
+      rotulo="Fluxo"
+      dica={
+        // A linha fica reservada antes da escolha: o diálogo não cresce ao escolher o fluxo.
+        <span className="block h-4 truncate">
+          {atual ? (atual.primeira_etapa ? `Começa em: ${atual.primeira_etapa}` : 'Este fluxo ainda não tem etapas.') : 'O lote começa na primeira etapa do fluxo.'}
+        </span>
+      }
+    >
+      <Select value={valor ?? ''} onChange={(e) => mudar(itens.find((f) => f.id === Number(e.target.value)) ?? null)}>
         <option value="">{erro ? 'não deu para carregar os fluxos' : 'Escolha o projeto, o tema e o fluxo'}</option>
         {itens.map((f) => (
           <option key={f.id} value={f.id}>
@@ -23,10 +26,6 @@ export function EscolherFluxo({ valor, mudar }: { valor: number | null; mudar: (
           </option>
         ))}
       </Select>
-      {/* A linha fica reservada antes da escolha: o diálogo não cresce ao escolher o fluxo. */}
-      <p className="h-4 truncate text-xs text-muted-foreground">
-        {atual ? (atual.primeira_etapa ? `Começa em: ${atual.primeira_etapa}` : 'Este fluxo ainda não tem etapas.') : 'A folha começa na primeira etapa do fluxo.'}
-      </p>
-    </div>
+    </Campo>
   )
 }

@@ -92,3 +92,61 @@ def test_regras_da_carga_no_servidor():
     )
     # Mudar outra coisa numa etapa encerrada não esbarra na regra do concluir.
     assert _Falso("concluida").regras(feita, {"concluido": True}) is None
+
+
+# --- CQ (D3a) --------------------------------------------------------------------------------------------------------
+
+
+def _cq(situacao="em_andamento"):
+    p = push._Push(None, None, USUARIO, "DF", dt.timedelta(0), T)
+    p.etapas = {12: {"situacao": situacao, "cod_projeto": 5, "folha": "2534-1"}}
+    p.cargas_cq = {
+        4001: {"id": 4001, "uuid": "c1", "responsavel": USUARIO, "id_lote_etapa": 12, "id_cq_plano": 801},
+        4003: {"id": 4003, "uuid": "c3", "responsavel": "u_aval", "id_lote_etapa": 12, "id_cq_plano": 801},
+        1001: {"id": 1001, "uuid": "p1", "responsavel": USUARIO, "id_lote_etapa": 11, "id_cq_plano": None},
+        1009: {"id": 1009, "uuid": "p9", "responsavel": "u_outro", "id_lote_etapa": 11, "id_cq_plano": None},
+    }
+    return p
+
+
+def test_regras_da_amostra_no_servidor():
+    assert _cq().regras_amostra({"id_carga_trabalho": 4001}) is None
+    assert "não é mais de uma carga sua" in _cq().regras_amostra({"id_carga_trabalho": 4003})
+    assert "não existe mais" in _cq().regras_amostra({"id_carga_trabalho": 4999})
+    assert "encerrada" in _cq("concluida").regras_amostra({"id_carga_trabalho": 4001})
+
+
+def test_regras_da_ocorrencia_nova_no_servidor():
+    nova = {"id_carga_trabalho": 4001, "responsavel": USUARIO}
+    assert _cq().regras_ocorrencia_nova(nova) is None
+    assert "outra pessoa" in _cq().regras_ocorrencia_nova({**nova, "responsavel": "u_aval"})
+    assert "não está mais atribuída" in _cq().regras_ocorrencia_nova({**nova, "id_carga_trabalho": 4003})
+    assert "não existe mais" in _cq().regras_ocorrencia_nova({**nova, "id_carga_trabalho": 1001})  # não é de CQ
+    assert "encerrada" in _cq("concluida").regras_ocorrencia_nova(nova)
+
+
+def test_regras_de_editar_e_dar_ciencia_no_servidor():
+    minha = {"responsavel": USUARIO, "id_lote_etapa": 12, "id_carga_avaliada": 1009}
+    dele = {"responsavel": "u_aval", "id_lote_etapa": 12, "id_carga_avaliada": 1001}
+    assert _cq().regras_ocorrencia(minha, ["anotacao"]) is None
+    assert "outra pessoa" in _cq().regras_ocorrencia(dele, ["anotacao", "geom"])
+    assert "encerrada" in _cq("concluida").regras_ocorrencia(minha, ["anotacao"])
+    # Ciência: só o autor da carga apontada, e vale com a passagem de CQ encerrada.
+    assert _cq("concluida").regras_ocorrencia(dele, ["ciente_em", "ciente_por"]) is None
+    assert "só quem fez a carga" in _cq().regras_ocorrencia(minha, ["ciente_em", "ciente_por"])
+
+
+def test_rotulos_do_cq():
+    p = _cq()
+    assert p._rotulo("cq_amostra", {"id_carga_trabalho": 4001}, {}) == "Amostra da carga 4001 em 2534-1"
+    assert p._rotulo("cq_inspecao", None, {"campos": {"id_lote_etapa": 12}}) == "Ocorrência em 2534-1"
+
+
+def test_juntar_nao_junta_apagar_com_editar():
+    itens = [
+        _item(1, "cq_inspecao", "o1", {"anotacao": "a"}, "x1"),
+        _item(2, "cq_inspecao", "o1", {"anotacao": "b"}, "x2"),
+        _item(3, "cq_inspecao", "o1", {}, "x3", op="delete"),
+    ]
+    passos = push.juntar(itens)
+    assert [(t, g["operacao"], len(g["itens"])) for t, g in passos] == [("envio", "update", 2), ("envio", "delete", 1)]

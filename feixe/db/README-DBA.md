@@ -14,11 +14,11 @@ flowchart LR
 | Arquivo | O que faz |
 |---|---|
 | `ccar/001_schema.sql` | Schema `mapcartacomp` e `schema_version` (controle das migrações) |
-| `ccar/002_referencias.sql` | Tema, fase (com carga inicial), atividade, fluxo e etapas, usuários do Feixe, calendário |
+| `ccar/002_referencias.sql` | Tema, fase (com carga inicial), atividade, fluxo e etapas (com o padrão do plano de CQ: nível de inspeção, LQA, fração crítica), usuários do Feixe, calendário |
 | `ccar/003_lotes.sql` | Lotes (folhas e lotes livres), passagens por etapa e histórico |
-| `ccar/004_cargas_cq.sql` | Planos de amostragem, cargas de trabalho, amostras, ocorrências de inspeção e a fila de folhas por pessoa |
+| `ccar/004_cargas_cq.sql` | Planos de amostragem (um por atividade em cada passagem, com a fração crítica usada), cargas de trabalho, amostras, ocorrências de inspeção (com a passagem de CQ e a carga avaliada) e a fila de folhas por pessoa |
 | `ccar/005_sync_log.sql` | Registro da sincronização |
-| `ccar/006_regras.sql` | Triggers: datas de conclusão e avaliação, auditoria, derivação do status nacional, recusa de carga fora da folha ou de atividade fora da etapa |
+| `ccar/006_regras.sql` | Triggers: datas de conclusão, avaliação e tratamento da ocorrência, passagem de CQ e carga avaliada da ocorrência, auditoria, derivação do status nacional, recusa de carga fora da folha ou de atividade fora da etapa |
 | `ccar/007_views.sql` | Views de compatibilidade (`vw_*`, filtradas pelo usuário), de acompanhamento (`ctrl_*`) e `vw_carga_supervisao` (cargas da unidade para o supervisor, só leitura) |
 
 Scripts auxiliares (na raiz do repositório): `scripts/db/aplicar.sh` (aplica as migrações que faltam) e `scripts/db/gerar_grants.py` (gera os GRANTs para as roles reais).

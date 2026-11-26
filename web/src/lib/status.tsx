@@ -1,13 +1,14 @@
 import type { StatusNacional } from '@/lib/api'
 
-// Status nacional: o que a CCAR vê. Cores do protótipo (escala do azul-aço ao azul IBGE; devolvida em vermelho).
-export const STATUS: Record<StatusNacional, { rotulo: string; cor: string }> = {
-  PLANEJADA: { rotulo: 'Planejada', cor: '#D6E0EE' },
-  EM_PRODUCAO: { rotulo: 'Em produção', cor: '#9DB4D8' },
-  EM_CQ: { rotulo: 'Em CQ', cor: '#7492C1' },
-  ENTREGUE_GCQ: { rotulo: 'Entregue à GCQ', cor: '#3A66A3' },
-  CONCLUIDA: { rotulo: 'Concluída', cor: '#004182' },
-  DEVOLVIDA: { rotulo: 'Devolvida', cor: '#C8443A' },
+// Status nacional: o que a CCAR vê. Escala do azul-aço ao azul IBGE, devolvida em vermelho (tokens --dado-status-*).
+// `escuro`: o texto por cima da cor vai em branco.
+export const STATUS: Record<StatusNacional, { rotulo: string; cor: string; escuro?: boolean }> = {
+  PLANEJADA: { rotulo: 'Planejada', cor: 'var(--dado-status-planejada)' },
+  EM_PRODUCAO: { rotulo: 'Em produção', cor: 'var(--dado-status-producao)' },
+  EM_CQ: { rotulo: 'Em CQ', cor: 'var(--dado-status-cq)', escuro: true },
+  ENTREGUE_GCQ: { rotulo: 'Entregue à GCQ', cor: 'var(--dado-status-gcq)', escuro: true },
+  CONCLUIDA: { rotulo: 'Concluída', cor: 'var(--dado-status-concluida)', escuro: true },
+  DEVOLVIDA: { rotulo: 'Devolvida', cor: 'var(--dado-status-devolvida)', escuro: true },
 }
 
 export const SITUACAO: Record<string, string> = {

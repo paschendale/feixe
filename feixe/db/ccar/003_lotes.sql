@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.lote_etapa (
 
 COMMENT ON COLUMN mapcartacomp.lote_etapa.revisao IS 'Revisão da folha nesta passagem. Nula no INSERT = derivada pelas regras (006).';
 COMMENT ON COLUMN mapcartacomp.lote_etapa.resultado IS
-    'Desfecho registrado pelo supervisor quando a etapa tem um (ex.: envio à GCQ: aprovada ou devolvida).';
+    'Desfecho registrado pelo supervisor quando a etapa tem um: envio à GCQ, aprovada ou devolvida; CQ, aprovada ou '
+    'reprovada (decisão do supervisor sobre o resultado dos planos, que pode aprovar uma folha reprovada).';
 COMMENT ON COLUMN mapcartacomp.lote_etapa.expor_ocorrencias IS
     'O supervisor incluiu as correções a serem feitas ao planejar esta passagem: o responsável vê as ocorrências '
     'das passagens anteriores. Falso (padrão) = revisão às cegas.';
@@ -100,7 +101,9 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.lote_etapa_hist (
 );
 
 COMMENT ON COLUMN mapcartacomp.lote_etapa_hist.acao IS
-    'Valores previstos: iniciar, concluir, pular, voltar, reabrir, repetir, gcq_aprovada, gcq_devolvida.';
+    'Valores previstos: abrir, iniciar, concluir, pular, voltar, reabrir, repetir, gcq_aprovada, gcq_devolvida, '
+    'cq_aprovada, cq_reprovada (a observação traz o resultado por elemento), importar, encerrar (folha concluída no '
+    'fim do fluxo pelo supervisor: a etapa atual com esta linha deixa o lote CONCLUIDA).';
 
 CREATE INDEX IF NOT EXISTS lote_etapa_hist_etapa_idx ON mapcartacomp.lote_etapa_hist (id_lote_etapa);
 CREATE INDEX IF NOT EXISTS lote_etapa_hist_atualizado_em_idx ON mapcartacomp.lote_etapa_hist (uf, atualizado_em);

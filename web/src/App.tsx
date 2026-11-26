@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CloudOff, Layers, RefreshCw } from 'lucide-react'
 import { Logo } from '@/components/Logo'
-import { RotuloEstavel, RotuloNegrito } from '@/components/painel'
+import { RotuloEstavel, RotuloNegrito } from '@/components/ds'
 import { AvisosProvider, useAvisar } from '@/lib/avisos'
 import { hora, plural } from '@/lib/formato'
 import { navegar, useRota } from '@/lib/rotas'
@@ -35,7 +35,7 @@ function BotaoCamadas() {
       onClick={montar}
       disabled={!conectado || ocupado}
       title="Monta o grupo Feixe no projeto aberto do QGIS"
-      className="flex items-center gap-1.5 rounded-md bg-white/12 px-3 py-[7px] text-white hover:bg-white/20 disabled:opacity-40"
+      className="flex h-7 items-center gap-1.5 rounded-md bg-primary-suave px-2.5 font-medium text-primary hover:bg-primary/15 disabled:opacity-40"
     >
       <Layers className="size-3.5" /> <RotuloEstavel ocupado={ocupado} rotulo="Camadas no QGIS" rotuloOcupado="Montando…" />
     </button>
@@ -56,8 +56,8 @@ function Conexao() {
   const texto = !conectado ? 'QGIS fechado' : online ? 'Conectado' : 'Sem a CCAR'
   const ambiente = status?.rotulo_ambiente && !/produ/i.test(status.ambiente) ? status.rotulo_ambiente : null
   return (
-    <span className="flex items-center gap-1.5" title={status?.detalhe || (conectado ? 'O painel está falando com o QGIS' : 'Reabra o Feixe pelo QGIS')}>
-      <span className={cn('size-2 rounded-full', online ? 'bg-[#4CC26F]' : conectado ? 'bg-[#F0A040]' : 'bg-white/40')} />
+    <span className="flex h-7 items-center gap-1.5 px-1" title={status?.detalhe || (conectado ? 'O painel está falando com o QGIS' : 'Reabra o Feixe pelo QGIS')}>
+      <span className={cn('size-2 rounded-full', online ? 'bg-sucesso' : conectado ? 'bg-alerta' : 'bg-terciario')} />
       {texto}
       {ambiente ? ` · ${ambiente}` : ''}
     </span>
@@ -106,7 +106,7 @@ function Sincronia() {
     }
   }
   return (
-    <button onClick={agora} disabled={s.em_andamento} title={dica} aria-live="polite" className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-white/85 hover:bg-white/12 hover:text-white disabled:opacity-80">
+    <button onClick={agora} disabled={s.em_andamento} title={dica} aria-live="polite" className="flex h-7 items-center gap-1.5 rounded-md px-2 hover:bg-preenchimento-2 hover:text-foreground disabled:opacity-80">
       <Icone className={cn('size-3.5', s.em_andamento && 'animate-spin')} aria-hidden />
       {texto}
     </button>
@@ -127,11 +127,11 @@ function Casca() {
   const Componente = atual?.componente
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="flex min-h-[52px] shrink-0 flex-wrap items-center gap-x-7 gap-y-2 bg-ibge px-6 py-2 text-white">
-        <a href="#/inicio" className="flex items-center gap-2.5 text-[17px] font-bold tracking-[.01em]">
-          <Logo tamanho={24} escuro /> feixe
+      <header className="sticky top-0 z-40 flex min-h-[52px] shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-b border-border/70 bg-card/80 px-6 py-2 backdrop-blur-xl backdrop-saturate-150">
+        <a href="#/inicio" className="flex items-center gap-2 text-titulo-3 font-bold tracking-[-.01em] text-ibge">
+          <Logo tamanho={22} /> feixe
         </a>
-        <nav aria-label="Módulos" className="flex flex-wrap gap-1">
+        <nav aria-label="Módulos" className="flex flex-wrap gap-0.5">
           {telas
             .filter((t) => !t.oculta)
             .map((t) => (
@@ -140,21 +140,21 @@ function Casca() {
                 href={`#/${t.id}`}
                 aria-current={t.id === atual?.id ? 'page' : undefined}
                 className={cn(
-                  'border-b-2 border-transparent px-3 py-2 text-white/78 hover:text-white',
-                  t.id === atual?.id && 'border-white text-white',
+                  'rounded-md px-3 py-1.5 text-texto-2 transition-colors hover:bg-preenchimento-2 hover:text-foreground',
+                  t.id === atual?.id && 'bg-preenchimento text-foreground',
                 )}
               >
-                <RotuloNegrito ativo={t.id === atual?.id}>{t.rotulo}</RotuloNegrito>
+                <RotuloNegrito ativo={t.id === atual?.id} peso="font-medium">{t.rotulo}</RotuloNegrito>
               </a>
             ))}
         </nav>
-        <div className="ml-auto flex flex-wrap items-center gap-3.5 text-[13px] text-white/85">
+        <div className="ml-auto flex flex-wrap items-center gap-2 text-nota text-muted-foreground">
           <Conexao />
           <Sincronia />
           <BotaoCamadas />
           <a
             href="#/sobre"
-            className="grid size-8 place-items-center rounded-full bg-white/18 font-semibold text-white hover:bg-white/28"
+            className="ml-1 grid size-8 place-items-center rounded-full bg-primary text-rodape font-semibold text-primary-foreground hover:bg-primary/90"
             title={eu ? `${eu.nome} (${eu.conta}) · ${eu.papel_rotulo}${eu.uf ? ` · ${eu.uf}` : ''}: conta e sobre` : 'Conta e sobre'}
             aria-label={eu ? `${eu.nome}: conta e sobre` : 'Conta e sobre'}
           >
@@ -163,7 +163,7 @@ function Casca() {
         </div>
       </header>
       {!conectado && (
-        <div className="border-b border-destructive/30 bg-destructive/10 px-6 py-2.5 text-center text-sm">
+        <div role="alert" className="border-b border-destructive/20 bg-perigo-suave px-6 py-2.5 text-center text-nota text-perigo">
           O QGIS fechou ou o plugin foi descarregado. Reabra o Feixe pelo QGIS.
         </div>
       )}

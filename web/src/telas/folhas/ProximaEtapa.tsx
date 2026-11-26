@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
-import { COR, RotuloEstavel } from '@/components/painel'
+import { Campo, Nota, RotuloEstavel } from '@/components/ds'
 import type { ItemAvanco, ResultadoAvanco } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { lista, num, plural } from '@/lib/formato'
@@ -37,6 +37,8 @@ export function ProximaEtapa({ lotes, fechar }: { lotes: number[]; fechar: (aber
     grupos.set(k, [...(grupos.get(k) ?? []), i])
   }
   const comPendentes = validos.filter((i) => i.concluir && i.pendentes > 0)
+  // Correção de inspeção (D5): folhas com ocorrências ainda não tratadas (a carga da folha conta nas pendentes).
+  const comATratar = validos.filter((i) => i.concluir && i.a_tratar > 0)
   const unica = new Set(validos.map((i) => i.proxima)).size === 1 ? validos[0]?.proxima : null
 
   async function confirmar() {
@@ -44,7 +46,7 @@ export function ProximaEtapa({ lotes, fechar }: { lotes: number[]; fechar: (aber
     try {
       const r = await enviar<ResultadoAvanco>('/api/lotes/avancar', { lotes: validos.map((i) => i.id_lote), observacao: obs, previa: false })
       const etapas = lista([...new Set(r.abertas.map((a) => a.etapa))])
-      avisar([r.abertas.length && `${etapas} aberta em ${plural(r.abertas.length, 'folha', 'folhas')}.`, resumoPreparo(r.preparo)].filter(Boolean).join(' '))
+      avisar([r.abertas.length && `${etapas} aberta em ${plural(r.abertas.length, 'lote', 'lotes')}.`, resumoPreparo(r.preparo)].filter(Boolean).join(' '))
       r.erros.forEach((e) => avisar(e.erro, 'erro'))
       const prontas = comCargas(r.preparo)
       fechar(r.abertas.filter((a) => prontas.has(a.id_lote_etapa)).map((a) => a.id_lote))
@@ -60,42 +62,47 @@ export function ProximaEtapa({ lotes, fechar }: { lotes: number[]; fechar: (aber
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Abrir a próxima etapa</DialogTitle>
-          <DialogDescription>Confira o que muda em cada folha. As cargas da etapa nova são geradas na hora, e a distribuição abre em seguida.</DialogDescription>
+          <DialogDescription>Confira o que muda em cada lote. As cargas da etapa nova são geradas na hora, e a distribuição abre em seguida.</DialogDescription>
         </DialogHeader>
         {/* Mesma altura mínima enquanto confere e depois: o diálogo não salta quando a conferência chega. */}
-        {!itens && <div className="grid min-h-[200px] place-items-center rounded-lg border text-sm text-muted-foreground">Conferindo as folhas…</div>}
+        {!itens && <div className="grid min-h-[200px] place-items-center rounded-xl bg-preenchimento-2 text-muted-foreground">Conferindo os lotes…</div>}
         {itens && (
           <div className="flex max-h-[50vh] min-h-[200px] flex-col gap-3 overflow-auto">
             {[...grupos.values()].map((g) => {
               const i = g[0]
               return (
-                <div key={`${i.tema}${i.etapa}${i.proxima}${i.concluir}`} className="rounded-lg border bg-[#F7F9FB] px-4 py-3">
+                <div key={`${i.tema}${i.etapa}${i.proxima}${i.concluir}`} className="rounded-xl bg-preenchimento-2 px-4 py-3">
                   <div className="flex flex-wrap items-baseline gap-x-2">
-                    <b>{plural(g.length, 'folha', 'folhas')}</b>
-                    <span className="text-[13px] text-muted-foreground">{i.tema}</span>
+                    <b>{plural(g.length, 'lote', 'lotes')}</b>
+                    <span className="text-nota text-muted-foreground">{i.tema}</span>
                   </div>
-                  <p className="mt-1 text-sm">
+                  <p className="mt-1">
                     {i.concluir ? (
                       <>
-                        conclui <b>{i.etapa}</b> e abre <b className="text-ibge">{i.proxima}</b>
+                        conclui <b>{i.etapa}</b> e abre <b className="text-primary">{i.proxima}</b>
                       </>
                     ) : (
                       <>
-                        {i.etapa ? `${i.etapa} já terminou; ` : ''}abre <b className="text-ibge">{i.proxima}</b>
+                        {i.etapa ? `${i.etapa} já terminou; ` : ''}abre <b className="text-primary">{i.proxima}</b>
                       </>
                     )}
                   </p>
-                  <p className="mt-1 text-[13px] text-muted-foreground tab">{nomes(g)}</p>
+                  <p className="tab mt-1 text-nota text-muted-foreground">{nomes(g)}</p>
                 </div>
               )
             })}
             {comPendentes.length > 0 && (
-              <p className="rounded-lg px-3.5 py-2.5 text-[13px]" style={{ background: COR.alertaFundo, color: '#5C3D00' }}>
-                {plural(comPendentes.length, 'folha ainda tem', 'folhas ainda têm')} cargas pendentes ({nomes(comPendentes)}: {num(comPendentes.reduce((s, i) => s + i.pendentes, 0))} cargas). Elas ficam na etapa concluída e ninguém mais trabalha nelas.
-              </p>
+              <Nota tom="alerta">
+                {plural(comPendentes.length, 'lote ainda tem', 'lotes ainda têm')} cargas pendentes ({nomes(comPendentes)}: {num(comPendentes.reduce((s, i) => s + i.pendentes, 0))} cargas). Elas ficam na etapa concluída e ninguém mais trabalha nelas.
+              </Nota>
+            )}
+            {comATratar.length > 0 && (
+              <Nota tom="alerta">
+                Na correção de inspeção, {plural(comATratar.length, 'lote ainda tem', 'lotes ainda têm')} ocorrências por tratar ({nomes(comATratar)}: {num(comATratar.reduce((s, i) => s + i.a_tratar, 0))}). Concluir a etapa encerra a varredura assim mesmo.
+              </Nota>
             )}
             {recusados.length > 0 && (
-              <div className="text-[13px]">
+              <div className="text-nota">
                 <b>Não {recusados.length === 1 ? 'anda' : 'andam'}:</b>
                 <ul className="mt-1 list-disc pl-5 text-muted-foreground">
                   {recusados.map((i) => (
@@ -109,17 +116,16 @@ export function ProximaEtapa({ lotes, fechar }: { lotes: number[]; fechar: (aber
           </div>
         )}
         {validos.length > 0 && (
-          <label className="flex flex-col gap-1.5 text-[13px] text-texto-2">
-            Observação (obrigatória, vai para o histórico de cada folha)
-            <Textarea rows={2} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, segue para a revisão" className="text-sm text-foreground" />
-          </label>
+          <Campo rotulo="Observação (opcional, vai para o histórico de cada lote)">
+            <Textarea rows={2} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, segue para a revisão" />
+          </Campo>
         )}
         <DialogFooter>
           <Button variant="outline" onClick={() => fechar()}>
             Cancelar
           </Button>
-          <Button className="font-semibold" disabled={!validos.length || !obs.trim() || ocupado} onClick={confirmar}>
-            <RotuloEstavel ocupado={ocupado} rotulo={`Abrir ${unica ?? 'a próxima etapa'} em ${plural(validos.length, 'folha', 'folhas')}`} rotuloOcupado="Abrindo…" />
+          <Button disabled={!validos.length || ocupado} onClick={confirmar}>
+            <RotuloEstavel ocupado={ocupado} rotulo={`Abrir ${unica ?? 'a próxima etapa'} em ${plural(validos.length, 'lote', 'lotes')}`} rotuloOcupado="Abrindo…" />
           </Button>
         </DialogFooter>
       </DialogContent>

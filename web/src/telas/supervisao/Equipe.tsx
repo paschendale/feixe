@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
-import { COR, Carregando, Colunas, Conteudo, Fichas, RotuloEstavel } from '@/components/painel'
+import { Carregando, Colunas, Conteudo, Fichas, RotuloEstavel, Selo, Tabela } from '@/components/ds'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { Pessoa, ResultadoPassar } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
-import { lista, num, parado, plural, quando } from '@/lib/formato'
+import { contarLotes, lista, num, parado, plural, quando } from '@/lib/formato'
 import { href, navegar, useRota } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'
 import { enviar, useApi } from '@/lib/useApi'
@@ -66,13 +66,27 @@ export default function Equipe() {
   const doPainel = new Map(p.pessoas.map((x) => [x.conta, x]))
   const grupo = (c: string) => p.grupos.find((g) => g.chave === c)
   const nomeLote = (id: number) => lotes.dados?.itens.find((l) => l.id === id)?.folha_revisao ?? `#${id}`
+  const contar = (ids: number[]) => contarLotes(ids.map((id) => ({ tipo: lotes.dados?.itens.find((l) => l.id === id)?.tipo })))
   const linhas = equipe.itens
     .map((x) => ({ ...x, painel: doPainel.get(x.conta) }))
     .filter((x) => ativa === 'todas' || x.painel?.grupos.includes(ativa))
     .sort((a, b) => Number(a.pendentes > 0) - Number(b.pendentes > 0) || Number(!a.ultima) - Number(!b.ultima) || (a.ultima ?? '').localeCompare(b.ultima ?? '') || a.nome.localeCompare(b.nome))
   const semCarga = linhas.filter((x) => !x.pendentes)
   const paradas = linhas.filter((x) => x.pendentes && parado(x.ultima))
-  const destinoDarCargas = p.grupos.find((g) => g.fase !== 'cq' && g.a_atribuir > 0) ?? p.grupos.find((g) => g.a_atribuir > 0)
+  // "Dar cargas" leva à produção com cargas a atribuir; para quem só avalia (perfil V), às amostras sem avaliador.
+  const producaoAAtribuir = p.grupos.find((g) => g.fase !== 'cq' && g.a_atribuir > 0)
+  const cqSemAvaliador = p.grupos.find((g) => g.fase === 'cq' && g.a_atribuir > 0)
+  const soAvalia = (s: string) => {
+    const ps = s.split(',').map((x) => x.trim().split(':').pop())
+    return ps.includes('V') && !ps.includes('O')
+  }
+  const destinoDe = (x: Pessoa) => (soAvalia(x.perfis) ? cqSemAvaliador : (producaoAAtribuir ?? cqSemAvaliador))
+  // "CQ · Hidrografia (12 amostras)": no CQ, as pendentes são amostras; na produção, só a atividade, como antes.
+  const ondeDe = (c: string, por: Record<string, number> | undefined) => {
+    const g = grupo(c)
+    if (!g) return c
+    return g.fase === 'cq' && por?.[c] ? `${rotuloCurto(g)} (${plural(por[c], 'amostra', 'amostras')})` : rotuloCurto(g)
+  }
 
   return (
     <Conteudo>
@@ -82,7 +96,7 @@ export default function Equipe() {
         escolher={(id) => navegar(`supervisao/equipe${id === 'todas' ? '' : `?grupo=${id}`}`)}
         fichas={[...p.grupos.map((g) => ({ id: g.chave, rotulo: g.rotulo })), { id: 'todas', rotulo: 'Todas as atividades', todas: true }]}
       />
-      <p className="min-h-12 max-w-[880px] text-base">
+      <p className="min-h-12 max-w-[880px] text-lede text-texto-2 [&_b]:font-semibold [&_b]:text-foreground">
         {ativa === 'todas' ? (
           <>
             <b>{plural(linhas.length, 'pessoa pode', 'pessoas podem')}</b> receber cargas {unidadeDe(eu?.uf).replace(/^Na /, 'na ')}.{' '}
@@ -110,53 +124,51 @@ export default function Equipe() {
         )}
       </p>
 
-      <div className="overflow-x-auto rounded-[10px] border bg-card">
-        <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
+      <Tabela fixa largura={900}>
           <Colunas larguras={[undefined, 130, '24%', 96, 150, 150, 184]} />
           <thead>
-            <tr className="text-left text-xs text-muted-foreground">
-              <th className="border-b py-3 pr-2 pl-4 font-medium">Pessoa</th>
-              <th className="border-b px-2 py-3 font-medium">Perfil no SGBC</th>
-              <th className="border-b px-2 py-3 font-medium">Onde está</th>
-              <th className="border-b px-2 py-3 text-right font-medium">Pendentes</th>
-              <th className="border-b px-2 py-3 text-right font-medium whitespace-nowrap">Concluídas em 7 dias</th>
-              <th className="border-b px-2 py-3 font-medium">Última conclusão</th>
-              <th className="border-b py-3 pr-4 pl-2" />
+            <tr>
+              <th>Pessoa</th>
+              <th>Perfil no SGBC</th>
+              <th>Onde está</th>
+              <th className="text-right">Pendentes</th>
+              <th className="text-right whitespace-nowrap">Concluídas em 7 dias</th>
+              <th>Última conclusão</th>
+              <th />
             </tr>
           </thead>
           <tbody>
             {linhas.map((x) => {
               const alerta = x.pendentes > 0 && parado(x.ultima)
-              const onde = x.painel?.grupos.map((c) => (grupo(c) ? rotuloCurto(grupo(c)!) : c)) ?? []
+              const onde = x.painel?.grupos.map((c) => ondeDe(c, x.painel?.por_grupo)) ?? []
+              const destino = destinoDe(x)
               const folhas = x.painel?.lotes ?? []
-              const textoOnde = `${lista(onde)}${folhas.length > 0 ? ` · ${folhas.length <= 2 ? lista(folhas.map(nomeLote)) : plural(folhas.length, 'folha', 'folhas')}` : ''}`
+              const textoOnde = `${lista(onde)}${folhas.length > 0 ? ` · ${folhas.length <= 2 ? lista(folhas.map(nomeLote)) : contar(folhas)}` : ''}`
               const nome = `${x.nome}${x.conta === eu?.conta ? ' (você)' : ''}`
               return (
-                <tr key={x.conta} className="border-b border-linha last:border-0">
-                  <td className="truncate py-3 pr-2 pl-4 font-medium" title={nome}>
+                <tr key={x.conta}>
+                  <td className="truncate font-medium" title={nome}>
                     {nome}
                   </td>
-                  <td className="truncate px-2 py-3 text-muted-foreground" title={perfis(x.perfis)}>
+                  <td className="truncate text-muted-foreground" title={perfis(x.perfis)}>
                     {perfis(x.perfis)}
                   </td>
-                  <td className="truncate px-2 py-3" title={x.pendentes ? textoOnde : undefined}>
+                  <td className="truncate" title={x.pendentes ? textoOnde : undefined}>
                     {x.pendentes ? (
                       <>
                         {lista(onde)}
-                        {folhas.length > 0 && <span className="text-muted-foreground"> · {folhas.length <= 2 ? lista(folhas.map(nomeLote)) : plural(folhas.length, 'folha', 'folhas')}</span>}
+                        {folhas.length > 0 && <span className="text-muted-foreground"> · {folhas.length <= 2 ? lista(folhas.map(nomeLote)) : contar(folhas)}</span>}
                       </>
                     ) : (
-                      <span className="font-semibold" style={{ color: COR.alerta }}>
-                        sem carga
-                      </span>
+                      <Selo tom="alerta">sem carga</Selo>
                     )}
                   </td>
-                  <td className="tab px-2 py-3 text-right">{num(x.pendentes)}</td>
-                  <td className="tab px-2 py-3 text-right">{num(x.painel?.concluidas_7d ?? 0)}</td>
-                  <td className={cn('truncate px-2 py-3', alerta && 'font-semibold')} style={{ color: alerta ? COR.alerta : undefined }}>
+                  <td className="tab text-right">{num(x.pendentes)}</td>
+                  <td className="tab text-right">{num(x.painel?.concluidas_7d ?? 0)}</td>
+                  <td className={cn('truncate', alerta && 'font-semibold text-alerta')}>
                     {quando(x.ultima)}
                   </td>
-                  <td className="py-3 pr-4 pl-2 text-right">
+                  <td className="text-right">
                     {x.pendentes ? (
                       <Popover open={passar?.de === x.conta} onOpenChange={(v) => setPassar(v ? { de: x.conta, para: '' } : null)}>
                         <PopoverTrigger asChild>
@@ -167,7 +179,7 @@ export default function Equipe() {
                         <PopoverContent>
                           <div className="flex flex-col gap-1">
                             <p className="font-semibold">Passar as {plural(x.pendentes, 'pendente', 'pendentes')}</p>
-                            <p className="text-[13px] text-muted-foreground">Uma folha por pessoa: o que não couber agora entra na fila de quem recebe. As concluídas ficam com {x.nome.split(' ')[0]}.</p>
+                            <p className="text-nota text-muted-foreground">Um lote por pessoa: o que não couber agora entra na fila de quem recebe. As concluídas ficam com {x.nome.split(' ')[0]}.</p>
                           </div>
                           <Select value={passar?.para ?? ''} onChange={(e) => passar && setPassar({ ...passar, para: e.target.value })} aria-label="Para quem">
                             <option value="">Para quem?</option>
@@ -190,9 +202,9 @@ export default function Equipe() {
                           </div>
                         </PopoverContent>
                       </Popover>
-                    ) : destinoDarCargas ? (
+                    ) : destino ? (
                       <Button size="sm" variant="outline" className="w-full" asChild>
-                        <a href={href('supervisao/folhas', { grupo: destinoDarCargas.chave, atribuir: 1 })}>Dar cargas</a>
+                        <a href={href('supervisao/folhas', { grupo: destino.chave, atribuir: 1 })}>{destino.fase === 'cq' ? 'Dar amostras' : 'Dar cargas'}</a>
                       </Button>
                     ) : null}
                   </td>
@@ -200,10 +212,9 @@ export default function Equipe() {
               )
             })}
           </tbody>
-        </table>
-      </div>
-      <p className="text-[13px] text-muted-foreground">
-        Ordem: quem está sem carga, depois quem está há mais tempo sem concluir e, por último, quem ainda não concluiu nenhuma. Quem pode receber cargas: conta ativa, lotação da UF e perfil de execução (O, V ou S) no SGBC; acertos de perfil se fazem lá. "Passar pendentes" muda só as pendentes; as concluídas ficam com quem fez.
+      </Tabela>
+      <p className="text-nota text-muted-foreground">
+        Ordem: quem está sem carga, depois quem está há mais tempo sem concluir e, por último, quem ainda não concluiu nenhuma. Quem pode receber cargas: conta ativa, lotação da UF e perfil de execução (O, V ou S) no SGBC; acertos de perfil se fazem lá. No CQ, as pendentes do avaliador são amostras. "Passar pendentes" muda só as pendentes; as concluídas ficam com quem fez.
       </p>
     </Conteudo>
   )

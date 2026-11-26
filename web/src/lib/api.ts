@@ -187,17 +187,286 @@ export type ResultadoCriacao = {
 
 // O que o Feixe fez sozinho depois de abrir passagens (D-109): cargas geradas, etapas sem atividade iniciadas e avisos.
 type PassagemPreparada = { id_lote_etapa: number; folha_revisao: string; etapa: string }
+// No CQ, `planos` = quantos planos de amostragem saíram com o padrão da etapa (D-136) e `gravadas` = as amostras;
+// `cq_sem_padrao` = a etapa não tem nível e LQA padrão, e os planos se criam na gaveta.
 export type Preparo = {
-  geradas: (PassagemPreparada & { gravadas: number })[]
-  iniciadas: PassagemPreparada[]
-  avisos: (PassagemPreparada & { aviso: string })[]
+  // Na correção de inspeção (D5), `ocorrencias` = quantas a tratar na carga da folha.
+  geradas: (PassagemPreparada & { gravadas: number; planos?: number; ocorrencias?: number })[]
+  // `nada_a_tratar`: correção de inspeção sem ocorrência por tratar (D5), que começa já e vai para Esperando você.
+  iniciadas: (PassagemPreparada & { nada_a_tratar?: boolean })[]
+  avisos: (PassagemPreparada & { aviso: string; cq_sem_padrao?: boolean })[]
   erro?: string
+}
+
+// --- Planos de amostragem do CQ (D2) ---
+
+// Planos convertidos do DF podem vir sem N, nível ou Ac (só o Feixe grava todos).
+export type PlanoCQ = {
+  id: number
+  id_atividade: number
+  atividade: string
+  elemento: string | null
+  N: number | null
+  nivel: string | null
+  letra: string | null
+  n: number
+  ac: number | null
+  lqa: number
+  fracao_critica: number | null
+  semente: number
+  universo: string | null
+  resultado: string
+  amostras: number
+  avaliadas: number
+  nao_conformes: number
+  distribuidas: number
+  inspecao_completa: boolean
+  pode_refazer: boolean
+  motivo_refazer: string | null
+} & ResultadoPlano
+
+// Resultado de um plano (D4): a frase ("Comissão: 2 não conformes, aceita até 0"), o que falta avaliar e o nível de
+// conformidade (percentual de não conformes nas avaliadas contra a fração crítica gravada no plano, D-62).
+export type ResultadoPlano = {
+  id: number
+  atividade: string
+  elemento: string | null
+  n: number
+  ac: number | null
+  fracao_critica: number | null
+  resultado: string
+  amostras: number
+  avaliadas: number
+  nao_conformes: number
+  sem_avaliador: number
+  faltam: number
+  sem_ac: boolean
+  excede: boolean
+  frase: string
+  resumo: string
+  conformidade: { observado: number | null; fracao_critica: number | null; situacao: 'dentro' | 'acima' | null; leitura: string }
+}
+
+export type ResultadoCQ = 'pendente' | 'aprovado' | 'reprovado' | 'sem_ac' | 'sem_planos'
+
+// Resultado da passagem de CQ: reprovado se algum plano reprovou; aprovado quando todos aprovaram e tudo foi avaliado.
+export type ResultadoPassagemCQ = {
+  resultado: ResultadoCQ
+  amostras: number
+  avaliadas: number
+  faltam: number
+  sem_avaliador: number
+  frase: string
+  resumo: string
+}
+
+export type AtividadeSemPlano = { id_atividade: number; atividade: string; elemento: string | null; fracao_critica: number | null; por_feicao: boolean }
+
+export type PlanosCQ = {
+  id_lote_etapa: number
+  folha_revisao: string
+  etapa: string
+  situacao: string
+  tipo: 'folha' | 'livre'
+  padrao: { nivel: string | null; lqa: number | null; fracao_critica: number | null }
+  planos: PlanoCQ[]
+  sem_plano: AtividadeSemPlano[]
+  resultado: ResultadoPassagemCQ
+}
+
+// Prévia (ou plano gravado) devolvida por POST /api/lote_etapas/{id}/cq_plano.
+export type PreviaCQ = {
+  id_atividade: number
+  atividade: string
+  elemento: string | null
+  N: number
+  nivel: string
+  lqa: number
+  letra: string | null
+  n: number
+  ac: number
+  inspecao_completa: boolean
+  fracao_critica: number | null
+  semente: number
+  universo: string
+  ja_sorteadas: number
+  geocodigos: string[]
+  previa: boolean
+  refeito: boolean
+}
+
+// CQ da execução (D3a): amostras e ocorrências do workspace; as ocorrências da folha para o supervisor, da CCAR.
+export type PlanoDaAmostra = { id: number; nivel: string | null; letra: string | null; N: number | null; n: number | null; ac: number | null; lqa: number | null; resultado: string }
+
+export type Amostra = {
+  id: number
+  uuid: string
+  id_cq_plano: number
+  id_carga_trabalho: number
+  status: 0 | 1 | null
+  observacao: string | null
+  avaliado_em: string | null
+  avaliado_por: string | null
+  avaliada: boolean
+  id_lote_etapa: number
+  id_lote: number
+  folha_revisao: string
+  tema: string | null
+  etapa: string | null
+  atividade: string | null
+  elemento: string | null
+  geocodigo: string | null
+  concluido: boolean
+  situacao_etapa: string
+  xmin: number
+  ymin: number
+  xmax: number
+  ymax: number
+  ocorrencias: number
+  plano: PlanoDaAmostra
+}
+
+export type ProximaAmostra = { carga: Carga; amostra: Amostra | null } | null
+
+export type ResultadoAvaliacao = {
+  amostra: Amostra
+  carga: Carga
+  progresso: Progresso
+  fila: { id: number; id_lote: number; id_lote_etapa: number; folha_revisao: string; tema: string | null; atribuidas: number } | null
+  proxima: ProximaAmostra
+}
+
+export type MotivoOcorrencia = 'registrada' | 'minha_carga' | 'correcao'
+
+export type Ocorrencia = {
+  id: number | null
+  uuid: string
+  id_lote: number
+  id_lote_etapa: number | null
+  id_carga_trabalho: number | null
+  id_carga_avaliada: number | null
+  elemento: string | null
+  anotacao: string | null
+  responsavel: string
+  tratado: boolean
+  tratado_em: string | null
+  tratado_por: string | null
+  ciente_em: string | null
+  ciente_por: string | null
+  criado_em: string
+  x: number
+  y: number
+  folha_revisao: string
+  etapa: string | null
+  situacao_etapa: string | null
+  minha: boolean
+  sou_autor: boolean
+  enviada: boolean
+  pode_editar: boolean
+  pode_ciente: boolean
+  // Correção de inspeção (D5): estou com a folha na passagem de correção aberta, então marco e desmarco.
+  pode_tratar: boolean
+  revisao: number | null
+  motivo: MotivoOcorrencia
+}
+
+export type OcorrenciaDaFolha = {
+  id: number
+  uuid: string
+  id_lote_etapa: number | null
+  id_carga_trabalho: number | null
+  id_carga_avaliada: number | null
+  elemento: string | null
+  anotacao: string | null
+  responsavel: string
+  responsavel_nome: string
+  autor: string | null
+  autor_nome: string | null
+  ciente_em: string | null
+  ciente_por: string | null
+  tratado: boolean
+  tratado_em: string | null
+  tratado_por: string | null
+  criado_em: string
+  x: number
+  y: number
+  revisao: number | null
+  instancia: number | null
+  situacao_etapa: string | null
+  etapa: string | null
+  folha_revisao: string
+}
+
+export type OcorrenciasDaFolha = { id_lote: number; itens: OcorrenciaDaFolha[]; total: number; pendentes: number; sem_ciente: number }
+
+// Execução › CQ (D3d): minhas amostras por passagem de CQ e atividade (elemento). `total` = tamanho do plano;
+// `outras` = as do plano com outro avaliador (o workspace só tem as minhas).
+export type ResumoCQ = {
+  id_lote_etapa: number
+  id_lote: number
+  folha_revisao: string
+  tema: string | null
+  etapa: string | null
+  situacao: string
+  aberta: boolean
+  id_atividade: number
+  atividade: string | null
+  elemento: string | null
+  id_cq_plano: number
+  plano: { id: number; nivel: string | null; letra: string | null; N: number | null; n: number | null; ac: number | null; lqa: number | null }
+  minhas: number
+  total: number
+  outras: number
+  avaliadas: number
+  nao_conformes: number
+  pendentes: number
+  ocorrencias: number
+  ultima: string | null
+}
+
+// Para ciência (D-66): ocorrências que apontam uma carga minha. `avaliador` = nome do SGBC quando a CCAR respondeu.
+export type OcorrenciaCiencia = Ocorrencia & { geocodigo_avaliada: string | null; avaliador: string }
+export type ParaCiencia = { pendentes: OcorrenciaCiencia[]; cientes: OcorrenciaCiencia[]; dias: number }
+
+// Execução › Correção (D5): as minhas folhas na correção de inspeção aberta, com as ocorrências da folha (todas as
+// revisões). `so_folha`: a minha parte é só a varredura (a carga da folha); senão há cargas pela grade a concluir.
+export type OcorrenciaCorrecao = Ocorrencia & { avaliador: string }
+export type FolhaCorrecao = {
+  id_lote: number
+  id_lote_etapa: number
+  folha_revisao: string
+  tema: string | null
+  etapa: string | null
+  situacao: string
+  total: number
+  tratadas: number
+  pendentes: number
+  so_folha: boolean
+  cargas_pendentes: number
+  ocorrencias: OcorrenciaCorrecao[]
+}
+export type ProgressoCorrecao = { id_lote: number; id_lote_etapa: number; folha_revisao: string; total: number; tratadas: number; pendentes: number }
+export type ResultadoTratar = {
+  ocorrencia: Ocorrencia
+  progresso: ProgressoCorrecao | null
+  fila: { folha_revisao: string; atribuidas: number } | null
+  proxima: Ocorrencia | null
+}
+
+export type PainelExecucao = {
+  por_dia: { dia: string; n: number }[]
+  cq: ResumoCQ[]
+  ciencia: ParaCiencia
+  correcao: FolhaCorrecao[]
+  preparando?: boolean
 }
 
 export type FolhaDistribuir = {
   id_lote: number
   id_lote_etapa: number
   folha_revisao: string
+  // Ainda não vem do servidor; sem ele, a UI diz "lote".
+  tipo?: 'folha' | 'livre'
   tema: string
   etapa: string
   fase: string
@@ -211,6 +480,29 @@ export type FolhaDistribuir = {
 export type PessoaDistribuir = { conta: string; nome: string; perfis: string | null; pendentes: number; na_fila: number }
 export type SugestaoDistribuicao = { folhas: FolhaDistribuir[]; pessoas: PessoaDistribuir[] }
 
+// CQ (D-147): as amostras de várias folhas juntas, repartidas entre avaliadores na proporção dos pesos (em amostras).
+export type ElementoDistribuirCQ = { id_atividade: number; elemento: string; amostras: number; avaliadas: number }
+export type SugestaoDistribuicaoCQ = {
+  folhas: { id_lote: number; id_lote_etapa: number; folha_revisao: string; tipo?: 'folha' | 'livre'; tema: string; etapa: string; amostras: number; avaliadas: number; sem_avaliador: number }[]
+  fora: { id_lote: number; folha_revisao?: string; motivo: string }[]
+  elementos: ElementoDistribuirCQ[]
+  total: number
+  origem: 'atual' | 'ultima' | 'igual'
+  origem_folha: string | null
+  sem_perfil_v: boolean
+  // nao_avalia: as folhas desta seleção que a pessoa executou (ela fica só fora delas)
+  pessoas: { conta: string; nome: string; pendentes: number; motivo: string | null; com: number; peso: number; nao_avalia: string[] }[]
+}
+export type ResultadoDistribuicaoCQ = {
+  previa: boolean
+  movidas: number
+  sem_avaliador: { folha_revisao: string; amostras: number }[]
+  excluidos: { conta: string; nome: string; folhas: string[] }[]
+  folhas: string[]
+  elementos: ElementoDistribuirCQ[]
+  pessoas: { conta: string; nome: string; total: number; avaliadas: number; recebe: number; perde: number; por_elemento: Record<string, number> }[]
+}
+
 export type ItemAvanco = {
   id_lote: number
   folha_revisao: string
@@ -221,7 +513,35 @@ export type ItemAvanco = {
   pendentes: number
   proxima: string | null
   erro: string | null
+  // Correção de inspeção (D5): ocorrências da folha ainda não tratadas (o diálogo avisa; quem decide é o supervisor).
+  a_tratar: number
 }
+// Aprovar ou Nova revisão no CQ (D4): a prévia por folha e o que voltou ao confirmar.
+export type DecisaoCQ = 'aprovar' | 'nova_revisao'
+export type ItemDecisaoCQ = {
+  id_lote: number
+  folha_revisao: string
+  tema: string
+  id_lote_etapa: number | null
+  etapa: string | null
+  concluir: boolean
+  resultado: ResultadoCQ
+  frase: string
+  resumo: string
+  faltam: number
+  proxima: string | null
+  nova_folha: string | null
+  autores: string[]
+  aviso: string | null
+  erro: string | null
+}
+export type ResultadoDecisaoCQ = {
+  decididas: { id_lote: number; folha_revisao: string; resultado: ResultadoCQ }[]
+  abertas: { id_lote: number; id_lote_etapa: number; etapa: string }[]
+  erros: { id_lote: number; erro: string }[]
+  preparo?: Preparo
+}
+
 export type ResultadoAvanco = {
   abertas: { id_lote: number; id_lote_etapa: number; etapa: string }[]
   erros: { id_lote: number; erro: string }[]
@@ -273,6 +593,8 @@ export type EtapaFluxo = {
   repetivel: boolean
   conta_revisao: boolean
   fracao_critica: number | null
+  nivel_inspecao: string | null
+  lqa: number | null
   passagens?: number
   atividades: { id: number; nome: string; geracao?: string }[]
 }
@@ -340,13 +662,19 @@ export type PessoaPainel = {
   ultima: string | null
   grupos: string[]
   lotes: number[]
+  // Pendentes por atividade em produção (chave do grupo): no CQ são amostras.
+  por_grupo: Record<string, number>
 }
+
+// Amostras de CQ sem avaliador, por atividade (elemento), separadas das cargas a atribuir da produção (D-101).
+export type AmostrasSemAvaliador = { id_atividade: number; atividade: string | null; elemento: string | null; tema: string | null; chave: string; amostras: number; lotes: number[] }
 
 export type PainelSupervisao = {
   grupos: GrupoAtividade[]
   lotes: LotePainel[]
   pessoas: PessoaPainel[]
   status: Partial<Record<StatusNacional, number>>
+  amostras_sem_avaliador: AmostrasSemAvaliador[]
 }
 
 export type GrupoEsperando = {
@@ -355,14 +683,18 @@ export type GrupoEsperando = {
   fluxo: string
   id_proxima: number | null
   proxima: string | null
+  fase: string | null
+  resultado: ResultadoCQ | null
   desde: string | null
   ate: string | null
-  folhas: { id_lote: number; folha_revisao: string; situacao: string; desde: string | null }[]
+  // Na correção de inspeção (D5), quantas ocorrências da folha foram tratadas; fora dela, nulo.
+  folhas: { id_lote: number; folha_revisao: string; tipo?: 'folha' | 'livre'; situacao: string; desde: string | null; cq: (ResultadoPassagemCQ & { planos: ResultadoPlano[] }) | null; ocorrencias_tratadas: number | null }[]
 }
 
 export type PessoaLote = { conta: string | null; nome: string | null; total: number; concluidas: number; ultima: string | null }
 
-export type LoteCompleto = Lote & { passagens: PassagemLote[]; pessoas: PessoaLote[] }
+// `ocorrencias`: as da folha, de todas as revisões (o andamento da correção de inspeção na gaveta, D5).
+export type LoteCompleto = Lote & { passagens: PassagemLote[]; pessoas: PessoaLote[]; ocorrencias: { total: number; tratadas: number } }
 
 // --- Fila de folhas por pessoa (B8, D-106) ---
 

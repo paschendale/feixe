@@ -16,6 +16,10 @@ campos e as ferramentas de edição de geometria deixariam; tudo isso também sa
 escapasse, os gatilhos de guarda do workspace (`sync/esquema.py`) recusariam a escrita do OGR no próprio arquivo: a
 garantia de que nada muda o workspace sem passar pela outbox não depende deste módulo.
 
+O mesmo vale para as camadas de ocorrências do avaliador (D3c): a única coisa que muda pelo QGIS é a anotação, que
+vai por `core/dados/local/cq.editar` (só a própria, com a passagem de CQ aberta). Ponto novo vem da ferramenta
+"Registrar ocorrência" da barra, não da edição da camada.
+
 Roda na thread principal (é chamado pelo sinal da camada).
 """
 
@@ -35,24 +39,25 @@ def _valor(v):
     return v
 
 
-def ler(camada: QgsVectorLayer) -> Tuple[Dict[int, bool], bool]:
-    """O que o buffer de edição muda: {id da carga: concluído} e se há mais alguma mudança (outro campo, geometria,
-    feição nova ou apagada)."""
+def ler(camada: QgsVectorLayer, campo: str = CAMPO, chave: str = "id", converter=bool) -> Tuple[Dict, bool]:
+    """O que o buffer de edição muda em `campo`, por feição ({`chave`: valor convertido}: em Minhas cargas, {id da
+    carga: concluído}; nas ocorrências, {uuid: anotação}) e se há mais alguma mudança (outro campo, geometria, feição
+    nova ou apagada)."""
     eb = camada.editBuffer()
     if eb is None:
         return {}, False
-    i_concluido = camada.fields().indexOf(CAMPO)
-    desejadas: Dict[int, bool] = {}
+    i_campo = camada.fields().indexOf(campo)
+    desejadas: Dict = {}
     outras = False
     for fid, atributos in eb.changedAttributeValues().items():
         for i, v in atributos.items():
-            if i != i_concluido:
+            if i != i_campo:
                 outras = True
                 continue
             f = camada.getFeature(fid)
-            id_carga = _valor(f["id"]) if f.isValid() else None
-            if id_carga is not None:
-                desejadas[int(id_carga)] = bool(_valor(v))
+            id_feicao = _valor(f[chave]) if f.isValid() else None
+            if id_feicao is not None:
+                desejadas[int(id_feicao) if chave == "id" else str(id_feicao)] = converter(_valor(v))
     outras = outras or bool(
         eb.changedGeometries() or eb.addedFeatures() or eb.deletedFeatureIds() or eb.addedAttributes()
         or eb.deletedAttributeIds()
@@ -66,3 +71,11 @@ def esvaziar(camada: QgsVectorLayer) -> bool:
     camada.undoStack().setIndex(0)
     eb = camada.editBuffer()
     return eb is None or not eb.isModified()
+
+
+def texto(v):
+    """Anotação vinda do formulário: vazio vira nulo."""
+    if v is None:
+        return None
+    v = str(v).strip()
+    return v or None

@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
-import { RotuloEstavel } from '@/components/painel'
+import { Campo, RotuloEstavel } from '@/components/ds'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import type { Atividade, Catalogo } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
@@ -65,23 +64,20 @@ export function FormAtividade({ catalogo, atividade, aberto, fechar }: { catalog
           </DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-4">
-          <div className="col-span-2 grid gap-1.5">
-            <Label htmlFor="at-nome">Nome</Label>
-            <Input id="at-nome" value={f.nome} onChange={(e) => mudar('nome', e.target.value)} placeholder="ex.: Aquisição BC100 - LML" />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="at-projeto">Projeto</Label>
-            <Select id="at-projeto" value={f.cod_projeto} disabled={travado} onChange={(e) => mudar('cod_projeto', Number(e.target.value))}>
+          <Campo rotulo="Nome" className="col-span-2">
+            <Input value={f.nome} onChange={(e) => mudar('nome', e.target.value)} placeholder="ex.: Aquisição BC100 - LML" />
+          </Campo>
+          <Campo rotulo="Projeto">
+            <Select value={f.cod_projeto} disabled={travado} onChange={(e) => mudar('cod_projeto', Number(e.target.value))}>
               {catalogo.projetos.map((p) => (
                 <option key={p.cod_projeto} value={p.cod_projeto}>
                   {p.nome}
                 </option>
               ))}
             </Select>
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="at-tema">Tema</Label>
-            <Select id="at-tema" value={f.id_tema} disabled={travado} onChange={(e) => mudar('id_tema', Number(e.target.value))}>
+          </Campo>
+          <Campo rotulo="Tema">
+            <Select value={f.id_tema} disabled={travado} onChange={(e) => mudar('id_tema', Number(e.target.value))}>
               {catalogo.temas
                 .filter((t) => t.ativo || t.id === f.id_tema)
                 .map((t) => (
@@ -90,21 +86,18 @@ export function FormAtividade({ catalogo, atividade, aberto, fechar }: { catalog
                   </option>
                 ))}
             </Select>
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="at-fase">Fase</Label>
-            <Select id="at-fase" value={f.fase} disabled={travado} onChange={(e) => mudar('fase', e.target.value)}>
+          </Campo>
+          <Campo rotulo="Fase">
+            <Select value={f.fase} disabled={travado} onChange={(e) => mudar('fase', e.target.value)}>
               {catalogo.fases.map((x) => (
                 <option key={x.codigo} value={x.codigo}>
                   {x.nome}
                 </option>
               ))}
             </Select>
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="at-medida">Medida de qualidade</Label>
+          </Campo>
+          <Campo rotulo="Medida de qualidade">
             <Select
-              id="at-medida"
               value={cq ? (f.id_medidadequalidade ?? '') : ''}
               disabled={!cq || travado}
               onChange={(e) => mudar('id_medidadequalidade', e.target.value ? Number(e.target.value) : null)}
@@ -119,20 +112,18 @@ export function FormAtividade({ catalogo, atividade, aberto, fechar }: { catalog
                   </option>
                 ))}
             </Select>
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="at-geracao">Cargas</Label>
-            <Select id="at-geracao" value={f.geracao ?? ''} onChange={(e) => mudar('geracao', e.target.value)}>
+          </Campo>
+          <Campo rotulo="Cargas">
+            <Select value={f.geracao ?? ''} onChange={(e) => mudar('geracao', e.target.value)}>
               {catalogo.geracoes.map((g) => (
                 <option key={g} value={g}>
                   {GERACAO[g] ?? g}
                 </option>
               ))}
             </Select>
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="at-grade">Nível da grade estatística</Label>
-            <Select id="at-grade" value={f.grade_nivel ?? ''} onChange={(e) => mudar('grade_nivel', e.target.value ? Number(e.target.value) : null)}>
+          </Campo>
+          <Campo rotulo="Nível da grade estatística">
+            <Select value={f.grade_nivel ?? ''} onChange={(e) => mudar('grade_nivel', e.target.value ? Number(e.target.value) : null)}>
               <option value="">{PRECISAM_GRADE.includes(f.geracao ?? '') ? 'Escolha o nível' : 'Sem grade'}</option>
               {catalogo.niveis_grade.map((n) => (
                 <option key={n} value={n}>
@@ -140,8 +131,8 @@ export function FormAtividade({ catalogo, atividade, aberto, fechar }: { catalog
                 </option>
               ))}
             </Select>
-          </div>
-          <label className="col-span-2 flex items-center gap-2 text-sm">
+          </Campo>
+          <label className="col-span-2 flex items-center gap-2">
             <input type="checkbox" checked={f.ativo} onChange={(e) => mudar('ativo', e.target.checked)} /> Ativa (aparece para as GGCs montarem fluxos)
           </label>
         </div>

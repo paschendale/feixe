@@ -194,6 +194,8 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.fluxo_etapa (
     repetivel boolean NOT NULL DEFAULT false,
     conta_revisao boolean NOT NULL DEFAULT false,
     fracao_critica numeric CHECK (fracao_critica > 0 AND fracao_critica < 100),
+    nivel_inspecao text,
+    lqa numeric CHECK (lqa > 0),
     criado_em timestamptz NOT NULL DEFAULT now(),
     criado_por text NOT NULL DEFAULT current_user,
     atualizado_em timestamptz NOT NULL DEFAULT now(),
@@ -207,6 +209,11 @@ COMMENT ON COLUMN mapcartacomp.fluxo_etapa.conta_revisao IS
 COMMENT ON COLUMN mapcartacomp.fluxo_etapa.fracao_critica IS
     'Fração crítica (em %) que a GGC adota nesta etapa de CQ, contra a qual se mostra o nível de conformidade. '
     'Nula = a fração crítica padrão de cada elemento (cq_elemento).';
+COMMENT ON COLUMN mapcartacomp.fluxo_etapa.nivel_inspecao IS
+    'Nível de inspeção padrão dos planos desta etapa de CQ (ex.: II). Aberto. Nulo = o supervisor escolhe no plano '
+    '(D-135); ele pode trocar o padrão em todo plano.';
+COMMENT ON COLUMN mapcartacomp.fluxo_etapa.lqa IS
+    'LQA padrão (em %) dos planos desta etapa de CQ (ex.: 2,5). Nulo = o supervisor escolhe no plano.';
 
 -- Atividades de cada etapa do fluxo, escolhidas pela GGC: na etapa de CQ, uma por medida inspecionada (o DF põe
 -- acurácia temporal na ADE, outra GGC pode ficar só com as medidas núcleo). Cargas e planos da passagem só podem ser

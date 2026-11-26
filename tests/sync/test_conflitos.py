@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import re
 
 import pytest
 from feixe.core.dados import ExecutorPg
@@ -28,6 +29,15 @@ from tests.sync.test_push import (  # noqa: F401 - fixtures
 )
 
 pytestmark = pytest.mark.db
+
+
+# Hora do que ficou, como a frase diz: "das 09:12" no mesmo dia e "de 17/11 às 09:12" se a ação foi no dia anterior
+# no fuso de quem olha (perto da meia-noite as ações de 15 a 31 minutos atrás caem no dia anterior).
+_DAS = r"(das \d{2}:\d{2}|de \d{2}/\d{2} às \d{2}:\d{2})"
+
+
+def _ficou(o_que: str, frase: str) -> bool:
+    return re.search(f"ficou {o_que}, {_DAS}", frase) is not None
 
 
 def _roteador(conn):
@@ -90,13 +100,13 @@ def test_api_do_supervisor_mostra_os_dois_lados(ccar, cen, ws1, ws2):  # noqa: F
     assert conc["local"] == "pendente" and conc["servidor"] == "concluída"
     assert perdido["servidor"]["origem_em"] == "acao"
     assert "concluiu a carga e depois desfez a conclusão" in perdido["frase"]
-    assert "tinha concluído a carga" in perdido["frase"] and "ficou a conclusão, das " in perdido["frase"]
+    assert "tinha concluído a carga" in perdido["frase"] and _ficou("a conclusão", perdido["frase"])
     assert "(chegou à CCAR" in perdido["frase"]  # a ação de 30 min atrás só chegou agora
 
     vencido = itens[cen.minhas[0]]
     assert vencido["resultado"] == "conflito_vencido" and vencido["vencedor"] == "local"
     assert vencido["descartado"] == "servidor" and vencido["servidor"]["por"]["conta"] == EU
-    assert "em outro computador" in vencido["frase"] and "ficou o desfazer, das " in vencido["frase"]
+    assert "em outro computador" in vencido["frase"] and _ficou("o desfazer", vencido["frase"])
 
     recusado = itens[cen.minhas[2]]
     assert recusado["resultado"] == "recusado" and "não está mais atribuída" in recusado["motivo"]

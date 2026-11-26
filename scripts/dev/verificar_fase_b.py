@@ -67,6 +67,29 @@ def ok(msg):
     print(f"  ok  {msg}")
 
 
+def sem_ddl_concorrente(amb, usuario, senha):
+    """Recusa rodar enquanto outra sessão aplica o DDL do `mapcartacomp` na CCAR de dev. Os testes de banco (`make
+    test-db`) reexecutam as migrações inteiras dentro de uma transação desfeita (`tests/db/migracoes.py`), com trava
+    exclusiva em tabelas e views; as camadas PostGIS do QGIS (Folhas lê a `ctrl_lote`) entram em deadlock com ela e
+    saem inválidas ("camada 'Folhas' inválida"). Não é defeito do plugin: em homologação e produção ninguém aplica DDL
+    no meio do expediente. Amostra a trava algumas vezes, porque cada teste a segura só enquanto roda."""
+    import time
+
+    sql = (
+        "SELECT count(*) AS n FROM pg_locks k JOIN pg_class c ON c.oid = k.relation "
+        "JOIN pg_namespace s ON s.oid = c.relnamespace WHERE s.nspname = 'mapcartacomp' "
+        "AND k.mode = 'AccessExclusiveLock' AND k.pid <> pg_backend_pid()"
+    )
+    for _ in range(6):
+        with db.transacao(amb, usuario, senha) as ex:
+            if ex.um(sql)["n"]:
+                raise SystemExit(
+                    "outra sessão está aplicando o DDL do mapcartacomp na CCAR de dev (os testes de banco, make "
+                    "test-db?): as camadas PostGIS entrariam em deadlock com ela. Rode depois que ela terminar."
+                )
+        time.sleep(0.25)
+
+
 @secao("b0")
 def b0(amb, usuario, senha):
     """Transação da camada de dados: commit ao sair, rollback em erro."""
@@ -163,9 +186,9 @@ def b1(amb, usuario, senha):
             return [(f.name(), arvore(f)) if f.children() else f.name() for f in no.children()]
 
         feixe = raiz.findGroup("Feixe")
-        trio = ["Folhas", "Cargas por responsável", "Cargas a atribuir"]
+        trio = ["Lotes", "Cargas por responsável", "Cargas a atribuir"]
         assert arvore(feixe) == [
-            ("Execução", ["Minhas cargas", "Minhas folhas"]),
+            ("Execução", ["Minhas cargas", "Meus lotes"]),
             ("Supervisão", [(g["rotulo"], trio) for g in sup]),
         ], arvore(feixe)
         ok(f"subgrupos por atividade em produção (CQ de um tema junto): {[g['rotulo'] for g in sup]}")
@@ -173,10 +196,10 @@ def b1(amb, usuario, senha):
             sub = feixe.findGroup("Supervisão").findGroup(g["rotulo"])
             n = {no.name(): no.layer().featureCount() for no in sub.findLayers()}
             e = esperado[g["rotulo"]]
-            assert n == {"Folhas": e["folhas"], "Cargas por responsável": e["atribuidas"],
+            assert n == {"Lotes": e["folhas"], "Cargas por responsável": e["atribuidas"],
                          "Cargas a atribuir": e["a_atribuir"]}, (g["rotulo"], n, e)  # fmt: skip
         n = {c["nome"]: c["feicoes"] for c in r["camadas"][:2]}
-        assert n == {"Minhas cargas": 5, "Minhas folhas": 1}, n
+        assert n == {"Minhas cargas": 5, "Meus lotes": 1}, n
         ok(f"contagens por subgrupo conferem com o banco: {esperado}")
         ligados = [s_.name() for s_ in feixe.findGroup("Supervisão").children() if s_.itemVisibilityChecked()]
         maior = max(sup, key=lambda g: esperado[g["rotulo"]]["folhas"])["rotulo"]
@@ -223,7 +246,7 @@ def b1(amb, usuario, senha):
         assert [a.name() for a in minhas.actions().actions()] == ["Trabalhar nesta carga", "Pular esta carga"]
         ff = next(mfolhas.getFeatures())
         assert ff["minhas_txt"].endswith("de 5 concluídas"), ff["minhas_txt"]
-        assert [a.name() for a in mfolhas.actions().actions()] == ["Próxima carga nesta folha"]
+        assert [a.name() for a in mfolhas.actions().actions()] == ["Próxima carga neste lote"]
         for camada in [no.layer() for no in feixe.findGroup("Supervisão").findLayers()]:
             f = next(camada.getFeatures(), None)
             if f is None:
@@ -237,7 +260,7 @@ def b1(amb, usuario, senha):
         ok("formulários, dicas e ações: APM com situação e progresso; supervisor só leitura, com abrir no Feixe")
 
         apm = camadas.montar(amb, authcfg, {"uf": "DF", "papeis": ["apm"]}, [], None, exe, ws.caminho)
-        assert apm["modo"] == "execucao" and [c["nome"] for c in apm["camadas"]] == ["Minhas cargas", "Minhas folhas"]
+        assert apm["modo"] == "execucao" and [c["nome"] for c in apm["camadas"]] == ["Minhas cargas", "Meus lotes"]
         try:
             camadas.modo("supervisao")
             raise AssertionError("APM entrou no modo supervisão")
@@ -267,7 +290,7 @@ def b1(amb, usuario, senha):
         crua.rollBack()
         ok("Minhas cargas é do workspace; gravar nele por fora do Feixe é recusado (a edição vai pela outbox, c4)")
 
-        caminho = _renderizar(os.path.join(SAIDA, "feixe-b1-camadas.png"), "Folhas")
+        caminho = _renderizar(os.path.join(SAIDA, "feixe-b1-camadas.png"), "Lotes")
         ok(f"imagem das camadas em {caminho}")
     finally:
         QgsProject.instance().clear()
@@ -415,24 +438,26 @@ def b3(amb, usuario, senha):
         canvas = QgsMapCanvas()
         canvas.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:3857"))
         recebidos = []
-        ferramenta = FerramentaFolha(canvas, lambda x, y: recebidos.append((x, y)))
+        ferramenta = FerramentaFolha(canvas, lambda x, y: recebidos.append((x, y)), lambda ret: None)
         from qgis.core import QgsCoordinateTransform, QgsProject
-        from qgis.PyQt.QtCore import Qt
 
         para_3857 = QgsCoordinateTransform(
             QgsCoordinateReferenceSystem("EPSG:4674"), QgsCoordinateReferenceSystem("EPSG:3857"), QgsProject.instance()
         )
-        ferramenta._clicou(para_3857.transform(QgsPointXY(centro["x"], centro["y"])), Qt.LeftButton)
+        # O clique (canvasReleaseEvent) leva o ponto para SIRGAS e chama ao_clicar: o mesmo caminho, sem o evento.
+        ponto = ferramenta._para_sirgas().transform(para_3857.transform(QgsPointXY(centro["x"], centro["y"])))
+        ferramenta._ao_clicar(ponto.x(), ponto.y())
         with db.transacao(amb, usuario, senha) as ex:
             achada = dl.folha_no_ponto(ex, *recebidos[0])
         assert achada["cd_mi"] == livre["cd_mi"], achada
         ok(f"clique no mapa em EPSG:3857 acha a folha {achada['cd_mi']}")
 
         # Lote livre a partir de duas feições selecionadas numa camada em EPSG:3857.
-        camada = QgsVectorLayer("Polygon?crs=EPSG:3857", "bacias", "memory")
+        camada = QgsVectorLayer("Polygon?crs=EPSG:3857&field=fid:integer&field=cobacia:string", "bacias", "memory")
         feicoes = []
-        for dx in (0, 0.05):
-            f = QgsFeature()
+        for n, dx in enumerate((0, 0.05)):
+            f = QgsFeature(camada.fields())
+            f.setAttributes([n, f"teste_b3 otto {7531 + n}"])
             g = QgsGeometry.fromWkt(
                 f"POLYGON(({-47.9 + dx} -15.9, {-47.85 + dx} -15.9, {-47.85 + dx} -15.85, {-47.9 + dx} -15.85, "
                 f"{-47.9 + dx} -15.9))"
@@ -457,6 +482,14 @@ def b3(amb, usuario, senha):
             )
         assert float(area["a"]) == 0.005, area  # 0,1 x 0,05 grau: as duas feições unidas, de volta em SIRGAS
         ok("lote livre da seleção de duas feições em EPSG:3857, unidas e em SIRGAS 2000")
+
+        # D-154: um lote por feição, com o nome do campo sugerido (o código da ottobacia, não o fid).
+        assert sel["campo_nome"] == "cobacia" and len(sel["itens"]) == 2, sel["campo_nome"]
+        lotes = [{"nome": i["atributos"]["cobacia"], "wkt": i["wkt"]} for i in sel["itens"]]
+        status, obj = r.despachar("POST", "/api/lotes", {}, {"tipo": "livre", "id_fluxo": fluxo, "lotes": lotes})
+        assert status == 200 and [c["nome"] for c in obj["criados"]] == [x["nome"] for x in lotes], obj
+        criados += [c["id_lote"] for c in obj["criados"]]
+        ok(f"um lote por feição: {', '.join(c['nome'] for c in obj['criados'])}")
     finally:
         with db.transacao(amb, usuario, senha) as ex:
             ex.executar("DELETE FROM mapcartacomp.lote WHERE id = ANY(%s)", (criados,))
@@ -532,6 +565,8 @@ def main():
         amb = ambiente_dev()
         usuario, senha = credencial_dev()
         config.salvar_credenciais(amb, usuario, senha)
+        if "b1" in pedidas:
+            sem_ddl_concorrente(amb, usuario, senha)
         for nome in pedidas:
             print(f"{nome}: {SECOES[nome].__doc__.strip()}")
             SECOES[nome](amb, usuario, senha)

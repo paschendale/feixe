@@ -4,15 +4,18 @@ import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { Barra, COR } from '@/components/painel'
-import type { EstadoLote, FluxoCompleto, Historico, LoteCompleto, PassagemLote, Preparo } from '@/lib/api'
+import { Barra, Bloco, COR, Campo, Nota, Rotulo, Tabela, TituloBloco } from '@/components/ds'
+import type { DecisaoCQ, EstadoLote, FluxoCompleto, Historico, LoteCompleto, PassagemLote, PlanosCQ as Planos, Preparo } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
-import { diaMes, diasAtras, num, pc, plural } from '@/lib/formato'
+import { diaMes, diasAtras, num, oLote, pc, plural } from '@/lib/formato'
 import { useSessao } from '@/lib/sessao'
 import { STATUS } from '@/lib/status'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 import { comCargas, resumoPreparo } from '../folhas/preparo'
+import { OcorrenciasFolha } from './OcorrenciasFolha'
+import { PlanosCQ } from './PlanosCQ'
+import { DecidirCQ } from './ResultadoCQ'
 
 const ABERTAS = ['pendente', 'em_andamento']
 
@@ -25,10 +28,9 @@ const ACAO: Record<string, string> = {
   reabrir: 'Reabriu',
   gcq_aprovada: 'Aprovada pela GCQ:',
   gcq_devolvida: 'Devolvida pela GCQ:',
-}
-
-function Titulo({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-[13px] font-semibold tracking-[.04em] text-muted-foreground uppercase">{children}</h2>
+  cq_aprovada: 'Decidiu o CQ:',
+  cq_reprovada: 'Decidiu o CQ:',
+  importar: 'Convertida:',
 }
 
 // Trilho: as etapas do fluxo com o que a folha já fez em cada uma, onde está agora e a próxima sugerida.
@@ -42,7 +44,10 @@ function Trilho({ fluxo, lote, estado }: { fluxo: FluxoCompleto; lote: LoteCompl
         const atual = ps.some((p) => p.id === lote.id_lote_etapa_atual)
         const proxima = estado?.sugestao?.id === e.id
         let lado = ''
-        if (aberta) lado = aberta.situacao === 'pendente' ? 'agora · a iniciar' : `agora${aberta.cargas_total ? ` · ${pc(aberta.cargas_concluidas, aberta.cargas_total)}%` : ''}`
+        if (aberta && aberta.fase === 'correcao_inspecao' && aberta.situacao !== 'pendente')
+          // Correção de inspeção (D5): o andamento é das ocorrências tratadas, não das cargas.
+          lado = `agora${lote.ocorrencias.total ? ` · ${pc(lote.ocorrencias.tratadas, lote.ocorrencias.total)}% tratadas` : ''}`
+        else if (aberta) lado = aberta.situacao === 'pendente' ? 'agora · a iniciar' : `agora${aberta.cargas_total ? ` · ${pc(aberta.cargas_concluidas, aberta.cargas_total)}%` : ''}`
         else if (proxima) lado = 'próxima sugerida'
         else if (ultima?.situacao === 'concluida') lado = `concluída ${diaMes(ultima.concluida_em)}${ps.length > 1 ? ` · ${ps.length}×` : ''}`
         else if (ultima?.situacao === 'pulada') lado = 'pulada'
@@ -50,17 +55,17 @@ function Trilho({ fluxo, lote, estado }: { fluxo: FluxoCompleto; lote: LoteCompl
           <li key={e.id} className={cn('grid grid-cols-[22px_1fr_auto] items-center gap-2.5 border-b border-linha py-2.5 last:border-0', aberta && 'font-semibold')}>
             <span
               className={cn(
-                'inline-block size-3 rounded-full border-2 border-[#C7D0DB]',
+                'inline-block size-3 rounded-full border-2 border-input',
                 ultima?.situacao === 'concluida' && !aberta && 'border-aco bg-aco',
-                aberta && 'border-ibge shadow-[0_0_0_3px_var(--aco-claro)]',
-                proxima && 'border-dashed border-ibge',
+                aberta && 'border-primary shadow-[0_0_0_3px_var(--aco-claro)]',
+                proxima && 'border-dashed border-primary',
               )}
             />
             <span>
               {e.nome}
               {atual && !aberta && <span className="font-normal text-muted-foreground"> · terminou aqui</span>}
             </span>
-            <span className={cn('text-[13px]', aberta || proxima ? 'font-medium text-ibge' : 'font-normal text-muted-foreground')}>{lado}</span>
+            <span className={cn('text-nota', aberta || proxima ? 'font-medium text-primary' : 'font-normal text-muted-foreground')}>{lado}</span>
           </li>
         )
       })}
@@ -78,15 +83,23 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
   const [etapa, setEtapa] = useState<number | null>(null)
   const [expor, setExpor] = useState(false)
   const [ocupado, setOcupado] = useState(false)
+  const [decidir, setDecidir] = useState<DecisaoCQ | null>(null)
   useEffect(() => setEtapa(estado?.sugestao?.id ?? fluxo?.etapas[0]?.id ?? null), [estado, fluxo])
 
   const aberta = lote.passagens.find((p) => ABERTAS.includes(p.situacao))
+  // CQ em andamento (D4): o resultado dos planos decide a sugestão; a decisão (Aprovar ou Nova revisão) é do supervisor.
+  const cqAberto = aberta?.situacao === 'em_andamento' && aberta.fase === 'cq'
+  const { dados: planos } = useApi<Planos>(cqAberto ? `/api/lote_etapas/${aberta!.id}/cq_planos` : null, ['lote', 'carga', 'cq'])
+  const resultado = cqAberto ? planos?.resultado : undefined
   const etapaDe = (p: PassagemLote) => fluxo?.etapas.find((e) => e.id === p.id_fluxo_etapa)
   const naoPuladas = lote.passagens.filter((p) => p.situacao !== 'pulada')
   const ultima = naoPuladas.length ? naoPuladas.reduce((a, b) => (a.id > b.id ? a : b)) : null
   const eAberta = aberta ? etapaDe(aberta) : undefined
   const seguinte = eAberta ? fluxo?.etapas.find((e) => (e.ordem ?? 0) > (eAberta.ordem ?? 0)) : undefined
   const faltam = aberta ? aberta.cargas_total - aberta.cargas_concluidas : 0
+  // Correção de inspeção (D5): a folha anda pelas ocorrências da folha (todas as revisões), não pelas cargas.
+  const correcao = aberta?.fase === 'correcao_inspecao'
+  const aTratar = lote.ocorrencias.total - lote.ocorrencias.tratadas
 
   async function rodar(p: Pedido) {
     setOcupado(true)
@@ -110,6 +123,8 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
     if (aberta.fase === 'envio_gcq') {
       botoes.push({ titulo: 'Aprovada pela GCQ', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/gcq`, corpo: { resultado: 'aprovada' } }] })
       botoes.push({ titulo: 'Devolvida pela GCQ', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/gcq`, corpo: { resultado: 'devolvida' } }] })
+    } else if (aberta.fase === 'cq') {
+      // As duas decisões abrem a confirmação (prévia, observação, aviso de reprovada), como no Esperando você.
     } else {
       if (seguinte)
         botoes.push({
@@ -119,49 +134,108 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
       botoes.push({ titulo: seguinte ? 'Só concluir' : 'Concluir etapa', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/concluir` }] })
     }
   }
-  // Etapa com cargas começa ao distribuir (D-109); só a sem cargas se inicia à mão.
-  if (aberta?.situacao === 'pendente' && !aberta.cargas_total) botoes.push({ titulo: 'Iniciar etapa', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/iniciar` }] })
+  // Etapa com cargas começa ao distribuir (D-109); só a sem cargas se inicia à mão. O CQ começa pelas amostras dos planos.
+  if (aberta?.situacao === 'pendente' && !aberta.cargas_total && aberta.fase !== 'cq') botoes.push({ titulo: 'Iniciar etapa', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/iniciar` }] })
   if (aberta && eAberta && !eAberta.obrigatoria) botoes.push({ titulo: 'Pular etapa', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/pular` }] })
   if (!aberta) {
     if (estado?.sugestao) botoes.push({ titulo: `Abrir ${estado.sugestao.nome}`, passos: [{ caminho: `/api/lotes/${lote.id}/passagens`, corpo: { id_fluxo_etapa: estado.sugestao.id } }] })
     if (ultima?.situacao === 'concluida') botoes.push({ titulo: 'Reabrir a última', passos: [{ caminho: `/api/lote_etapas/${ultima.id}/reabrir` }] })
   }
 
+  const oL = oLote(lote.tipo)
+  const doL = lote.tipo === 'folha' ? 'da folha' : 'do lote'
   let sugestao: React.ReactNode = null
-  if (aberta?.situacao === 'em_andamento' && seguinte && aberta.fase !== 'envio_gcq')
+  if (cqAberto && resultado)
+    sugestao =
+      resultado.faltam > 0 ? (
+        <>
+          {resultado.faltam === 1 ? 'falta avaliar 1 amostra' : `faltam avaliar ${num(resultado.faltam)} amostras`}
+          {resultado.sem_avaliador > 0 ? ` (${num(resultado.sem_avaliador)} sem avaliador: distribua)` : ' (com os avaliadores)'}; com tudo avaliado, {oL} vai para Esperando você com o resultado, e você decide: aprovar{seguinte ? <> e abrir <b>{seguinte.nome}</b></> : ''}, ou nova revisão.
+        </>
+      ) : resultado.resultado === 'reprovado' ? (
+        <>
+          <b>{lote.tipo === 'folha' ? 'reprovada' : 'reprovado'} no CQ</b> ({resultado.frase}): abrir uma <b>nova revisão</b> por outra pessoa. Aprovar mesmo assim também é possível, com observação.
+        </>
+      ) : resultado.resultado === 'aprovado' ? (
+        <>
+          <b>aprovada no CQ</b> ({resultado.frase}): aprovar{seguinte ? <> e abrir <b>{seguinte.nome}</b></> : ''}.
+        </>
+      ) : (
+        <>
+          amostras avaliadas, mas o plano não tem Ac ({resultado.frase}): confira os não conformes e decida entre aprovar e nova revisão.
+        </>
+      )
+  else if (correcao && aberta?.situacao === 'pendente' && aberta.cargas_total)
+    sugestao = (
+      <>
+        distribuir {oL}: quem receber trata as <b>{plural(aTratar, 'ocorrência', 'ocorrências')}</b> {doL} (de todas as revisões), marcando cada uma como tratada. A etapa começa quando alguém receber.
+      </>
+    )
+  else if (correcao && aberta && !aberta.cargas_total && aTratar > 0)
+    sugestao = (
+      <>
+        a etapa não tem atividade de correção de inspeção no fluxo, então ninguém recebe {oL} para tratar as {plural(aTratar, 'ocorrência', 'ocorrências')}. Acrescente a atividade à etapa em Fluxos e use <b>Gerar as cargas</b>; ou conclua a etapa se a correção foi feita por fora.
+      </>
+    )
+  else if (correcao && aberta?.situacao === 'em_andamento' && seguinte)
+    sugestao =
+      aTratar > 0 ? (
+        <>
+          quando {aTratar === 1 ? 'a' : 'as'} <b>{plural(aTratar, 'ocorrência restante', 'ocorrências restantes')}</b> {aTratar === 1 ? 'for tratada' : 'forem tratadas'}{faltam > 0 && aberta.cargas_total > 1 ? ' e as cargas concluídas' : ''}, {oL} vai para Esperando você: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
+        </>
+      ) : faltam > 0 ? (
+        <>
+          as ocorrências estão tratadas; {plural(faltam, 'carga falta', 'cargas faltam')} concluir. Depois, concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
+        </>
+      ) : (
+        <>
+          todas as ocorrências {doL} estão tratadas: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
+        </>
+      )
+  else if (aberta?.situacao === 'em_andamento' && seguinte && aberta.fase !== 'envio_gcq')
     sugestao =
       faltam > 0 ? (
+        aberta.fase === 'cq' ? (
+          <>
+            quando {faltam === 1 ? 'a' : 'as'} <b>{plural(faltam, 'amostra restante', 'amostras restantes')}</b> {faltam === 1 ? 'for avaliada' : 'forem avaliadas'}, conferir os planos (não conformes x aceita até) e decidir: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>, ou outra revisão.
+          </>
+        ) : (
+          <>
+            quando {faltam === 1 ? 'a' : 'as'} <b>{plural(faltam, 'carga restante', 'cargas restantes')}</b> {faltam === 1 ? 'for concluída' : 'forem concluídas'}, concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
+          </>
+        )
+      ) : aberta.fase === 'cq' ? (
         <>
-          quando {faltam === 1 ? 'a' : 'as'} <b>{plural(faltam, 'carga restante', 'cargas restantes')}</b> {faltam === 1 ? 'for concluída' : 'forem concluídas'}, concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
+          as amostras estão avaliadas: conferir os planos (não conformes x aceita até) e decidir: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>, ou outra revisão.
         </>
       ) : (
         <>
           as cargas estão concluídas: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
         </>
       )
-  else if (aberta?.situacao === 'pendente' && aberta.cargas_total) sugestao = <>distribuir a folha: a etapa começa quando alguém receber as cargas.</>
+  else if (aberta?.situacao === 'pendente' && aberta.cargas_total && aberta.fase === 'cq') sugestao = <>distribuir as amostras: o CQ começa quando um avaliador as receber.</>
+  else if (aberta?.situacao === 'pendente' && aberta.cargas_total) sugestao = <>distribuir {oL}: a etapa começa quando alguém receber as cargas.</>
+  else if (aberta?.situacao === 'pendente' && aberta.fase === 'cq') sugestao = <>criar os planos de CQ (acima); as amostras sorteadas viram as cargas a distribuir.</>
   else if (aberta?.situacao === 'pendente') sugestao = <>a etapa não tem cargas; inicie quando a equipe começar.</>
   else if (!aberta && estado?.sugestao) sugestao = <>abrir <b>{estado.sugestao.nome}</b>, a etapa seguinte do fluxo.</>
-  else if (!aberta) sugestao = <>a folha terminou a última etapa do fluxo; não há etapa seguinte.</>
+  else if (!aberta) sugestao = <>{oL} terminou a última etapa do fluxo; não há etapa seguinte.</>
 
   return (
     <section aria-labelledby="andar" className="flex flex-col gap-3">
-      <Titulo>
-        <span id="andar">Andar com a folha</span>
-      </Titulo>
+      <Rotulo>
+        <span id="andar">Andar com {oL}</span>
+      </Rotulo>
       {sugestao && (
-        <p className="rounded-lg bg-[#EEF3FA] px-3.5 py-3 text-[#1C2F4A]">
+        <Nota tom="info" semIcone>
           Sugestão do Feixe: {sugestao} Nada anda sozinho: a decisão é sua.
-        </p>
+        </Nota>
       )}
-      <label className="flex flex-col gap-1.5 text-[13px] text-texto-2">
-        Observação (fica no histórico; obrigatória)
-        <Textarea rows={3} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, segue para o CQ" className="text-sm text-foreground" />
-      </label>
+      <Campo rotulo="Observação (opcional, fica no histórico)">
+        <Textarea rows={3} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, segue para o CQ" className="text-corpo font-normal text-foreground" />
+      </Campo>
       {outra && (
-        <div className="flex flex-col gap-2.5 rounded-lg border bg-[#F7F9FB] p-3">
-          <label className="flex flex-col gap-1.5 text-[13px]">
-            Etapa a abrir
+        <div className="flex flex-col gap-2.5 rounded-xl bg-preenchimento-2 p-3">
+          <Campo rotulo="Etapa a abrir">
             <Select value={etapa ?? ''} onChange={(e) => setEtapa(Number(e.target.value))}>
               {fluxo?.etapas.map((e) => (
                 <option key={e.id} value={e.id}>
@@ -170,12 +244,12 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
                 </option>
               ))}
             </Select>
-          </label>
-          <label className="flex items-start gap-2 text-sm">
+          </Campo>
+          <label className="flex items-start gap-2">
             <input type="checkbox" className="mt-1" checked={expor} onChange={(e) => setExpor(e.target.checked)} />
             <span>
               Incluir as correções a fazer
-              <span className="block text-xs text-muted-foreground">Mostra a quem executar as ocorrências das passagens anteriores. Sem isso, a revisão é às cegas.</span>
+              <span className="block text-rodape text-muted-foreground">Mostra a quem executar as ocorrências das passagens anteriores. Sem isso, a revisão é às cegas.</span>
             </span>
           </label>
           <div className="flex justify-end gap-2">
@@ -184,7 +258,7 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
             </Button>
             <Button
               size="sm"
-              disabled={ocupado || !obs.trim() || !etapa}
+              disabled={ocupado || !etapa}
               onClick={() => rodar({ titulo: 'Abrir etapa', passos: [{ caminho: `/api/lotes/${lote.id}/passagens`, corpo: { id_fluxo_etapa: etapa, expor_ocorrencias: expor } }] })}
             >
               Abrir etapa
@@ -194,8 +268,19 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
       )}
       {!outra && (
         <div className="flex flex-wrap gap-2">
+          {cqAberto && (
+            <>
+              {(['aprovar', 'nova_revisao'] as DecisaoCQ[])
+                .sort((a) => (resultado?.resultado === 'reprovado' ? (a === 'nova_revisao' ? -1 : 1) : a === 'aprovar' ? -1 : 1))
+                .map((d, i) => (
+                  <Button key={d} variant={i === 0 ? 'default' : 'outline'} disabled={ocupado} onClick={() => setDecidir(d)}>
+                    {d === 'aprovar' ? (resultado?.resultado === 'reprovado' ? 'Aprovar mesmo assim…' : seguinte ? `Aprovar e abrir ${seguinte.nome}…` : 'Aprovar…') : 'Nova revisão…'}
+                  </Button>
+                ))}
+            </>
+          )}
           {botoes.map((b, i) => (
-            <Button key={b.titulo} variant={i === 0 ? 'default' : 'outline'} className={i === 0 ? 'font-semibold' : ''} disabled={ocupado || !obs.trim()} onClick={() => rodar(b)}>
+            <Button key={b.titulo} variant={i === 0 && !cqAberto ? 'default' : 'outline'} disabled={ocupado} onClick={() => rodar(b)}>
               {b.titulo}
             </Button>
           ))}
@@ -206,7 +291,17 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
           )}
         </div>
       )}
-      <span className="text-xs text-muted-foreground">
+      <DecidirCQ
+        lotes={decidir ? [lote.id] : []}
+        decisao={decidir}
+        observacao={obs}
+        fechar={(abertas) => {
+          setDecidir(null)
+          if (abertas) setObs('')
+          if (abertas?.length) distribuir(abertas)
+        }}
+      />
+      <span className="text-rodape text-muted-foreground">
         {eAberta?.obrigatoria ? `Pular não aparece: ${eAberta.nome} é obrigatória neste fluxo. ` : ''}
         {aberta ? 'Para repetir ou voltar a uma etapa, conclua ou pule a atual; depois "Outra etapa…" abre qualquer etapa do fluxo.' : '"Outra etapa…" abre qualquer etapa do fluxo (repetir uma revisão, voltar).'}
       </span>
@@ -215,7 +310,7 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
 }
 
 // Gaveta da folha (D-72, D-103): abre por cima da lista, sem trocar de página; é onde a folha anda pelo fluxo.
-export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos: FluxoCompleto[]; fechar: () => void; distribuir: (ids: number[]) => void }) {
+export function Gaveta({ id, fluxos, fechar, distribuir, excluir }: { id: number; fluxos: FluxoCompleto[]; fechar: () => void; distribuir: (ids: number[]) => void; excluir?: (ids: number[]) => void }) {
   const avisar = useAvisar()
   const { conectado, tem, eu } = useSessao()
   const { dados: lote, erro } = useApi<LoteCompleto>(`/api/lotes/${id}`, ['lote', 'carga'])
@@ -231,14 +326,14 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
   return (
     <D.Root open onOpenChange={(v) => !v && fechar()}>
       <D.Portal>
-        <D.Overlay className="fixed inset-0 z-40 bg-[#1C2733]/10" />
+        <D.Overlay className="fixed inset-0 z-40 bg-black/10" />
         <D.Content
           aria-describedby={undefined}
-          className="fixed inset-y-0 right-0 z-40 flex w-full max-w-[620px] flex-col gap-6 overflow-auto border-l bg-card px-7 pt-6 pb-10 shadow-[-12px_0_32px_rgba(28,39,51,.08)] outline-none"
+          className="fixed inset-y-2 right-2 z-40 flex w-[calc(100%-1rem)] max-w-[620px] flex-col gap-6 overflow-auto rounded-xl bg-card px-7 pt-6 pb-10 shadow-flutuante outline-none"
         >
         <div className="flex items-start gap-3">
           <div className="flex flex-1 flex-col gap-1">
-            <D.Title className="tab text-[26px] font-bold">{lote?.folha_revisao ?? '…'}</D.Title>
+            <D.Title className="tab text-titulo-grande font-bold">{lote?.folha_revisao ?? '…'}</D.Title>
             {lote && (
               <span className="text-muted-foreground">
                 {lote.tema} · {lote.projeto}
@@ -247,15 +342,15 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
             )}
           </div>
           {lote && (
-            <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: STATUS[lote.status_nacional].cor, color: ['EM_PRODUCAO', 'PLANEJADA'].includes(lote.status_nacional) ? '#1C2F4A' : '#fff' }}>
+            <span className="rounded-full px-2.5 py-1 text-rodape font-semibold" style={{ background: STATUS[lote.status_nacional].cor, color: STATUS[lote.status_nacional].escuro ? 'var(--primary-foreground)' : COR.textoClaro }}>
               {STATUS[lote.status_nacional].rotulo}
             </span>
           )}
-          <button onClick={fechar} aria-label="Fechar" className="grid size-9 place-items-center rounded-lg border hover:bg-accent">
+          <Button variant="secondary" size="icon" className="rounded-full" onClick={fechar} aria-label="Fechar">
             <X className="size-3.5" />
-          </button>
+          </Button>
         </div>
-        {erro && <p className="text-sm text-destructive">{erro}</p>}
+        {erro && <Nota tom="perigo">{erro}</Nota>}
         {lote && (
           <>
             <div className="flex flex-wrap gap-2">
@@ -263,9 +358,9 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                 Ver no QGIS
               </Button>
               {supervisor && aberta && lote.pessoas.some((p) => !p.conta && p.total > p.concluidas) && (
-                <Button onClick={() => distribuir([lote.id])}>Distribuir</Button>
+                <Button onClick={() => distribuir([lote.id])}>{atual?.fase === 'cq' ? 'Distribuir as amostras' : atual?.fase === 'correcao_inspecao' ? `Distribuir ${oLote(lote.tipo)}` : 'Distribuir'}</Button>
               )}
-              {supervisor && aberta && (atual?.cargas_total ?? 0) > atual!.cargas_concluidas && (
+              {supervisor && aberta && atual?.fase !== 'cq' && atual?.fase !== 'correcao_inspecao' && (atual?.cargas_total ?? 0) > atual!.cargas_concluidas && (
                 <Button
                   variant="outline"
                   disabled={!conectado}
@@ -285,65 +380,105 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                   Tirar cargas selecionadas no QGIS
                 </Button>
               )}
+              {supervisor && excluir && (
+                <Button variant="destructive-tinted" title={`Para ${lote.tipo === 'folha' ? 'a folha criada' : 'o lote criado'} por engano, antes de qualquer trabalho: a prévia diz se dá`} onClick={() => excluir([lote.id])}>
+                  Excluir…
+                </Button>
+              )}
             </div>
 
             {fluxo && (
               <section className="flex flex-col gap-2.5">
-                <Titulo>Fluxo</Titulo>
+                <Rotulo>Fluxo</Rotulo>
                 <Trilho fluxo={fluxo} lote={lote} estado={estado} />
               </section>
             )}
 
             {atual && (
-              <section className="flex flex-col gap-3 rounded-[10px] border bg-[#F7F9FB] p-4">
-                <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-                  <h2 className="text-base font-semibold">
-                    {atual.etapa}
-                    {atual.instancia > 1 ? ` (${atual.instancia}ª)` : ''}
-                  </h2>
-                  <span className="text-[13px] text-muted-foreground">
-                    {atual.situacao === 'em_andamento' && atual.iniciada_em && `em andamento desde ${diaMes(atual.iniciada_em)} · ${plural(diasAtras(atual.iniciada_em) ?? 0, 'dia', 'dias')}`}
-                    {atual.situacao === 'pendente' && 'a iniciar'}
-                    {atual.situacao === 'concluida' && `concluída em ${diaMes(atual.concluida_em)}, esperando a próxima etapa`}
-                    {atual.situacao === 'pulada' && 'pulada, esperando a próxima etapa'}
+              <Bloco className="gap-3 bg-preenchimento-2 p-4 shadow-none">
+                <TituloBloco
+                  titulo={
+                    <>
+                      {atual.etapa}
+                      {atual.instancia > 1 ? ` (${atual.instancia}ª)` : ''}
+                    </>
+                  }
+                  sub={
+                    <>
+                      {atual.situacao === 'em_andamento' && atual.iniciada_em && `em andamento desde ${diaMes(atual.iniciada_em)} · ${plural(diasAtras(atual.iniciada_em) ?? 0, 'dia', 'dias')}`}
+                      {atual.situacao === 'pendente' && 'a iniciar'}
+                      {atual.situacao === 'concluida' && `concluída em ${diaMes(atual.concluida_em)}, esperando a próxima etapa`}
+                      {atual.situacao === 'pulada' && 'pulada, esperando a próxima etapa'}
+                    </>
+                  }
+                />
+                {atual.fase === 'correcao_inspecao' && (
+                  // Correção de inspeção (D5): o andamento é das ocorrências da folha, de todas as revisões.
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex justify-between text-nota">
+                      <span>
+                        <b>{num(lote.ocorrencias.tratadas)}</b> de {plural(lote.ocorrencias.total, 'ocorrência tratada', 'ocorrências tratadas')} · todas as revisões
+                      </span>
+                      <span className="tab">{lote.ocorrencias.total ? `${pc(lote.ocorrencias.tratadas, lote.ocorrencias.total)}%` : ''}</span>
+                    </div>
+                    <Barra total={Math.max(lote.ocorrencias.total, 1)} partes={[{ valor: lote.ocorrencias.tratadas, cor: COR.concluida }]} />
+                  </div>
+                )}
+                {atual.fase === 'correcao_inspecao' && atual.cargas_total === 1 ? (
+                  <span className="text-nota text-muted-foreground">
+                    {lote.pessoas.find((p) => p.conta) ? (
+                      <>
+                        Com <b>{lote.pessoas.find((p) => p.conta)!.nome}</b>
+                        {lote.pessoas.find((p) => p.conta)!.conta === eu?.conta ? ' (você)' : ''}, que trata as ocorrências {lote.tipo === 'folha' ? 'da folha' : 'do lote'}.
+                      </>
+                    ) : (
+                      `${lote.tipo === 'folha' ? 'A folha' : 'O lote'} ainda não está com ninguém: distribua.`
+                    )}
                   </span>
-                </div>
-                {atual.cargas_total > 0 ? (
+                ) : atual.cargas_total > 0 ? (
                   <>
                     <div className="flex flex-col gap-1.5">
-                      <div className="flex justify-between text-[13px]">
+                      <div className="flex justify-between text-nota">
                         <span>
-                          <b>{num(atual.cargas_concluidas)}</b> de {num(atual.cargas_total)} cargas concluídas
+                          <b>{num(atual.cargas_concluidas)}</b> de {num(atual.cargas_total)} {atual.fase === 'cq' ? 'amostras avaliadas' : 'cargas concluídas'}
                         </span>
-                        <span style={{ color: lote.pessoas.some((p) => !p.conta) ? COR.alerta : undefined }}>
-                          {num(lote.pessoas.filter((p) => !p.conta).reduce((s, p) => s + p.total - p.concluidas, 0))} a atribuir
+                        <span className={lote.pessoas.some((p) => !p.conta) ? 'text-alerta' : undefined}>
+                          {num(lote.pessoas.filter((p) => !p.conta).reduce((s, p) => s + p.total - p.concluidas, 0))} {atual.fase === 'cq' ? 'sem avaliador' : 'a atribuir'}
                         </span>
                       </div>
                       <Barra total={atual.cargas_total} partes={[{ valor: atual.cargas_concluidas, cor: COR.concluida }]} />
                     </div>
-                    <table className="w-full border-collapse text-[13px]">
+                    <Tabela solta densa>
                       <tbody>
                         {lote.pessoas
                           .filter((p) => p.conta)
                           .map((p) => (
                             <tr key={p.conta}>
-                              <td className="border-t py-1.5">
+                              <td>
                                 {p.nome}
                                 {p.conta === eu?.conta ? ' (você)' : ''}
                               </td>
-                              <td className="tab border-t py-1.5 text-right">
+                              <td className="tab text-right">
                                 {num(p.concluidas)} de {num(p.total)}
                               </td>
-                              <td className="border-t py-1.5 pl-3 text-right text-muted-foreground">{p.ultima ? diaMes(p.ultima) : 'ainda não'}</td>
+                              <td className="text-right text-muted-foreground">{p.ultima ? diaMes(p.ultima) : 'ainda não'}</td>
                             </tr>
                           ))}
                       </tbody>
-                    </table>
+                    </Tabela>
                   </>
                 ) : (
-                  <div className="flex flex-wrap items-center gap-3 text-[13px] text-muted-foreground">
-                    <span>Sem cargas nesta etapa.</span>
-                    {aberta && supervisor && atual && (
+                  <div className="flex flex-wrap items-center gap-3 text-nota text-muted-foreground">
+                    <span>
+                      {atual.fase === 'cq'
+                        ? 'Sem amostras ainda nesta etapa.'
+                        : atual.fase === 'correcao_inspecao'
+                          ? lote.ocorrencias.total > lote.ocorrencias.tratadas
+                            ? `Ninguém está com ${oLote(lote.tipo)}: a etapa não tem atividade de correção no fluxo.`
+                            : 'Nenhuma ocorrência a tratar.'
+                          : 'Sem cargas nesta etapa.'}
+                    </span>
+                    {aberta && supervisor && atual && atual.fase !== 'cq' && !(atual.fase === 'correcao_inspecao' && lote.ocorrencias.total === lote.ocorrencias.tratadas) && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -362,15 +497,18 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                     )}
                   </div>
                 )}
-              </section>
+                {supervisor && atual.fase === 'cq' && <PlanosCQ idLoteEtapa={atual.id} folha={lote.tipo === 'folha'} distribuir={() => distribuir([lote.id])} />}
+              </Bloco>
             )}
+
+            {supervisor && <OcorrenciasFolha idLote={lote.id} />}
 
             {supervisor && <Andar lote={lote} fluxo={fluxo} estado={estado} distribuir={distribuir} />}
 
             {hist && hist.itens.length > 0 && (
               <section className="flex flex-col gap-2.5">
-                <Titulo>Histórico</Titulo>
-                <ol className="flex flex-col text-[13px]">
+                <Rotulo>Histórico</Rotulo>
+                <ol className="flex flex-col text-nota">
                   {hist.itens.slice(0, 20).map((h, i) => (
                     <li key={i} className="flex flex-col gap-0.5 border-b border-linha py-2.5 last:border-0">
                       <span>

@@ -8,6 +8,7 @@ import shutil
 import sqlite3
 import subprocess
 import threading
+import uuid as uuid_mod
 
 import pytest
 from feixe.sync import esquema
@@ -322,3 +323,44 @@ def test_esquema_2_ganha_os_gatilhos_e_as_views_sem_recriar(ws):
                 conn.execute("UPDATE carga_trabalho SET concluido = 0 WHERE id = 1001")
         finally:
             conn.close()
+
+
+@pytest.mark.skipif(sqlite3.sqlite_version_info < (3, 35), reason="DROP COLUMN do SQLite 3.35")
+def test_esquema_3_ganha_as_colunas_do_cq_e_rele_as_linhas_limpas(ws):
+    """Fase D: o esquema 4 acrescenta colunas ao CQ sem recriar o workspace, e as linhas limpas perdem a versão base
+    para o próximo pull trazê-las com as colunas novas; a que tem pendência fica como está."""
+    with ws.transacao() as ex:
+        limpa = str(uuid_mod.uuid4())
+        ex.gravar_remoto("cq_inspecao", {"id": 7001, "uuid": limpa, "id_lote": 1, "uf": "DF", "elemento": "Omissão",
+                                         "geom": wkb_ponto(-47.9, -15.8), "tratado": False,
+                                         "criado_em": VERSAO, "criado_por": "sup", "atualizado_em": VERSAO,
+                                         "atualizado_por": "sup"})  # fmt: skip
+        suja = ex.inserir("cq_inspecao", {"id_lote": 1, "elemento": "Comissão", "geom": wkb_ponto(-47.8, -15.8),
+                                          "responsavel": USUARIO})  # fmt: skip
+    conn = ws.conn
+    conn.execute("BEGIN IMMEDIATE")
+    for vw in (esquema.VW_AMOSTRA_INFO, esquema.VW_OCORRENCIA_INFO):  # do esquema 6 (D3c); usam as colunas do 4
+        conn.execute(f"DROP VIEW {vw}")
+        conn.execute("DELETE FROM gpkg_contents WHERE table_name = ?", (vw,))
+    for indice in ("cq_inspecao_carga_idx", "cq_inspecao_carga_avaliada_idx", "cq_inspecao_lote_etapa_idx"):
+        conn.execute(f"DROP INDEX {indice}")
+    for tabela, colunas in esquema._COLUNAS_V4.items():
+        for nome, _ in colunas:
+            conn.execute(f"ALTER TABLE {tabela} DROP COLUMN {nome}")
+    conn.execute("ALTER TABLE atividade DROP COLUMN elemento")  # do esquema 5 (D3a)
+    conn.execute("INSERT INTO meta (chave, valor) VALUES ('resumo.atividade', 'md5 velho')")
+    conn.execute("UPDATE meta SET valor = '3' WHERE chave = 'versao_esquema'")
+    conn.execute("COMMIT")
+    ws.fechar()
+    with Workspace.abrir("dev", USUARIO, "DF", path=ws.caminho) as w2, w2.leitura() as ex:
+        assert ex.meta("versao_esquema") == str(esquema.VERSAO)
+        assert len(ex.pendentes()) == 1  # migrou, não recriou
+        cols = {r["name"] for r in ex.todos("PRAGMA table_info(cq_inspecao)")}
+        assert {"id_lote_etapa", "id_carga_avaliada"} <= cols
+        assert "fracao_critica" in {r["name"] for r in ex.todos("PRAGMA table_info(cq_plano)")}
+        # Esquema 5: o elemento na atividade, e o md5 esquecido para o próximo pull trazer as atividades de novo.
+        assert "elemento" in {r["name"] for r in ex.todos("PRAGMA table_info(atividade)")}
+        assert ex.meta("resumo.atividade") is None
+        versoes = {r["uuid"]: r["versao_base"] for r in ex.todos("SELECT uuid, versao_base FROM cq_inspecao")}
+        assert versoes[limpa] is None and suja in versoes
+        assert ex.um("SELECT plugin FROM controle_escrita")["plugin"] == 0

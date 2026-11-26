@@ -112,7 +112,8 @@ def test_folhas_viram_lotes_por_tema(convertido):
         )
         lotes = set(cur.fetchall())
         cur.execute(
-            "SELECT count(*) FROM mapcartacomp.lote "
+            # Só folhas: lote livre não tem articulação (os criados à mão no dev ficariam todos no mesmo grupo nulo).
+            "SELECT count(*) FROM mapcartacomp.lote WHERE tipo = 'folha' "
             "GROUP BY cod_projeto, id_tema, id_articulacao_scn HAVING count(*) > 1"
         )
         assert cur.fetchall() == []
@@ -212,3 +213,15 @@ def test_cq_tem_uma_atividade_e_um_plano_por_medida(convertido):
             "(SELECT count(*) FROM mapcartacomp.carga_trabalho c WHERE c.id_cq_plano = p.id)"
         )
         assert cur.fetchone()[0] == 0
+
+
+def test_cq_do_df_tem_o_padrao_dos_planos(convertido):
+    """D-135: a etapa de CQ dos fluxos do DF sai com nível II, LQA 2,5% e fração crítica 2,5%; as outras, sem padrão."""
+    with convertido["ccar"].cursor() as cur:
+        cur.execute(
+            "SELECT fe.fase = 'cq', fe.nivel_inspecao, fe.lqa::float8, fe.fracao_critica::float8 "
+            "FROM mapcartacomp.fluxo f JOIN mapcartacomp.fluxo_etapa fe ON fe.id_fluxo = f.id WHERE f.uf = 'DF'"
+        )
+        linhas = cur.fetchall()
+    assert {(n, lqa, fc) for cq, n, lqa, fc in linhas if cq} == {("II", 2.5, 2.5)}
+    assert {(n, lqa, fc) for cq, n, lqa, fc in linhas if not cq} == {(None, None, None)}

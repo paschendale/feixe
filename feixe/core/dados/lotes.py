@@ -40,7 +40,7 @@ def _fluxo_da_uf(ex: Executor, uf: str, id_fluxo: int, projetos: Optional[Iterab
     if not fluxo or fluxo["uf"] != uf or not fluxo["ativo"]:
         raise ErroDados("fluxo não encontrado entre os fluxos ativos da sua unidade", 404)
     if fluxo["primeira_etapa"] is None:
-        raise ErroDados("o fluxo não tem etapas: configure o fluxo antes de criar folhas nele")
+        raise ErroDados("o fluxo não tem etapas: configure o fluxo antes de criar lotes nele")
     if projetos is not None and fluxo["cod_projeto"] not in set(projetos):
         raise ErroDados("você não é supervisor no projeto deste fluxo (perfil S no SGBC)", 403)
     return fluxo
@@ -129,6 +129,102 @@ def criar_livre(
     return {"tema": fluxo["tema"], "criados": [criado], "existentes": []}
 
 
+def criar_livres(
+    ex: Executor, uf: str, id_fluxo: int, itens: List[Dict], projetos: Optional[Iterable[int]] = None
+) -> Dict:
+    """Vários lotes livres de uma vez, um por polígono (D-154): as feições selecionadas no QGIS (ottobacias,
+    municípios), cada uma com o seu nome. Cada um é conferido sozinho, num savepoint: nome vazio ou repetido na lista,
+    geometria que não é polígono válido com área e nome que já existe no projeto e tema não impedem os outros.
+    Volta `criados`, `existentes` (o nome já é de um lote; nada muda nele) e `erros` (nome e motivo)."""
+    if not itens:
+        raise ErroDados("nenhum polígono para criar", 400)
+    fluxo = _fluxo_da_uf(ex, uf, id_fluxo, projetos)
+    criados, existentes, erros, vistos = [], [], [], set()
+    for i, item in enumerate(itens, 1):
+        nome = (item.get("nome") or "").strip()
+        if not nome:
+            erros.append({"nome": f"polígono {i}", "erro": "sem nome"})
+            continue
+        if nome in vistos:
+            erros.append({"nome": nome, "erro": "nome repetido nesta seleção"})
+            continue
+        vistos.add(nome)
+        ja = ex.um(
+            "SELECT id FROM mapcartacomp.lote WHERE tipo = 'livre' AND cod_projeto = %s AND id_tema = %s AND uf = %s "
+            "AND nome = %s",
+            (fluxo["cod_projeto"], fluxo["id_tema"], uf, nome),
+        )
+        if ja:
+            existentes.append({"cd_mi": nome, "nome": nome, "id_lote": ja["id"], "uf": uf})
+            continue
+        ex.executar("SAVEPOINT livre")
+        try:
+            r = criar_livre(ex, uf, id_fluxo, nome, item.get("wkt") or "", projetos)
+        except ErroDados as e:
+            ex.executar("ROLLBACK TO SAVEPOINT livre")
+            erros.append({"nome": nome, "erro": e.mensagem})
+            continue
+        except Exception as e:  # noqa: BLE001 - WKT ilegível etc.: o banco recusa e este fica de fora
+            ex.executar("ROLLBACK TO SAVEPOINT livre")
+            erros.append({"nome": nome, "erro": f"geometria ilegível ({str(e).splitlines()[0][:80]})"})
+            continue
+        ex.executar("RELEASE SAVEPOINT livre")
+        criados += r["criados"]
+    return {"tema": fluxo["tema"], "criados": criados, "existentes": existentes, "erros": erros}
+
+
+def excluir(ex: Executor, uf: str, ids: List[int], previa: bool, projetos: Optional[Iterable[int]] = None) -> Dict:
+    """Exclui folhas e lotes criados por engano (D-155): o lote, as passagens, as cargas, os planos de CQ, a fila e o
+    histórico. Só sem trabalho feito: nenhuma carga concluída, nenhuma amostra avaliada e nenhuma ocorrência de
+    inspeção; com trabalho, recusa com o motivo (o caminho é tirar cargas na gaveta). Cargas pendentes com alguém saem
+    do workspace dessa pessoa no próximo pull. Na prévia, o que acontece com cada um; sem prévia, apaga os aceitos."""
+    if not ids:
+        raise ErroDados("escolha pelo menos um lote", 400)
+    linhas = ex.todos(
+        "SELECT l.id AS id_lote, l.uf, l.cod_projeto, l.tipo, coalesce(c.folha_revisao, l.nome) AS folha_revisao, "
+        "(SELECT count(*) FROM mapcartacomp.carga_trabalho x JOIN mapcartacomp.lote_etapa le "
+        " ON le.id = x.id_lote_etapa WHERE le.id_lote = l.id) AS cargas, "
+        "(SELECT count(*) FROM mapcartacomp.carga_trabalho x JOIN mapcartacomp.lote_etapa le "
+        " ON le.id = x.id_lote_etapa WHERE le.id_lote = l.id AND x.concluido) AS concluidas, "
+        "(SELECT count(DISTINCT x.responsavel) FROM mapcartacomp.carga_trabalho x JOIN mapcartacomp.lote_etapa le "
+        " ON le.id = x.id_lote_etapa WHERE le.id_lote = l.id AND NOT x.concluido AND x.responsavel IS NOT NULL) "
+        "AS com_alguem, "
+        "(SELECT count(*) FROM mapcartacomp.cq_amostra a JOIN mapcartacomp.cq_plano p ON p.id = a.id_cq_plano "
+        " JOIN mapcartacomp.lote_etapa le ON le.id = p.id_lote_etapa WHERE le.id_lote = l.id "
+        " AND a.status IS NOT NULL) AS avaliadas, "
+        "(SELECT count(*) FROM mapcartacomp.cq_inspecao i WHERE i.id_lote = l.id) AS ocorrencias "
+        "FROM mapcartacomp.lote l LEFT JOIN mapcartacomp.ctrl_lote c ON c.id_lote = l.id "
+        "WHERE l.id = ANY(%s) ORDER BY folha_revisao" + ("" if previa else " FOR UPDATE OF l"),
+        (list(ids),),
+    )
+    permitidos = set(projetos) if projetos is not None else None
+    itens = []
+    for r in linhas:
+        erro = None
+        if r["uf"] != uf or (permitidos is not None and r["cod_projeto"] not in permitidos):
+            erro = "lote de outra unidade ou projeto"
+        elif r["concluidas"]:
+            erro = f"já tem {r['concluidas']} cargas concluídas: tire na gaveta só as cargas que sobraram"
+        elif r["avaliadas"]:
+            erro = f"já tem {r['avaliadas']} amostras de CQ avaliadas"
+        elif r["ocorrencias"]:
+            erro = f"já tem {r['ocorrencias']} ocorrências de inspeção"
+        itens.append({"id_lote": r["id_lote"], "folha_revisao": r["folha_revisao"], "tipo": r["tipo"],
+                      "cargas": r["cargas"], "com_alguem": r["com_alguem"], "erro": erro})  # fmt: skip
+    if previa:
+        return {"itens": itens}
+    apagar = [i["id_lote"] for i in itens if not i["erro"]]
+    if apagar:
+        # As passagens primeiro (levam cargas, planos, amostras, fila e histórico em cascata), com o lote ainda lá
+        # para a derivação do status; depois o lote.
+        ex.executar("DELETE FROM mapcartacomp.lote_etapa WHERE id_lote = ANY(%s)", (apagar,))
+        ex.executar("DELETE FROM mapcartacomp.lote WHERE id = ANY(%s)", (apagar,))
+    return {
+        "excluidos": [{"id_lote": i["id_lote"], "folha_revisao": i["folha_revisao"]} for i in itens if not i["erro"]],
+        "erros": [{"id_lote": i["id_lote"], "erro": i["erro"]} for i in itens if i["erro"]],
+    }
+
+
 # Etapa em que a folha está trabalhando (D-105): a aberta (pendente ou em andamento; no máximo uma), se houver; senão a
 # atual do lote, que é a que dá o status nacional e fica na concluída até a seguinte começar. Sem isso, uma folha com a
 # próxima etapa aberta e ainda não iniciada apareceria como "esperando" e gerar ou atribuir cargas iria para a etapa
@@ -191,6 +287,12 @@ def um(ex: Executor, id_lote: int) -> Optional[Dict]:
             "LEFT JOIN mapcartctrl.t_usuario u ON u.nom_contausuario = c.responsavel WHERE c.id_lote_etapa = %s "
             "GROUP BY 1, 2 ORDER BY c.responsavel IS NULL, 2",
             (lote["id_lote_etapa_atual"],),
+        )
+        # Ocorrências da folha, de todas as revisões: o andamento da correção de inspeção na gaveta (D5).
+        lote["ocorrencias"] = ex.um(
+            "SELECT count(*) AS total, count(*) FILTER (WHERE tratado) AS tratadas FROM mapcartacomp.cq_inspecao "
+            "WHERE id_lote = %s",
+            (id_lote,),
         )
     return lote
 

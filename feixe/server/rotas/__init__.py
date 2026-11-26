@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from . import camadas, cargas, filas, fluxos, lotes, painel, referencias, sync_log
+from . import camadas, cargas, cq, filas, fluxos, lotes, painel, referencias, sync_log
 
-MODULOS: list = [camadas, cargas, filas, lotes, fluxos, painel, referencias, sync_log]
+# `cq` antes de `fluxos`: /api/lote_etapas/{id}/cq_plano casaria com /api/lote_etapas/{id}/{acao}.
+MODULOS: list = [camadas, cargas, filas, lotes, cq, fluxos, painel, referencias, sync_log]
 
 
 def registrar(r, ctx) -> None:

@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Tuple
 from ...core.dados import ErroDados
 from ...core.dados import cargas as dc
 from ...core.dados.local import cargas as lc
+from ...core.dados.local import grupos as lgrupos
 from ..api import ErroApi, campo, inteiro
 from .lotes import uf_de
 
@@ -103,10 +104,10 @@ def mensagens_edicao(r: Dict) -> Tuple[List[str], List[str]]:
     f = r.get("fila")
     if f:
         ok.append(
-            f"A próxima folha da sua fila é a {f['folha_revisao']} ({f['atribuidas']} cargas), já atribuída a você."
+            f"O próximo lote da sua fila é o {f['folha_revisao']} ({f['atribuidas']} cargas), já atribuído a você."
         )
     for x in r.get("recusadas") or []:
-        folha = f" da {x['folha_revisao']}" if x.get("folha_revisao") else ""
+        folha = f" em {x['folha_revisao']}" if x.get("folha_revisao") else ""
         motivo = x["motivo"][:1].upper() + x["motivo"][1:]
         avisos.append(f"Carga {x['id']}{folha}: {motivo}. A mudança foi desfeita.")
     return ok, avisos
@@ -211,8 +212,13 @@ def registrar(r, ctx) -> None:
 
     @r.rota("POST", "/api/cargas/proxima", exige=EXECUTORES)
     def _proxima(req):
+        # "Próxima carga" (Continuar no QGIS) é da produção: as amostras de CQ andam por /api/amostras/proxima e a
+        # carga da folha na correção de inspeção, por /api/inspecoes/proxima (D5).
+        ctx.exigir_pronto()
+        with ctx.leitura() as ex:
+            amostras = lgrupos.fora_da_producao(ex)
         return 200, proxima(
-            ctx, campo(req, "referencia", int, padrao=None), id_lote=campo(req, "id_lote", int, padrao=None)
+            ctx, campo(req, "referencia", int, padrao=None), amostras, campo(req, "id_lote", int, padrao=None)
         )
 
     @r.rota("POST", "/api/cargas/{id}/desfazer", exige=EXECUTORES)

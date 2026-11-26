@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Colunas, RotuloEstavel } from '@/components/painel'
+import { Colunas, Nota, RotuloEstavel, Tabela } from '@/components/ds'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select } from '@/components/ui/select'
 import type { PessoaDistribuir, SugestaoDistribuicao } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
-import { num, plural } from '@/lib/formato'
+import { contarLotes, num, oLote, plural } from '@/lib/formato'
 import { enviar } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
+import { DistribuirCQ } from './DistribuirCQ'
 
 type Destino = { tipo: 'agora' } | { tipo: 'fila'; posicao: number } | { tipo: 'ja' } | { tipo: 'fica' } | null
 type Folha = SugestaoDistribuicao['folhas'][number]
@@ -34,10 +35,12 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
   const [dados, setDados] = useState<SugestaoDistribuicao | null>(null)
   const [escolha, setEscolha] = useState<Record<number, string>>({})
   const [ocupado, setOcupado] = useState(false)
+  const [cqAgora, setCqAgora] = useState(false)
 
   useEffect(() => {
-    if (!lotes.length) return
     setDados(null)
+    setCqAgora(false)
+    if (!lotes.length) return
     enviar<SugestaoDistribuicao>('/api/distribuir/sugestao', { lotes })
       .then((d) => {
         setDados(d)
@@ -45,11 +48,17 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
       })
       .catch((e) => avisar((e as Error).message, 'erro'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lotes])
+  }, [lotes.join(',')])
 
   const pessoa = useMemo(() => new Map((dados?.pessoas ?? []).map((p) => [p.conta, p])), [dados])
-  const distribuiveis = (dados?.folhas ?? []).filter((f) => f.a_atribuir > 0 || f.com.length > 0)
-  const nada = (dados?.folhas ?? []).filter((f) => !f.a_atribuir && !f.com.length)
+  // CQ (D-147): as amostras se repartem por proporção entre avaliadores, num diálogo próprio (`DistribuirCQ`). Aqui
+  // ficam só as folhas da produção; com as duas na seleção, o CQ abre à parte pelo aviso.
+  const ehCq = (f: Folha) => f.fase === 'cq'
+  // Memorizada: uma lista nova a cada render fazia o diálogo do CQ pedir a sugestão de novo, sem parar.
+  const lotesCq = useMemo(() => [...new Set((dados?.folhas ?? []).filter((f) => f.fase === 'cq').map((f) => f.id_lote))], [dados])
+  const daProducao = (dados?.folhas ?? []).filter((f) => !ehCq(f))
+  const distribuiveis = daProducao.filter((f) => f.a_atribuir > 0 || f.com.length > 0)
+  const nada = daProducao.filter((f) => !f.a_atribuir && !f.com.length)
   const comAlguem = distribuiveis.filter((f) => f.com.length > 0).length
 
   // O que vai acontecer, na ordem da lista: a primeira folha de quem está livre é dele agora, as outras vão para a fila.
@@ -92,7 +101,7 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
       const r = await enviar<{ agora: unknown[]; na_fila: unknown[]; erros: { id_lote_etapa: number; erro: string }[] }>('/api/distribuir', {
         itens: itens.map((f) => ({ id_lote_etapa: f.id_lote_etapa, responsavel: escolha[f.id_lote_etapa] })),
       })
-      const partes = [r.agora.length && `${plural(r.agora.length, 'folha entregue', 'folhas entregues')} agora (a etapa começou)`, r.na_fila.length && `${plural(r.na_fila.length, 'folha', 'folhas')} na fila`]
+      const partes = [r.agora.length && `${plural(r.agora.length, 'lote entregue', 'lotes entregues')} agora (a etapa começou)`, r.na_fila.length && `${plural(r.na_fila.length, 'lote', 'lotes')} na fila`]
       avisar(`Distribuído: ${partes.filter(Boolean).join(', ')}.`)
       r.erros.forEach((e) => avisar(e.erro, 'erro'))
       fechar(true)
@@ -103,32 +112,40 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
     }
   }
 
+  // Fechado (sem folhas), o diálogo do CQ fecha junto: ele abre a partir de `dados`, que é de antes de fechar.
+  if (lotes.length && dados && lotesCq.length && (cqAgora || !daProducao.length)) return <DistribuirCQ lotes={lotesCq} fechar={fechar} />
+
   return (
     <Dialog open={lotes.length > 0} onOpenChange={(v) => !v && fechar(false)}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Distribuir {distribuiveis.length > 1 ? `${num(distribuiveis.length)} folhas` : 'a folha'}</DialogTitle>
+          <DialogTitle>
+            Distribuir {distribuiveis.length > 1 ? contarLotes(distribuiveis) : oLote(distribuiveis[0]?.tipo)}
+          </DialogTitle>
           <DialogDescription>
-            Uma folha por pessoa. Quem está sem carga recebe agora e a etapa começa; quem já tem, recebe na fila e pega a folha quando terminar o que tem. A sugestão evita quem fez a etapa anterior da folha.
-            {comAlguem > 0 && ' Folha que já está com alguém fica com a pessoa; escolha outra para redistribuir: as cargas pendentes saem de quem estava (as concluídas continuam dela).'}
+            Um lote por pessoa. Quem está sem carga recebe agora e a etapa começa; quem já tem, recebe na fila e pega o lote quando terminar o que tem. A sugestão evita quem fez a etapa anterior do lote.
+            {comAlguem > 0 && ' Lote que já está com alguém fica com a pessoa; escolha outra para redistribuir: as cargas pendentes saem de quem estava (as concluídas continuam dela).'}
           </DialogDescription>
         </DialogHeader>
         {/* Enquanto a sugestão chega, o espaço da tabela já fica reservado (uma linha por folha): o diálogo não salta. */}
         {!dados && (
-          <div className="grid place-items-center rounded-md border text-sm text-muted-foreground" style={{ height: `min(${37 + 57 * lotes.length}px, 52vh)` }}>
+          <div className="grid place-items-center rounded-xl bg-preenchimento-2 text-muted-foreground" style={{ height: `min(${37 + 57 * lotes.length}px, 52vh)` }}>
             Montando a sugestão…
           </div>
         )}
-        {dados && distribuiveis.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma destas folhas tem cargas a distribuir: abra a próxima etapa delas, que já sai com as cargas.</p>}
+        {dados && distribuiveis.length === 0 && (
+          <p className="text-muted-foreground">
+            Nenhum destes lotes tem cargas a distribuir: abra a próxima etapa deles, que já sai com as cargas.
+          </p>
+        )}
         {dados && distribuiveis.length > 0 && (
-          <div className="max-h-[52vh] overflow-auto rounded-md border">
-            <table className="w-full table-fixed border-collapse text-sm">
+          <Tabela fixa compacta className="max-h-[52vh] overflow-auto">
               <Colunas larguras={['28%', '44%', undefined]} />
               <thead className="sticky top-0 bg-card">
-                <tr className="text-left text-xs text-muted-foreground">
-                  <th className="border-b py-2 pr-2 pl-3 font-medium">Folha</th>
-                  <th className="border-b px-2 py-2 font-medium">Para</th>
-                  <th className="border-b py-2 pr-3 pl-2 font-medium">Recebe</th>
+                <tr>
+                  <th>Lote</th>
+                  <th>Para</th>
+                  <th>Recebe</th>
                 </tr>
               </thead>
               <tbody>
@@ -136,33 +153,33 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
                   const c = escolha[f.id_lote_etapa]
                   const d = destinos[f.id_lote_etapa]
                   return (
-                    <tr key={f.id_lote_etapa} className="border-b border-linha last:border-0">
-                      <td className="py-2 pr-2 pl-3">
+                    <tr key={f.id_lote_etapa}>
+                      <td>
                         <b className="tab">{f.folha_revisao}</b>
-                        <span className="block text-xs text-muted-foreground">
-                          {f.etapa} · {plural(f.a_atribuir + f.com.reduce((n, p) => n + p.pendentes, 0), 'carga', 'cargas')}
+                        <span className="block text-rodape text-muted-foreground">
+                          {f.etapa} · {f.fase === 'correcao_inspecao' && f.cargas === 1 ? `${f.tipo === 'folha' ? 'a folha inteira' : 'o lote inteiro'}: tratar as ocorrências` : plural(f.a_atribuir + f.com.reduce((n, p) => n + p.pendentes, 0), 'carga', 'cargas')}
                         </span>
                       </td>
-                      <td className="px-2 py-2">
-                        <Select className="h-8 w-full text-[13px]" value={c ?? ''} onChange={(e) => setEscolha((x) => ({ ...x, [f.id_lote_etapa]: e.target.value }))} aria-label={`Quem recebe a ${f.folha_revisao}`}>
+                      <td>
+                        <Select className="h-8 w-full text-nota" value={c ?? ''} onChange={(e) => setEscolha((x) => ({ ...x, [f.id_lote_etapa]: e.target.value }))} aria-label={`Quem recebe ${f.tipo === 'folha' ? 'a' : 'o'} ${f.folha_revisao}`}>
                           <option value="">{f.com.length ? `Deixar com ${comQuem(f)}` : 'Não distribuir agora'}</option>
                           {dados.pessoas.map((p) => (
                             <option key={p.conta} value={p.conta}>
                               {primeiro(p.nome)} · {situacao(p)}
-                              {f.com.some((x) => x.conta === p.conta) ? ' · está com a folha' : f.anteriores.includes(p.conta) ? ' · fez a etapa anterior' : ''}
+                              {f.com.some((x) => x.conta === p.conta) ? ` · está com ${oLote(f.tipo)}` : f.anteriores.includes(p.conta) ? ' · fez a etapa anterior' : ''}
                             </option>
                           ))}
                         </Select>
-                        {c && f.anteriores.includes(c) && <span className="mt-0.5 block text-xs text-[#8A5300]">Esta pessoa trabalhou na etapa anterior desta folha: a revisão deixa de ser às cegas.</span>}
+                        {c && f.anteriores.includes(c) && <span className="mt-0.5 block text-rodape text-alerta">Esta pessoa trabalhou na etapa anterior {f.tipo === 'folha' ? 'desta folha' : 'deste lote'}: a revisão deixa de ser às cegas.</span>}
                       </td>
-                      <td className={cn('py-2 pr-3 pl-2 text-[13px]', d?.tipo === 'agora' && 'font-semibold text-ibge')}>
+                      <td className={cn('text-nota', d?.tipo === 'agora' && 'font-semibold text-primary')}>
                         {d?.tipo === 'agora' && 'agora'}
                         {d?.tipo === 'fila' && `na fila (${d.posicao}ª)`}
                         {d?.tipo === 'ja' && `já está na fila de ${primeiro(pessoa.get(c)?.nome)}`}
                         {d?.tipo === 'fica' && <span className="text-muted-foreground">continua com {comQuem(f)}</span>}
                         {!d && <span className="text-muted-foreground">fica a atribuir</span>}
                         {d && d.tipo !== 'fica' && f.com.some((p) => p.conta !== c) && (
-                          <span className="block text-xs text-muted-foreground">
+                          <span className="block text-rodape text-muted-foreground">
                             sai de {f.com.filter((p) => p.conta !== c).map((p) => `${primeiro(p.nome)} (${plural(p.pendentes, 'pendente', 'pendentes')})`).join(', ')}
                           </span>
                         )}
@@ -171,17 +188,28 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
                   )
                 })}
               </tbody>
-            </table>
-          </div>
+          </Tabela>
         )}
         {nada.length > 0 && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-rodape text-muted-foreground">
             Sem cargas a distribuir: {nada.map((f) => f.folha_revisao).join(', ')} ({nada.some((f) => f.cargas) ? 'todas concluídas' : 'a etapa não tem cargas'}).
           </p>
         )}
+        {lotesCq.length > 0 && (
+          <Nota
+            tom="info"
+            acao={
+              <Button size="sm" variant="tinted" onClick={() => setCqAgora(true)}>
+                Distribuir as amostras
+              </Button>
+            }
+          >
+            {contarLotes(lotesCq.map((id) => ({ tipo: dados?.folhas.find((f) => f.id_lote === id)?.tipo })))} {lotesCq.length === 1 ? 'está' : 'estão'} no CQ: as amostras se repartem entre avaliadores, à parte.
+          </Nota>
+        )}
         <DialogFooter className="items-center gap-3 sm:justify-between">
-          <span className="text-[13px] text-muted-foreground">
-            {[nTroca && `${plural(nTroca, 'folha muda', 'folhas mudam')} de mão`, nAgora && `${plural(nAgora, 'pessoa recebe', 'pessoas recebem')} agora`, nFila && `${plural(nFila, 'folha vai', 'folhas vão')} para a fila`, sem && `${plural(sem, 'fica', 'ficam')} a atribuir`].filter(Boolean).join(' · ')}
+          <span className="text-nota text-muted-foreground">
+            {[nTroca && `${contarLotes(itens.filter((f) => f.com.length > 0))} ${nTroca === 1 ? 'muda' : 'mudam'} de mão`, nAgora && `${plural(nAgora, 'pessoa recebe', 'pessoas recebem')} agora`, nFila && `${contarLotes(distribuiveis.filter((f) => destinos[f.id_lote_etapa]?.tipo === 'fila'))} ${nFila === 1 ? 'vai' : 'vão'} para a fila`, sem && `${plural(sem, 'fica', 'ficam')} a atribuir`].filter(Boolean).join(' · ')}
           </span>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => fechar(false)}>

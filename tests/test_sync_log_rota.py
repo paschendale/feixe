@@ -112,7 +112,7 @@ def test_quem_executa_ve_as_proprias_recusas_e_conflitos_perdidos_sem_colegas(mo
     colega = {"por": "u_colega", "em": srv, "origem_em": "acao"}
     perdido = {**base, "descartado": "local", "servidor": {"valores": {"concluido": True}, **colega}}
     _registrar(ws, "conflito_perdido", perdido)
-    motivo = "a etapa desta folha foi encerrada pelo supervisor"
+    motivo = "a etapa deste lote foi encerrada pelo supervisor"
     _registrar(ws, "recusado", {**base, "itens": ["k2"], "motivo": motivo,
                                 "servidor": {"valores": {"concluido": False}, **colega}})  # fmt: skip
     _registrar(ws, "recusado", {"itens": ["k2"], "repetido": True})  # repetição: não aparece de novo

@@ -1,5 +1,5 @@
 """Fluxos da GGC e o andar da folha pelas etapas (B6). Nada avança sozinho: toda mudança é ação do supervisor, com
-observação, registrada em lote_etapa_hist. O plugin só sugere a próxima etapa.
+observação opcional, registrada em lote_etapa_hist. O plugin só sugere a próxima etapa.
 
 Modelo de passagem: cada lote tem no máximo uma passagem aberta (pendente ou em andamento). Avançar, repetir uma
 etapa repetível ou voltar a uma etapa anterior é o mesmo gesto: abrir uma nova passagem numa etapa do fluxo.
@@ -9,18 +9,26 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
+from ..cq import amostragem as am
 from . import ErroDados, Executor, novo_uuid
+from . import cq as dcq
 
 ABERTAS = ("pendente", "em_andamento")
-CAMPOS_ETAPA = ("ordem", "fase", "nome", "obrigatoria", "repetivel", "conta_revisao", "fracao_critica")
+CAMPOS_ETAPA = (
+    "ordem", "fase", "nome", "obrigatoria", "repetivel", "conta_revisao", "fracao_critica", "nivel_inspecao", "lqa",
+)  # fmt: skip
+CAMPOS_CQ = ("fracao_critica", "nivel_inspecao", "lqa")  # padrão dos planos de amostragem, só na etapa de CQ (D-135)
 
 # Fluxo modelo da CCAR (D-65): o caminho do DF. Fica no código, não no banco, porque um fluxo no banco é de uma UF.
-# As atividades de cada etapa são escolhidas no catálogo pelo projeto, tema e fase; no CQ, todas as ativas do tema.
+# As atividades de cada etapa são escolhidas no catálogo pelo projeto, tema e fase; no CQ, todas as ativas do tema, com
+# o padrão dos planos no nível II e LQA 4% (a fração crítica fica a de cada elemento, 4% na CCAR, D-75): abrir o CQ já
+# sorteia as amostras (D-136), e a GGC troca o padrão no editor.
 MODELO_CCAR = [
     {"fase": "aquisicao", "nome": "Aquisição", "obrigatoria": True, "repetivel": False, "conta_revisao": True},
     {"fase": "revisao", "nome": "Revisão por outra pessoa", "obrigatoria": False, "repetivel": True,
      "conta_revisao": True},
-    {"fase": "cq", "nome": "Controle de qualidade", "obrigatoria": False, "repetivel": True, "conta_revisao": False},
+    {"fase": "cq", "nome": "Controle de qualidade", "obrigatoria": False, "repetivel": True, "conta_revisao": False,
+     "nivel_inspecao": "II", "lqa": 4},
     {"fase": "correcao_inspecao", "nome": "Correção de inspeção", "obrigatoria": False, "repetivel": True,
      "conta_revisao": False},
     {"fase": "correcao_topologica", "nome": "Correção topológica", "obrigatoria": True, "repetivel": True,
@@ -54,7 +62,7 @@ def listar(ex: Executor, uf: Optional[str]) -> List[Dict]:
         return []
     etapas = ex.todos(
         "SELECT fe.id, fe.id_fluxo, fe.ordem, fe.fase, fa.nome AS fase_nome, fe.nome, fe.obrigatoria, fe.repetivel, "
-        "fe.conta_revisao, fe.fracao_critica, "
+        "fe.conta_revisao, fe.fracao_critica::float8 AS fracao_critica, fe.nivel_inspecao, fe.lqa::float8 AS lqa, "
         "(SELECT count(*) FROM mapcartacomp.lote_etapa le WHERE le.id_fluxo_etapa = fe.id) AS passagens, "
         "coalesce((SELECT json_agg(json_build_object('id', a.id, 'nome', a.nome, 'geracao', a.geracao) "
         "ORDER BY a.nome) "
@@ -88,6 +96,7 @@ def _validar_etapas(ex: Executor, cod_projeto: int, id_tema: int, etapas: List[D
         fc = e.get("fracao_critica")
         if fc is not None and (e["fase"] != "cq" or not 0 < float(fc) < 100):
             raise ErroDados(f"etapa {i}: fração crítica só na etapa de CQ, entre 0 e 100%", 400)
+        _padrao_cq(e, i)
         ids = e.get("atividades") or []
         if ids:
             ok = ex.um(
@@ -97,6 +106,25 @@ def _validar_etapas(ex: Executor, cod_projeto: int, id_tema: int, etapas: List[D
             )["n"]
             if ok != len(set(ids)):
                 raise ErroDados(f"etapa {i} ({e['nome']}): atividade de outro projeto, tema ou fase", 400)
+
+
+def _padrao_cq(e: Dict, i: int) -> None:
+    """Nível de inspeção e LQA padrão da etapa de CQ, normalizados ("2" vira "II", "2,5" vira 2.5) e conferidos nos
+    quadros do manual; fora do CQ não há padrão. Vazio = o supervisor escolhe ao criar o plano."""
+    nivel, lqa = e.get("nivel_inspecao"), e.get("lqa")
+    if nivel in ("", None):
+        nivel = None
+    if lqa in ("", None):
+        lqa = None
+    if e["fase"] != "cq":
+        if nivel is not None or lqa is not None:
+            raise ErroDados(f"etapa {i}: nível de inspeção e LQA só na etapa de CQ", 400)
+        return
+    try:
+        e["nivel_inspecao"] = None if nivel is None else am.normalizar_nivel(nivel)
+        e["lqa"] = None if lqa is None else am.normalizar_lqa(lqa)
+    except am.ErroAmostragem as erro:
+        raise ErroDados(f"etapa {i} ({e['nome']}): {erro}", 400) from None
 
 
 def _gravar_etapas(ex: Executor, id_fluxo: int, etapas: List[Dict]) -> None:
@@ -117,12 +145,12 @@ def _gravar_etapas(ex: Executor, id_fluxo: int, etapas: List[Dict]) -> None:
     for id_etapa, r in atuais.items():
         if id_etapa not in ficam:
             if r["passagens"]:
-                raise ErroDados(f"a etapa {r['nome']} já tem passagens de folhas e não pode sair do fluxo")
+                raise ErroDados(f"a etapa {r['nome']} já tem passagens de lotes e não pode sair do fluxo")
             ex.executar("DELETE FROM mapcartacomp.fluxo_etapa WHERE id = %s", (id_etapa,))
     for ordem, e in enumerate(etapas, start=1):
         valores = (
             ordem, e["fase"], e["nome"].strip(), e.get("obrigatoria", True), e.get("repetivel", False),
-            e.get("conta_revisao", False), e.get("fracao_critica"),
+            e.get("conta_revisao", False), *(e.get(c) if e["fase"] == "cq" else None for c in CAMPOS_CQ),
         )  # fmt: skip
         if e.get("id"):
             if atuais[e["id"]]["passagens"]:
@@ -193,13 +221,27 @@ def alterar(ex: Executor, uf: str, id_fluxo: int, nome: Optional[str], ativo: Op
     return next(x for x in listar(ex, uf) if x["id"] == id_fluxo)
 
 
+def _padrao_copiavel(e: Dict) -> Dict:
+    """Padrão de CQ de uma etapa copiada de outra unidade: o que se normaliza fica ("2" vira "II"); nível ou LQA fora
+    dos quadros do manual (o banco aceita texto aberto) sai, e a etapa cai em "Criar os planos de CQ" na gaveta, em
+    vez de a cópia falhar."""
+    for campo, normalizar in (("nivel_inspecao", am.normalizar_nivel), ("lqa", am.normalizar_lqa)):
+        if e.get(campo) is not None:
+            try:
+                e[campo] = normalizar(e[campo])
+            except am.ErroAmostragem:
+                e[campo] = None
+    return e
+
+
 def copiar(ex: Executor, uf: str, id_origem: int, nome: str) -> Dict:
     """Copia o fluxo de qualquer unidade para a minha, com as mesmas etapas e atividades."""
     origem = next((f for f in listar(ex, None) if f["id"] == id_origem), None)
     if not origem:
         raise ErroDados("fluxo não encontrado", 404)
     etapas = [
-        {**{k: e[k] for k in CAMPOS_ETAPA}, "atividades": [a["id"] for a in e["atividades"]]} for e in origem["etapas"]
+        _padrao_copiavel({**{k: e[k] for k in CAMPOS_ETAPA}, "atividades": [a["id"] for a in e["atividades"]]})
+        for e in origem["etapas"]
     ]
     return criar(ex, uf, origem["cod_projeto"], origem["id_tema"], nome, etapas)
 
@@ -229,11 +271,9 @@ def _hist(ex: Executor, id_lote_etapa: int, acao: str, observacao: str) -> None:
     )
 
 
-def _obs(observacao: Optional[str]) -> str:
-    o = (observacao or "").strip()
-    if not o:
-        raise ErroDados("escreva uma observação: toda mudança de etapa fica no histórico da folha", 400)
-    return o
+def _obs(observacao: Optional[str]) -> Optional[str]:
+    """A observação é sempre opcional: a mudança de etapa fica no histórico com ou sem ela."""
+    return (observacao or "").strip() or None
 
 
 def _passagem(ex: Executor, id_lote_etapa: int, uf: str) -> Dict:
@@ -291,7 +331,7 @@ def acao(ex: Executor, uf: str, id_lote_etapa: int, qual: str, observacao: str, 
             raise ErroDados(f"{nome}: só se reabre a última etapa concluída")
         aberta = _outra_aberta(ex, p["id_lote"], p["id"])
         if aberta:
-            raise ErroDados(f"a folha já tem a etapa {aberta['etapa']} aberta")
+            raise ErroDados(f"o lote já tem a etapa {aberta['etapa']} aberta")
         ex.executar(
             "UPDATE mapcartacomp.lote_etapa SET situacao = 'em_andamento', concluida_em = NULL, concluida_por = NULL, "
             "resultado = NULL WHERE id = %s",
@@ -328,10 +368,10 @@ def nova_passagem(
         (id_fluxo_etapa, lote["id_fluxo"]),
     )
     if not etapa:
-        raise ErroDados("etapa fora do fluxo desta folha", 400)
+        raise ErroDados("etapa fora do fluxo deste lote", 400)
     aberta = _outra_aberta(ex, id_lote, -1)
     if aberta:
-        raise ErroDados(f"a folha já tem a etapa {aberta['etapa']} aberta: conclua ou pule antes")
+        raise ErroDados(f"o lote já tem a etapa {aberta['etapa']} aberta: conclua ou pule antes")
     feitas = ex.um(
         "SELECT count(*) AS n, coalesce(max(instancia), 0) AS ultima FROM mapcartacomp.lote_etapa "
         "WHERE id_lote = %s AND id_fluxo_etapa = %s",
@@ -384,7 +424,7 @@ def abrir_proximas(ex: Executor, uf: str, ids: List[int], observacao: str) -> Di
         if not r or r["uf"] != uf:
             erros.append({"id_lote": i, "erro": "lote não encontrado na sua unidade"})
         elif r["aberta"]:
-            erros.append({"id_lote": i, "erro": f"a folha já tem a etapa {r['aberta']} aberta"})
+            erros.append({"id_lote": i, "erro": f"o lote já tem a etapa {r['aberta']} aberta"})
         elif r["id_etapa"] is None:
             erros.append({"id_lote": i, "erro": "sem próxima etapa no fluxo"})
         elif r["nao_puladas"] and not r["repetivel"]:
@@ -429,7 +469,8 @@ def avancar(ex: Executor, uf: str, ids: List[int], observacao: Optional[str], pr
         "t.nome AS tema, le.id AS id_lote_etapa, le.situacao, fe.nome AS etapa, fe.fase, "
         "(SELECT count(*) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id) AS cargas, "
         "(SELECT count(*) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id AND NOT c.concluido) "
-        "AS pendentes, n.nome AS proxima, n.repetivel, "
+        "AS pendentes, (SELECT count(*) FROM mapcartacomp.cq_inspecao i WHERE i.id_lote = l.id AND NOT i.tratado) "
+        "AS a_tratar, n.nome AS proxima, n.repetivel, "
         "(SELECT count(*) FROM mapcartacomp.lote_etapa x WHERE x.id_lote = l.id AND x.id_fluxo_etapa = n.id "
         " AND x.situacao <> 'pulada') AS nao_puladas "
         "FROM mapcartacomp.lote l JOIN mapcartacomp.tema t ON t.id = l.id_tema "
@@ -445,11 +486,16 @@ def avancar(ex: Executor, uf: str, ids: List[int], observacao: Optional[str], pr
     for r in linhas:
         erro = None
         if r["uf"] != uf:
-            erro = "folha de outra unidade"
+            erro = "lote de outra unidade"
         elif r["situacao"] == "pendente":
             erro = f"{r['etapa']} ainda não começou: distribua as cargas, ou pule a etapa pela gaveta"
         elif r["situacao"] == "em_andamento" and r["fase"] == "envio_gcq":
-            erro = "o resultado da GCQ se registra na gaveta da folha"
+            erro = "o resultado da GCQ se registra na gaveta do lote"
+        elif r["situacao"] == "em_andamento" and r["fase"] == "cq":
+            # O CQ termina pela decisão sobre o resultado (D4), que fica registrada: aprovar ou nova revisão.
+            erro = (
+                "o CQ termina pela decisão sobre o resultado: Aprovar ou Nova revisão, em Esperando você ou na gaveta"
+            )
         elif r["proxima"] is None:
             erro = "é a última etapa do fluxo"
         elif r["nao_puladas"] and not r["repetivel"]:
@@ -458,6 +504,8 @@ def avancar(ex: Executor, uf: str, ids: List[int], observacao: Optional[str], pr
             "id_lote": r["id_lote"], "folha_revisao": r["folha_revisao"], "tema": r["tema"], "etapa": r["etapa"],
             "concluir": r["situacao"] == "em_andamento", "cargas": r["cargas"], "pendentes": r["pendentes"],
             "proxima": r["proxima"], "erro": erro,
+            # Correção de inspeção (D5): ocorrências da folha ainda não tratadas; o diálogo avisa, quem decide é você.
+            "a_tratar": r["a_tratar"] if r["fase"] == "correcao_inspecao" else 0,
         })  # fmt: skip
     if previa:
         return {"itens": itens}
@@ -480,6 +528,199 @@ def avancar(ex: Executor, uf: str, ids: List[int], observacao: Optional[str], pr
         return {"abertas": [], "erros": erros}
     r = abrir_proximas(ex, uf, [i["id_lote"] for i in validos], obs)
     return {"abertas": r["abertas"], "erros": erros + r["erros"]}
+
+
+def encerrar(ex: Executor, uf: str, ids: List[int], observacao: Optional[str], previa: bool) -> Dict:
+    """Encerra folhas no fim do fluxo (D-153, P-26): a última etapa terminou e não há seguinte, e a folha passa a
+    CONCLUIDA para a CCAR. Decisão do supervisor, em lote, com prévia; grava `encerrar` no histórico da última passagem
+    (a derivação do status lê dali, `f_lote_derivar`). Abrir outra etapa depois muda a etapa atual e a folha deixa de
+    estar concluída. Recusa: etapa aberta, etapa seguinte no fluxo, folha já concluída, outra unidade."""
+    linhas = ex.todos(
+        "SELECT l.id AS id_lote, l.uf, l.status_nacional, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) "
+        "AS folha_revisao, t.nome AS tema, le.id AS id_lote_etapa, le.situacao, fe.nome AS etapa, n.nome AS proxima "
+        "FROM mapcartacomp.lote l JOIN mapcartacomp.tema t ON t.id = l.id_tema "
+        "LEFT JOIN mapcartacomp.lote_etapa le ON le.id = coalesce((SELECT x.id FROM mapcartacomp.lote_etapa x "
+        f"WHERE x.id_lote = l.id AND x.situacao IN ('pendente', 'em_andamento') LIMIT 1), {_ULTIMA}) "
+        "LEFT JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+        "LEFT JOIN LATERAL (SELECT x.nome FROM mapcartacomp.fluxo_etapa x "
+        " WHERE x.id_fluxo = l.id_fluxo AND x.ordem > coalesce(fe.ordem, 0) ORDER BY x.ordem LIMIT 1) n ON true "
+        "WHERE l.id = ANY(%s) ORDER BY t.nome, folha_revisao" + ("" if previa else " FOR UPDATE OF l"),
+        (list(ids),),
+    )
+    itens = []
+    for r in linhas:
+        erro = None
+        if r["uf"] != uf:
+            erro = "lote de outra unidade"
+        elif r["status_nacional"] == "CONCLUIDA":
+            erro = "o lote já está concluído"
+        elif r["id_lote_etapa"] is None:
+            erro = "o lote ainda não entrou no fluxo"
+        elif r["situacao"] != "concluida":
+            erro = f"{r['etapa']} ainda está aberta: termine a etapa antes de encerrar o lote"
+        elif r["proxima"] is not None:
+            erro = f"o fluxo ainda tem {r['proxima']}: abra a próxima etapa em vez de encerrar"
+        itens.append({"id_lote": r["id_lote"], "folha_revisao": r["folha_revisao"], "tema": r["tema"],
+                      "etapa": r["etapa"], "erro": erro})  # fmt: skip
+    if previa:
+        return {"itens": itens}
+    obs = _obs(observacao)
+    validos = [(r, i) for r, i in zip(linhas, itens) if not i["erro"]]
+    if validos:
+        ex.executar(
+            "INSERT INTO mapcartacomp.lote_etapa_hist (uuid, id_lote_etapa, acao, observacao) "
+            "SELECT u::uuid, le, 'encerrar', %s FROM unnest(%s::text[], %s::int[]) AS t(u, le)",
+            (obs, [novo_uuid() for _ in validos], [r["id_lote_etapa"] for r, _ in validos]),
+        )
+    return {
+        "encerradas": [{"id_lote": i["id_lote"], "folha_revisao": i["folha_revisao"]} for _, i in validos],
+        "erros": [{"id_lote": i["id_lote"], "erro": i["erro"]} for i in itens if i["erro"]],
+    }
+
+
+# --- Decisão sobre o resultado do CQ (D4) ----------------------------------------------------------------------------
+
+DECISOES_CQ = ("aprovar", "nova_revisao")
+
+
+def _alvos_cq(ex: Executor, ids: List[int], travar: bool) -> List[Dict]:
+    """A passagem de CQ de cada folha (a aberta ou, sem nenhuma aberta, a última), a etapa seguinte do fluxo e a etapa
+    de revisão da nova revisão: a mais recente antes do CQ que conta revisão e se repete."""
+    return ex.todos(
+        "SELECT l.id AS id_lote, l.uf, l.tipo, l.nome, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS "
+        "folha_revisao, t.nome AS tema, le.id AS id_lote_etapa, le.situacao, le.resultado, le.revisao, fe.fase, "
+        "fe.nome AS etapa, n.id AS id_proxima, n.nome AS proxima, n.repetivel AS proxima_repetivel, "
+        "(SELECT count(*) FROM mapcartacomp.lote_etapa x WHERE x.id_lote = l.id AND x.id_fluxo_etapa = n.id "
+        " AND x.situacao <> 'pulada') AS proxima_feitas, rv.id AS id_revisao, rv.nome AS revisao_etapa, "
+        "mapcartacomp.f_rotulo(l.tipo, l.nome, (1 + (SELECT count(*) FROM mapcartacomp.lote_etapa x "
+        " JOIN mapcartacomp.fluxo_etapa fx ON fx.id = x.id_fluxo_etapa WHERE x.id_lote = l.id AND fx.conta_revisao "
+        " AND x.situacao <> 'pulada'))::int) AS nova_folha, "
+        # Quem fez a revisão avaliada (a passagem que conta revisão na mesma revisão do CQ): a nova revisão vai para
+        # outra pessoa (a sugestão do Distribuir já evita quem trabalhou na folha, D-109).
+        "(SELECT array_agg(DISTINCT coalesce(u.nom_usuario::text, c.responsavel)) FROM mapcartacomp.lote_etapa x "
+        " JOIN mapcartacomp.fluxo_etapa fx ON fx.id = x.id_fluxo_etapa AND fx.conta_revisao "
+        " JOIN mapcartacomp.carga_trabalho c ON c.id_lote_etapa = x.id AND c.responsavel IS NOT NULL "
+        " LEFT JOIN mapcartctrl.t_usuario u ON u.nom_contausuario = c.responsavel "
+        " WHERE x.id_lote = l.id AND x.revisao = le.revisao AND x.id <> le.id AND x.situacao <> 'pulada') AS autores "
+        "FROM mapcartacomp.lote l JOIN mapcartacomp.tema t ON t.id = l.id_tema "
+        "LEFT JOIN mapcartacomp.lote_etapa le ON le.id = coalesce((SELECT x.id FROM mapcartacomp.lote_etapa x "
+        f"WHERE x.id_lote = l.id AND x.situacao IN ('pendente', 'em_andamento') LIMIT 1), {_ULTIMA}) "
+        "LEFT JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+        "LEFT JOIN LATERAL (SELECT x.id, x.nome, x.repetivel FROM mapcartacomp.fluxo_etapa x "
+        " WHERE x.id_fluxo = l.id_fluxo AND x.ordem > fe.ordem ORDER BY x.ordem LIMIT 1) n ON true "
+        "LEFT JOIN LATERAL (SELECT x.id, x.nome FROM mapcartacomp.fluxo_etapa x WHERE x.id_fluxo = l.id_fluxo "
+        " AND x.ordem < fe.ordem AND x.conta_revisao AND x.repetivel ORDER BY x.ordem DESC LIMIT 1) rv ON true "
+        "WHERE l.id = ANY(%s) ORDER BY t.nome, folha_revisao" + (" FOR UPDATE OF l" if travar else ""),
+        (list(ids),),
+    )
+
+
+def _item_cq(r: Dict, res: Optional[Dict], decisao: str, uf: str) -> Dict:
+    """O que a decisão faz numa folha (ou por que não), para a prévia e para a execução."""
+    erro = aviso = None
+    if r["uf"] != uf:
+        erro = "lote de outra unidade"
+    elif r["fase"] != "cq":
+        erro = f"a etapa atual ({r['etapa'] or 'nenhuma'}) não é de CQ"
+    elif r["situacao"] == "pendente":
+        erro = "o CQ ainda não começou: distribua as amostras"
+    elif r["situacao"] == "pulada":
+        erro = "o CQ foi pulado"
+    elif r["situacao"] == "concluida" and r["resultado"]:
+        erro = f"o CQ desta passagem já foi decidido ({r['resultado']})"
+    elif decisao == "aprovar" and r["id_proxima"] and r["proxima_feitas"] and not r["proxima_repetivel"]:
+        erro = f"a etapa {r['proxima']} não se repete neste fluxo"
+    elif decisao == "nova_revisao" and not r["id_revisao"]:
+        erro = "o fluxo não tem, antes do CQ, etapa que conta revisão e se repete: abra a etapa pela gaveta"
+    resultado = (res or {}).get("resultado", "sem_planos")
+    if not erro:
+        avisos = []
+        if decisao == "aprovar" and resultado == "reprovado":
+            avisos.append("reprovado no CQ: aprovar assim mesmo pede a sua confirmação e fica no histórico")
+        if res and res["faltam"]:
+            falta = "falta avaliar 1 amostra" if res["faltam"] == 1 else f"faltam avaliar {res['faltam']} amostras"
+            avisos.append(f"{falta}: decidir agora encerra o CQ com o que foi avaliado")
+        if resultado == "sem_ac":
+            avisos.append("plano sem Ac (convertido do DF): o Feixe não tem a régua para aprovar ou reprovar")
+        aviso = "; ".join(avisos) or None
+    return {
+        "id_lote": r["id_lote"], "folha_revisao": r["folha_revisao"], "tema": r["tema"],
+        "id_lote_etapa": r["id_lote_etapa"], "etapa": r["etapa"], "concluir": r["situacao"] == "em_andamento",
+        "resultado": resultado, "frase": (res or {}).get("frase", ""), "resumo": (res or {}).get("resumo", ""),
+        "faltam": (res or {}).get("faltam", 0),
+        "proxima": (r["proxima"] if decisao == "aprovar" else r["revisao_etapa"]),
+        "nova_folha": r["nova_folha"] if decisao == "nova_revisao" else None,
+        "autores": sorted(r["autores"] or []), "aviso": aviso, "erro": erro,
+    }  # fmt: skip
+
+
+def previa_cq(ex: Executor, uf: str, ids: List[int], decisao: str) -> Dict:
+    """O que Aprovar ou Nova revisão faz em cada folha marcada: o resultado com a frase por elemento, a etapa que abre
+    (e a folha-revisão nova, na nova revisão), avisos (reprovada, amostras sem avaliação, plano sem Ac) e recusas."""
+    if decisao not in DECISOES_CQ:
+        raise ErroDados("decisão do CQ: aprovar ou nova_revisao", 400)
+    linhas = _alvos_cq(ex, ids, travar=False)
+    res = dcq.resultados(ex, [r["id_lote_etapa"] for r in linhas if r["fase"] == "cq"])
+    return {"itens": [_item_cq(r, res.get(r["id_lote_etapa"]), decisao, uf) for r in linhas]}
+
+
+def _texto_cq(decisao: str, item: Dict, obs: Optional[str]) -> str:
+    """A linha do histórico: a decisão, o resultado por elemento e a observação do supervisor."""
+    if decisao == "aprovar":
+        cabeca = "Aprovado no CQ"
+        if item["resultado"] == "reprovado":
+            cabeca += " pelo supervisor, apesar de reprovado"
+        elif item["resultado"] == "sem_ac":
+            cabeca += " (plano sem Ac)"
+    else:
+        cabeca = "Reprovado no CQ" if item["resultado"] == "reprovado" else "Nova revisão pedida no CQ"
+        if item["resultado"] == "aprovado":
+            cabeca += ", apesar de aprovado"
+    corpo = f": {item['resumo']}" if item["resumo"] else ""
+    if item["faltam"]:
+        corpo += f" ({item['faltam']} sem avaliação)"
+    return f"{cabeca}{corpo}." + (f" {obs}" if obs else "")
+
+
+def decidir_cq(
+    ex: Executor, uf: str, id_lote: int, decisao: str, observacao: str, forcar: bool = False, expor: bool = False
+) -> Dict:
+    """Decisão do supervisor sobre o resultado do CQ de uma folha (D4), numa transação:
+
+    - aprovar: conclui a passagem de CQ como aprovada e abre a etapa seguinte do fluxo (sem seguinte, só conclui).
+      Reprovada no CQ, só com `forcar` (o supervisor confirmou o aviso);
+    - nova_revisao: conclui a passagem de CQ como reprovada e abre nova passagem da etapa de revisão (a mais recente
+      antes do CQ que conta revisão e se repete), na revisão seguinte, às cegas ou com as correções a fazer (`expor`,
+      D-66).
+
+    O resultado por elemento e a observação vão para o histórico. As cargas da etapa aberta saem depois, em
+    `cargas.preparar` (a rota chama), como em todo abrir."""
+    obs = _obs(observacao)
+    if decisao not in DECISOES_CQ:
+        raise ErroDados("decisão do CQ: aprovar ou nova_revisao", 400)
+    linhas = _alvos_cq(ex, [id_lote], travar=True)
+    if not linhas:
+        raise ErroDados("lote não encontrado na sua unidade", 404)
+    r = linhas[0]
+    res = dcq.resultados(ex, [r["id_lote_etapa"]]).get(r["id_lote_etapa"]) if r["fase"] == "cq" else None
+    item = _item_cq(r, res, decisao, uf)
+    if item["erro"]:
+        raise ErroDados(f"{r['folha_revisao']}: {item['erro']}")
+    if decisao == "aprovar" and item["resultado"] == "reprovado" and not forcar:
+        raise ErroDados(f"{r['folha_revisao']}: reprovado no CQ; para aprovar assim mesmo, confirme o aviso")
+    ex.executar(
+        "UPDATE mapcartacomp.lote_etapa SET resultado = %s, situacao = 'concluida', "
+        "concluida_em = coalesce(concluida_em, now()), concluida_por = coalesce(concluida_por, current_user) "
+        "WHERE id = %s",
+        ("aprovada" if decisao == "aprovar" else "reprovada", r["id_lote_etapa"]),
+    )
+    _hist(ex, r["id_lote_etapa"], "cq_aprovada" if decisao == "aprovar" else "cq_reprovada",
+          _texto_cq(decisao, item, obs))  # fmt: skip
+    destino = r["id_proxima"] if decisao == "aprovar" else r["id_revisao"]
+    if destino is None:
+        return {**item, "id_lote_etapa_nova": None, "erro": None}
+    e = nova_passagem(ex, uf, id_lote, destino, obs, expor_ocorrencias=expor and decisao == "nova_revisao")
+    return {**item, "id_lote_etapa_nova": e["id_lote_etapa"], "erro": None}
 
 
 def estado(ex: Executor, id_lote: int) -> Dict:

@@ -70,6 +70,9 @@ ATIVIDADES = {
 
 # Fluxos: tema -> (nome, [(chave da etapa, fase, [atividades], nome, obrigatória, repetível, conta revisão)]).
 # O CQ de LML nunca teve amostra no DF: a etapa fica sem atividade até a GGC escolher as medidas.
+# Padrão dos planos na etapa de CQ do fluxo convertido (D-135): (nível de inspeção, LQA %, fração crítica %).
+PADRAO_CQ_DF = ("II", 2.5, 2.5)
+
 FLUXOS = {
     "hid": ("DF Hidrografia", [
         ("aq", "aquisicao", ["hid_aq"], "Aquisição e revisão", True, True, True),
@@ -385,18 +388,22 @@ def _referencias(cur, rel) -> dict:
         )
         fluxos[tema] = cur.fetchone()[0]
         for ordem, (chave, fase, atividades, nome_etapa, obrig, repet, conta) in enumerate(lista, start=1):
+            # Padrão dos planos de CQ do DF (D-135): nível II, LQA 2,5% e fração crítica 2,5%.
+            nivel, lqa, fracao = PADRAO_CQ_DF if fase == "cq" else (None, None, None)
             # A unicidade (fluxo, ordem) é adiável e não serve para ON CONFLICT: atualiza ou insere à mão.
             cur.execute(
                 "UPDATE mapcartacomp.fluxo_etapa SET fase = %s, nome = %s, obrigatoria = %s, repetivel = %s, "
-                "conta_revisao = %s WHERE id_fluxo = %s AND ordem = %s RETURNING id",
-                (fase, nome_etapa, obrig, repet, conta, fluxos[tema], ordem),
+                "conta_revisao = %s, nivel_inspecao = %s, lqa = %s, fracao_critica = %s "
+                "WHERE id_fluxo = %s AND ordem = %s RETURNING id",
+                (fase, nome_etapa, obrig, repet, conta, nivel, lqa, fracao, fluxos[tema], ordem),
             )
             linha = cur.fetchone()
             if linha is None:
                 cur.execute(
                     "INSERT INTO mapcartacomp.fluxo_etapa (id_fluxo, ordem, fase, nome, obrigatoria, repetivel, "
-                    "conta_revisao) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                    (fluxos[tema], ordem, fase, nome_etapa, obrig, repet, conta),
+                    "conta_revisao, nivel_inspecao, lqa, fracao_critica) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                    (fluxos[tema], ordem, fase, nome_etapa, obrig, repet, conta, nivel, lqa, fracao),
                 )
                 linha = cur.fetchone()
             etapas[(tema, chave)] = linha[0]

@@ -26,7 +26,11 @@ enquanto a rede trabalha: a pessoa continua concluindo cargas, e o que ela grava
    mesma `cargas.equipe` do `filas.puxar` da CCAR) e só passam as cargas ainda sem responsável; nenhuma passou,
    a unidade toda é recusada. Recusa: resultado `recusado` com o motivo, o workspace volta ao valor do servidor e
    a pessoa recebe um aviso. Linha que sumiu da CCAR (passagem apagada, carga descartada) também é recusa: sai do
-   workspace.
+   workspace. CQ (D3a): a amostra tem de ser de uma carga de CQ da pessoa, com a passagem aberta; a ocorrência nova,
+   numa carga de CQ da pessoa com a passagem aberta; editar e apagar ocorrência, só a própria e com a passagem
+   aberta; a ciência, só pelo autor da carga apontada (`id_carga_avaliada`), em qualquer situação da passagem.
+   Correção de inspeção (D5): marcar ou desmarcar tratada, só quem tem carga na passagem de correção aberta da folha
+   (a última escrita decide entre duas pessoas na mesma folha); a carga da folha não se conclui à mão.
 6. **Última escrita vence** (D-111, D-117): versão base do item igual ao `atualizado_em` do servidor, `aplicado`.
    Diferente, a linha mudou lá desde o último pull: vence a mais nova entre a hora corrigida da ação e a hora da
    versão do servidor (`conflito_vencido`, aplica e o valor do servidor vai para o detalhe; `conflito_perdido`, o
@@ -35,9 +39,15 @@ enquanto a rede trabalha: a pessoa continua concluindo cargas, e o que ela grava
    quando foi uma mudança direta: senão uma conclusão offline enviada tarde levaria a hora do envio e ganharia de uma
    ação mais nova. Exceção: a mesma carga concluída nas duas pontas não é disputa, fica a conclusão mais antiga
    (`aplicado`, com a nota no detalhe), que é quando o trabalho terminou de fato.
+   Ciência que já estava na CCAR (dada noutra estação) fica como está (`aplicado` sem efeito).
 7. **Falha de banco** que não é rede nem regra (gatilho que recusa, constraint): o item fica na outbox com
    `tentativas` e `erro`, registrado como `erro` nos dois `sync_log`; na quinta tentativa vira recusa. Falha de rede
    derruba o push inteiro: a transação da CCAR é desfeita e a outbox fica como estava.
+
+Efeito do gatilho: avaliar a amostra conclui a carga de CQ na CCAR (`t20_derivar`), e tratar a última ocorrência da
+folha conclui a carga da folha na correção (`t20_correcao`), sem item na outbox. Depois dos envios, essas cargas são
+relidas e o workspace fica com elas, como com as linhas enviadas (recusa inclusive: a conclusão local volta ao que
+está na CCAR).
 
 Desempenho: uma transação na CCAR; as linhas do servidor, o `sync_log` das linhas e as etapas vêm em uma consulta
 por tabela, com `FOR UPDATE`; cada envio é uma ida e volta (`SAVEPOINT` junto com o comando); o `sync_log` vai num
@@ -55,8 +65,8 @@ from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple
 
 from ..core.dados import cargas as dc
 from ..core.dados import novo_uuid
+from ..core.dados.local import carga_da_folha, rotulo
 from ..core.dados.local import cargas as lc
-from ..core.dados.local import rotulo
 from . import esquema
 from .pull import _colunas
 from .workspace import Workspace, _json_padrao, agora, de_iso, iso_exato
@@ -68,6 +78,7 @@ ABERTAS = ("pendente", "em_andamento")
 AUDITORIA = ("criado_em", "criado_por", "atualizado_em", "atualizado_por")
 DESVIO_AVISO = dt.timedelta(minutes=5)
 RESULTADOS = ("aplicado", "conflito_vencido", "conflito_perdido", "recusado", "erro")
+TRATAR = frozenset({"tratado", "tratado_em", "tratado_por"})  # a marcação da correção de inspeção (D5)
 
 
 # --- partes puras: relógio, junção, decisão ---------------------------------------------------------------------------
@@ -247,6 +258,16 @@ _REF = {
     "lote_etapa": f"SELECT x.uuid, x.id, x.id AS id_lote_etapa, x.id_lote, {rotulo()} AS folha, fe.nome AS etapa "
     "FROM lote_etapa x LEFT JOIN lote_etapa le ON le.id = x.id LEFT JOIN lote l ON l.id = x.id_lote "
     "LEFT JOIN fluxo_etapa fe ON fe.id = x.id_fluxo_etapa",
+    "cq_amostra": (
+        f"SELECT x.uuid, x.id, x.id_carga_trabalho AS id_carga, c.geocodigo, c.id_lote_etapa, le.id_lote, "
+        f"{rotulo()} AS folha, fe.nome AS etapa, at.nome AS atividade FROM cq_amostra x "
+        "LEFT JOIN carga_trabalho c ON c.id = x.id_carga_trabalho LEFT JOIN lote_etapa le ON le.id = c.id_lote_etapa "
+        "LEFT JOIN lote l ON l.id = le.id_lote LEFT JOIN fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+        "LEFT JOIN atividade at ON at.id = c.id_atividade"
+    ),
+    "cq_inspecao": f"SELECT x.uuid, x.id, x.id_lote_etapa, x.id_lote, {rotulo()} AS folha, fe.nome AS etapa, "
+    "x.elemento FROM cq_inspecao x LEFT JOIN lote_etapa le ON le.id = x.id_lote_etapa "
+    "LEFT JOIN lote l ON l.id = x.id_lote LEFT JOIN fluxo_etapa fe ON fe.id = le.id_fluxo_etapa",
 }
 
 
@@ -286,6 +307,14 @@ class _Push:
         self.savepoint = False
         self.equipes: Dict[int, set] = {}
         self.refs: Dict[Tuple[str, str], Dict] = {}  # (tabela, uuid) -> carga/folha legível, do workspace
+        self.cargas_cq: Dict[int, Dict] = {}  # id -> carga de CQ das amostras e ocorrências, e a carga avaliada
+        self.derivadas: set = set()  # uuids das cargas de CQ que o gatilho da amostra pode ter mudado
+        # Correção de inspeção (D5): as folhas em que estou numa passagem de correção aberta (quem está nelas marca a
+        # ocorrência como tratada) e, por folha, as minhas cargas da folha no workspace (o gatilho `t20_correcao` as
+        # conclui na CCAR; `local.cq.tratar` já as mudou aqui, e o push as relê, recusa inclusive).
+        self.correcao: set = set()
+        self.cargas_folha: Dict[int, List[str]] = {}
+        self.ativ_folha: set = set()  # atividades que não são pela grade (a carga da folha na correção)
 
     # --- leitura do servidor ---
 
@@ -309,17 +338,87 @@ class _Push:
                 d = json.loads(d)
             r["detalhe"] = d or {}
             self.logs.setdefault(r["uuid"], []).append(r)
+        self._carregar_cq(itens)
+        self._carregar_correcao()
         ids = set()
-        for t in ("carga_trabalho", "fila_folha"):
+        for t in ("carga_trabalho", "fila_folha", "cq_inspecao"):
             ids |= {r["id_lote_etapa"] for r in self.servidor.get(t, {}).values() if r.get("id_lote_etapa")}
         ids |= {r["id"] for r in self.servidor.get("lote_etapa", {}).values()}
+        ids |= {r["id_lote_etapa"] for r in self.cargas_cq.values() if r.get("id_lote_etapa")}
         if ids:
             for r in self.rx.todos(
-                f"SELECT le.id, le.situacao, l.cod_projeto, {S}.f_rotulo(l.tipo, l.nome, le.revisao) AS folha "
-                f"FROM {S}.lote_etapa le JOIN {S}.lote l ON l.id = le.id_lote WHERE le.id = ANY(%s)",
+                f"SELECT le.id, le.situacao, l.cod_projeto, {S}.f_rotulo(l.tipo, l.nome, le.revisao) AS folha, "
+                f"fe.fase FROM {S}.lote_etapa le JOIN {S}.lote l ON l.id = le.id_lote "
+                f"JOIN {S}.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa WHERE le.id = ANY(%s)",
                 (sorted(ids),),
             ):
                 self.etapas[r["id"]] = r
+        ativs = sorted({r["id_atividade"] for r in self.servidor.get("carga_trabalho", {}).values()})
+        if ativs:
+            self.ativ_folha = {
+                r["id"]
+                for r in self.rx.todos(
+                    f"SELECT id FROM {S}.atividade WHERE id = ANY(%s) AND coalesce(geracao, 'manual') <> 'grade'",
+                    (ativs,),
+                )
+            }
+
+    def _carregar_correcao(self) -> None:
+        """As folhas das ocorrências enviadas em que estou numa passagem de correção aberta (na CCAR) e, do
+        workspace, as minhas cargas da folha nelas, que o push relê depois dos envios."""
+        lotes = sorted({r["id_lote"] for r in self.servidor.get("cq_inspecao", {}).values() if r.get("id_lote")})
+        if not lotes:
+            return
+        self.correcao = {
+            r["id_lote"]
+            for r in self.rx.todos(
+                f"SELECT DISTINCT le.id_lote FROM {S}.lote_etapa le JOIN {S}.fluxo_etapa fe "
+                f"ON fe.id = le.id_fluxo_etapa JOIN {S}.carga_trabalho c ON c.id_lote_etapa = le.id "
+                "WHERE le.id_lote = ANY(%s) AND fe.fase = 'correcao_inspecao' AND le.situacao IN ('pendente', "
+                "'em_andamento') AND c.responsavel = %s",
+                (lotes, self.usuario),
+            )
+        }
+        marcas = ", ".join("?" * len(lotes))
+        with self.ws.leitura() as wx:
+            for r in wx.todos(
+                "SELECT le.id_lote, c.uuid FROM carga_trabalho c JOIN lote_etapa le ON le.id = c.id_lote_etapa "
+                f"WHERE le.id_lote IN ({marcas}) AND c.responsavel = ? AND {carga_da_folha()}",
+                (*lotes, self.usuario),
+            ):
+                self.cargas_folha.setdefault(r["id_lote"], []).append(r["uuid"])
+
+    def _carregar_cq(self, itens: List[Dict]) -> None:
+        """As cargas que as regras do CQ conferem, travadas: a da amostra, a de CQ da ocorrência (a do servidor ou, na
+        ocorrência nova, a que veio no item) e a carga avaliada (o autor dá ciência)."""
+        ids = set()
+        for r in self.servidor.get("cq_amostra", {}).values():
+            ids.add(r.get("id_carga_trabalho"))
+        for r in self.servidor.get("cq_inspecao", {}).values():
+            ids |= {r.get("id_carga_trabalho"), r.get("id_carga_avaliada")}
+        for it in itens:
+            if it["tabela"] == "cq_inspecao" and it["operacao"] == "insert":
+                ids.add(it["campos"].get("id_carga_trabalho"))
+        ids = sorted(i for i in ids if i is not None)
+        if not ids:
+            return
+        for r in self.rx.todos(
+            "SELECT t.id, t.uuid::text AS uuid, t.responsavel, t.id_lote_etapa, t.id_cq_plano "
+            f"FROM {S}.carga_trabalho t WHERE t.id = ANY(%s) ORDER BY t.id FOR UPDATE OF t",
+            (ids,),
+        ):
+            self.cargas_cq[r["id"]] = r
+
+    def reler_derivadas(self) -> None:
+        """Depois dos envios: as cargas de CQ das amostras enviadas e as cargas da folha das ocorrências tratadas na
+        correção, como ficaram na CCAR (os gatilhos as concluem)."""
+        if not self.derivadas:
+            return
+        for r in self.rx.todos(
+            f"SELECT {_colunas('carga_trabalho')} FROM {S}.carga_trabalho t WHERE t.uuid = ANY(%s::uuid[])",
+            (sorted(self.derivadas),),
+        ):
+            self.servidor.setdefault("carga_trabalho", {})[r["uuid"]] = r
 
     def feitos(self) -> Dict[str, Tuple[str, str]]:
         """chave do item -> (resultado, uuid) já registrado na CCAR (menos erro, que não aplicou nada)."""
@@ -431,13 +530,21 @@ class _Push:
     # --- regras ---
 
     def _rotulo(self, tabela: str, linha: Optional[Dict], g: Dict) -> str:
-        le = (linha or {}).get("id_lote_etapa")
+        linha = linha or g.get("campos") or {}
+        if tabela == "cq_amostra":
+            carga = self.cargas_cq.get(linha.get("id_carga_trabalho")) or {}
+            folha = (self.etapas.get(carga.get("id_lote_etapa")) or {}).get("folha")
+            ident = carga.get("id") or linha.get("id_carga_trabalho")
+            return f"Amostra da carga {ident} em {folha}" if folha else f"Amostra da carga {ident}"
+        le = linha.get("id_lote_etapa")
         folha = (self.etapas.get(le) or {}).get("folha")
+        if tabela == "cq_inspecao":
+            return f"Ocorrência em {folha}" if folha else "Ocorrência"
         if tabela == "carga_trabalho":
             ident = (linha or {}).get("id")
-            return f"Carga {ident} da {folha}" if folha else f"Carga {ident or g['uuid'][:8]}"
+            return f"Carga {ident} em {folha}" if folha else f"Carga {ident or g['uuid'][:8]}"
         if tabela == "fila_folha":
-            return f"Folha {folha} da sua fila" if folha else "Folha da sua fila"
+            return f"Lote {folha} da sua fila" if folha else "Lote da sua fila"
         return tabela
 
     def regras_carga(self, g: Dict, srv: Dict, valores: Dict, hora: dt.datetime) -> Optional[str]:
@@ -446,11 +553,56 @@ class _Push:
         if "concluido" in valores and bool(valores["concluido"]) != bool(srv.get("concluido")):
             etapa = self.etapas.get(srv.get("id_lote_etapa")) or {}
             if etapa.get("situacao") not in ABERTAS:
-                return "a etapa desta folha foi encerrada pelo supervisor"
+                return "a etapa deste lote foi encerrada pelo supervisor"
+            if etapa.get("fase") == "correcao_inspecao" and srv.get("id_atividade") in self.ativ_folha:
+                return lc.FOLHA_NA_CORRECAO
             if not valores["concluido"]:
                 quando = srv.get("concluido_em")
                 if quando is None or hora - quando >= JANELA_DESFAZER:
                     return f"só dá para desfazer até {lc.JANELA_DESFAZER_HORAS} horas depois de concluir"
+        return None
+
+    def _aberta(self, id_lote_etapa: Optional[int]) -> bool:
+        return (self.etapas.get(id_lote_etapa) or {}).get("situacao") in ABERTAS
+
+    def regras_amostra(self, srv: Dict) -> Optional[str]:
+        carga = self.cargas_cq.get(srv.get("id_carga_trabalho"))
+        if carga is None:
+            return "a carga desta amostra não existe mais na CCAR"
+        if carga.get("responsavel") != self.usuario:
+            return "esta amostra não é mais de uma carga sua"
+        if not self._aberta(carga.get("id_lote_etapa")):
+            return "a etapa de CQ deste lote foi encerrada pelo supervisor"
+        return None
+
+    def regras_ocorrencia_nova(self, valores: Dict) -> Optional[str]:
+        if valores.get("responsavel") not in (None, self.usuario):
+            return "a ocorrência é de outra pessoa"
+        carga = self.cargas_cq.get(valores.get("id_carga_trabalho"))
+        if carga is None or carga.get("id_cq_plano") is None:
+            return "a carga de CQ desta ocorrência não existe mais na CCAR"
+        if carga.get("responsavel") != self.usuario:
+            return "a carga de CQ desta ocorrência não está mais atribuída a você"
+        if not self._aberta(carga.get("id_lote_etapa")):
+            return "a etapa de CQ deste lote foi encerrada pelo supervisor"
+        return None
+
+    def regras_ocorrencia(self, srv: Dict, campos) -> Optional[str]:
+        campos = set(campos)
+        if campos & {"ciente_em", "ciente_por"}:
+            autor = (self.cargas_cq.get(srv.get("id_carga_avaliada")) or {}).get("responsavel")
+            if autor != self.usuario:
+                return "só quem fez a carga apontada pela ocorrência dá ciência"
+        if campos & TRATAR and srv.get("id_lote") not in self.correcao:
+            return (
+                "o lote não está com você numa correção de inspeção aberta (o supervisor encerrou a etapa ou passou "
+                "o lote a outra pessoa)"
+            )
+        if campos - {"ciente_em", "ciente_por"} - TRATAR:
+            if srv.get("responsavel") != self.usuario:
+                return "esta ocorrência foi registrada por outra pessoa"
+            if not self._aberta(srv.get("id_lote_etapa")):
+                return "a etapa de CQ deste lote foi encerrada pelo supervisor"
         return None
 
     def perfil(self, cod_projeto: Optional[int]) -> bool:
@@ -468,20 +620,49 @@ class _Push:
         valores = _para_pg(t, g["campos"], self.desvio, self.agora)
         srv = self.servidor.get(t, {}).get(u)
         rot = self._rotulo(t, srv, g)
+        if g["operacao"] == "delete":
+            self.apagar(g, hora, srv, rot)
+            return
         if g["operacao"] == "insert":
             if srv is not None:  # já existe (o mesmo uuid): nada a aplicar
                 self.registrar(g, "aplicado", self.detalhe(g, hora, None, sem_efeito="a linha já estava na CCAR"))
+                return
+            motivo = self.regras_ocorrencia_nova(valores) if t == "cq_inspecao" else None
+            if motivo:
+                self.recusar(g, hora, None, motivo, rot)
                 return
             self._tentar(g, hora, lambda: self.inserir(t, u, valores), rot)
             return
         if srv is None:
             self.recusar(g, hora, None, "a linha não existe mais na CCAR (foi apagada ou descartada)", rot)
             return
+        motivo = None
         if t == "carga_trabalho":
             motivo = self.regras_carga(g, srv, valores, hora)
-            if motivo:
-                self.recusar(g, hora, srv, motivo, rot)
-                return
+        elif t == "cq_amostra":
+            carga = self.cargas_cq.get(srv.get("id_carga_trabalho"))
+            if carga is not None:
+                self.derivadas.add(carga["uuid"])
+                g["carga_derivada"] = carga["uuid"]
+            motivo = self.regras_amostra(srv)
+        elif t == "cq_inspecao":
+            motivo = self.regras_ocorrencia(srv, valores)
+            if set(valores) & TRATAR:
+                folha = self.cargas_folha.get(srv.get("id_lote")) or []
+                self.derivadas |= set(folha)
+                g["cargas_derivadas"] = list(folha)
+        if motivo:
+            self.recusar(g, hora, srv, motivo, rot)
+            return
+        if t == "cq_inspecao" and set(valores) <= {"ciente_em", "ciente_por"} and srv.get("ciente_em") is not None:
+            nota = "a ciência já estava registrada na CCAR: fica a que já estava"
+            self.registrar(g, "aplicado", self.detalhe(g, hora, srv, sem_efeito=nota))
+            return
+        if t == "cq_inspecao" and set(valores) <= {"ciente_em", "ciente_por"}:
+            # A ciência só toca os seus campos: não disputa a última escrita com a edição da anotação ou do ponto
+            # pelo avaliador, que pode ter mudado a linha depois do último pull.
+            self._tentar(g, hora, lambda: self.atualizar(t, u, valores), rot)
+            return
         if all(_igual(v, srv.get(c)) for c, v in valores.items()):
             self.registrar(g, "aplicado", self.detalhe(g, hora, srv, sem_efeito="a CCAR já tinha estes valores"))
             return
@@ -496,6 +677,29 @@ class _Push:
             return
         descartado = "servidor" if res == "conflito_vencido" else None
         self._tentar(g, hora, lambda: self.atualizar(t, u, valores), rot, res, srv, descartado)
+
+    def apagar(self, g: Dict, hora: dt.datetime, srv: Optional[Dict], rot: str) -> None:
+        """Exclusão (só de ocorrência própria, com a passagem de CQ aberta). Já não estava na CCAR: nada a fazer."""
+        t, u = g["tabela"], g["uuid"]
+        if srv is None:
+            self.registrar(g, "aplicado", self.detalhe(g, hora, None, sem_efeito="a linha já não estava na CCAR"))
+            return
+        if t != "cq_inspecao":
+            motivo = "o Feixe só apaga ocorrências"
+        elif srv.get("responsavel") != self.usuario:
+            motivo = "esta ocorrência foi registrada por outra pessoa"
+        elif not self._aberta(srv.get("id_lote_etapa")):
+            motivo = "a etapa de CQ deste lote foi encerrada pelo supervisor"
+        else:
+            motivo = None
+        if motivo:
+            self.recusar(g, hora, srv, motivo, rot)
+            return
+        self._tentar(g, hora, lambda: self.excluir(t, u), rot, "aplicado", srv)
+
+    def excluir(self, tabela: str, uuid: str) -> None:
+        self._executar(f"DELETE FROM {S}.{tabela} AS t WHERE t.uuid = %s::uuid RETURNING t.id", (uuid,))
+        self.servidor.get(tabela, {}).pop(uuid, None)
 
     def conclusao_dupla(self, g: Dict, hora: dt.datetime, srv: Dict, valores: Dict, rot: str) -> bool:
         """A mesma carga concluída nas duas pontas (duas estações, ou a estação e a tabela de atributos online): não é
@@ -550,13 +754,13 @@ class _Push:
         rot = self._rotulo("fila_folha", fsrv, fila)
         motivo = None
         if fsrv is None:
-            motivo = "a folha saiu da sua fila"
+            motivo = "o lote saiu da sua fila"
         elif fsrv.get("responsavel") != self.usuario:
-            motivo = "a folha foi para a fila de outra pessoa"
+            motivo = "o lote foi para a fila de outra pessoa"
         elif fsrv.get("atribuida_em") is not None:
-            motivo = "a folha já tinha sido entregue pela fila"
+            motivo = "o lote já tinha sido entregue pela fila"
         elif etapa.get("situacao") not in ABERTAS:
-            motivo = "a etapa da folha foi encerrada pelo supervisor"
+            motivo = "a etapa do lote foi encerrada pelo supervisor"
         elif not self.perfil(etapa.get("cod_projeto")):
             motivo = f"você não tem mais o perfil de execução no projeto (SGBC, lotação {self.uf})"
         cargas = [g for g in grupos if g["tabela"] == "carga_trabalho"]
@@ -573,7 +777,7 @@ class _Push:
                 else:
                     outras.append(g)
             if not passam and not minhas:
-                motivo = "outra pessoa já pegou as cargas desta folha"
+                motivo = "outra pessoa já pegou as cargas deste lote"
         if motivo is not None:
             for g in grupos:
                 self.recusar_sem_aviso(g, hora, motivo)
@@ -710,6 +914,7 @@ def enviar(ws: Workspace, remota: Callable[[], ContextManager[Any]], usuario: Op
                 p.envio(conteudo)
             else:
                 p.unidade(conteudo)
+        p.reler_derivadas()
         p.gravar_log()
     grupos = [g for tipo, c in passos for g in ([c] if tipo == "envio" else c)]
     _finalizar(ws, p, grupos, repetidos, feitos)
@@ -760,6 +965,12 @@ def _finalizar(ws: Workspace, p: _Push, grupos: List[Dict], repetidos: List[Dict
             wx.registrar_log(g["tabela"], g["uuid"], g["operacao"], g["resultado"], g["detalhe"])
             chave = (g["tabela"], g["uuid"])
             linhas[chave] = linhas.get(chave, False) or bool(g.get("aplicou"))
+            if g.get("carga_derivada"):
+                # A carga de CQ que o gatilho da amostra concluiu (ou não, na recusa): fica como está na CCAR.
+                linhas.setdefault(("carga_trabalho", g["carga_derivada"]), False)
+            for u in g.get("cargas_derivadas") or []:
+                # A carga da folha na correção (D5), que o gatilho da ocorrência concluiu ou reabriu.
+                linhas.setdefault(("carga_trabalho", u), False)
         for (tabela, uuid), aplicou in linhas.items():
             srv = p.servidor.get(tabela, {}).get(uuid)
             resta = wx.todos("SELECT id FROM outbox WHERE tabela = ? AND uuid = ?", (tabela, uuid))

@@ -148,12 +148,14 @@ CREATE TRIGGER t10_resultado BEFORE UPDATE ON mapcartacomp.cq_plano
 -- avaliação for desfeita), e o plano é recalculado.
 
 -- Roda com os direitos do dono do schema, para que a derivação não dependa dos privilégios de quem avaliou.
+-- A conclusão leva a hora da avaliação (avaliado_em, que vem explícito da avaliação feita offline), não a do push:
+-- é ela que conta na produtividade, como o concluido_em das cargas de produção.
 CREATE OR REPLACE FUNCTION mapcartacomp.f_amostra_derivar_um(p_carga integer, p_plano integer) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = mapcartacomp, public, pg_temp AS $$
 BEGIN
     UPDATE mapcartacomp.carga_trabalho c
-       SET concluido = d.todas
-      FROM (SELECT count(*) > 0 AND bool_and(status IS NOT NULL) AS todas
+       SET concluido = d.todas, concluido_em = CASE WHEN d.todas THEN d.quando END
+      FROM (SELECT count(*) > 0 AND bool_and(status IS NOT NULL) AS todas, max(avaliado_em) AS quando
               FROM mapcartacomp.cq_amostra WHERE id_carga_trabalho = p_carga) d
      WHERE c.id = p_carga AND c.concluido IS DISTINCT FROM d.todas;
 
@@ -180,6 +182,137 @@ $$;
 DROP TRIGGER IF EXISTS t20_derivar ON mapcartacomp.cq_amostra;
 CREATE TRIGGER t20_derivar AFTER INSERT OR UPDATE OF status, id_carga_trabalho, id_cq_plano OR DELETE
     ON mapcartacomp.cq_amostra FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_amostra_derivar();
+
+-- Passagem de CQ e carga avaliada da ocorrência -------------------------------------------------------------------
+-- Carga de produção que contém o ponto na passagem avaliada pela passagem de CQ: a passagem do mesmo lote, por etapa
+-- que conta revisão, não pulada, com a mesma revisão da passagem de CQ (t10_revisao: a passagem de CQ herda a revisão
+-- corrente). Mais de uma carga no ponto (borda): a de menor id, para o resultado ser sempre o mesmo.
+CREATE OR REPLACE FUNCTION mapcartacomp.f_carga_avaliada(p_lote_etapa integer, p_geom geometry) RETURNS integer
+LANGUAGE sql STABLE AS $$
+    SELECT c.id
+      FROM mapcartacomp.lote_etapa cq
+      JOIN mapcartacomp.lote_etapa le ON le.id_lote = cq.id_lote AND le.revisao = cq.revisao AND le.id <> cq.id
+                                     AND le.situacao <> 'pulada'
+      JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa AND fe.conta_revisao
+      JOIN mapcartacomp.carga_trabalho c ON c.id_lote_etapa = le.id AND c.id_cq_plano IS NULL
+     WHERE cq.id = p_lote_etapa AND c.geom && p_geom AND ST_Intersects(c.geom, p_geom)
+     ORDER BY le.instancia DESC, c.id
+     LIMIT 1
+$$;
+
+-- Nome do elemento de qualidade (a medida no SGBC). Com os direitos do dono do schema: quem executa (APM, avaliador)
+-- pode não ter leitura em mapcartctrl.t_qua_medidadequalidade, e o pull do workspace e a ocorrência precisam do nome.
+CREATE OR REPLACE FUNCTION mapcartacomp.f_elemento_nome(p_medida integer) RETURNS text
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = mapcartacomp, public, pg_temp AS $$
+    SELECT m.nome::text FROM mapcartctrl.t_qua_medidadequalidade m WHERE m.id = p_medida
+$$;
+
+CREATE OR REPLACE FUNCTION mapcartacomp.f_inspecao_passagem() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_lote integer;
+BEGIN
+    -- OLD só é lido em UPDATE: no 9.6, ler OLD num INSERT é erro.
+    IF NEW.id_lote_etapa IS NULL AND NEW.id_carga_trabalho IS NOT NULL THEN
+        SELECT c.id_lote_etapa INTO NEW.id_lote_etapa
+          FROM mapcartacomp.carga_trabalho c
+         WHERE c.id = NEW.id_carga_trabalho AND c.id_cq_plano IS NOT NULL;
+    END IF;
+    -- Elemento: o da atividade da carga de CQ, quando não veio.
+    IF NEW.elemento IS NULL AND NEW.id_carga_trabalho IS NOT NULL THEN
+        SELECT mapcartacomp.f_elemento_nome(a.id_medidadequalidade) INTO NEW.elemento
+          FROM mapcartacomp.carga_trabalho c JOIN mapcartacomp.atividade a ON a.id = c.id_atividade
+         WHERE c.id = NEW.id_carga_trabalho;
+    END IF;
+    IF NEW.id_lote_etapa IS NOT NULL THEN
+        SELECT id_lote INTO v_lote FROM mapcartacomp.lote_etapa WHERE id = NEW.id_lote_etapa;
+        IF v_lote IS DISTINCT FROM NEW.id_lote THEN
+            RAISE EXCEPTION 'a passagem % não é do lote % da ocorrência', NEW.id_lote_etapa, NEW.id_lote
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    -- Carga avaliada: derivada quando não veio; num UPDATE que muda o ponto ou a passagem sem mexer nela, de novo.
+    IF NEW.id_lote_etapa IS NOT NULL AND (
+           (TG_OP = 'INSERT' AND NEW.id_carga_avaliada IS NULL)
+        OR (TG_OP = 'UPDATE' AND NEW.id_carga_avaliada IS NOT DISTINCT FROM OLD.id_carga_avaliada
+            AND (NEW.id_carga_avaliada IS NULL OR NOT ST_Equals(NEW.geom, OLD.geom)
+                 OR NEW.id_lote_etapa IS DISTINCT FROM OLD.id_lote_etapa))) THEN
+        NEW.id_carga_avaliada := mapcartacomp.f_carga_avaliada(NEW.id_lote_etapa, NEW.geom);
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS t05_passagem ON mapcartacomp.cq_inspecao;
+CREATE TRIGGER t05_passagem BEFORE INSERT OR UPDATE OF id_lote, id_lote_etapa, id_carga_trabalho, id_carga_avaliada,
+    geom ON mapcartacomp.cq_inspecao FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_inspecao_passagem();
+
+-- tratado_em/tratado_por da ocorrência ------------------------------------------------------------------------------
+-- Ao marcar tratada: guarda a hora e a pessoa informadas (marcação offline sincronizada depois) ou, se não vieram,
+-- agora e quem conectou. Ao desmarcar: limpa.
+
+CREATE OR REPLACE FUNCTION mapcartacomp.f_inspecao_tratado() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NOT NEW.tratado THEN
+        NEW.tratado_em := NULL;
+        NEW.tratado_por := NULL;
+    ELSIF TG_OP = 'INSERT' THEN
+        NEW.tratado_em := coalesce(NEW.tratado_em, now());
+        NEW.tratado_por := coalesce(NEW.tratado_por, current_user);
+    ELSIF NOT OLD.tratado THEN
+        IF NEW.tratado_em IS NULL OR NEW.tratado_em IS NOT DISTINCT FROM OLD.tratado_em THEN
+            NEW.tratado_em := now();
+        END IF;
+        IF NEW.tratado_por IS NULL OR NEW.tratado_por IS NOT DISTINCT FROM OLD.tratado_por THEN
+            NEW.tratado_por := current_user;
+        END IF;
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS t10_tratado ON mapcartacomp.cq_inspecao;
+CREATE TRIGGER t10_tratado BEFORE INSERT OR UPDATE ON mapcartacomp.cq_inspecao
+    FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_inspecao_tratado();
+
+-- Carga da folha na correção de inspeção (D5) ----------------------------------------------------------------------
+-- Na correção de inspeção sem atividade pela grade, a passagem tem uma carga só, a folha inteira (`cargas.preparar`):
+-- é por ela que a folha vai a alguém (Distribuir, fila) e que se sabe quem varre as ocorrências. Ela não se conclui à
+-- mão: conclui quando todas as ocorrências da folha (de todas as revisões) estão tratadas, com a hora da última
+-- marcação (tratado_em, que vem explícito da marcação offline), e volta a pendente se alguma for desmarcada enquanto a
+-- passagem estiver aberta. Carga de atividade pela grade na correção é trabalho de cada um e não muda aqui. Como a
+-- carga de CQ pela amostra (t20_derivar), com os direitos do dono do schema.
+CREATE OR REPLACE FUNCTION mapcartacomp.f_correcao_derivar_um(p_lote integer) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = mapcartacomp, public, pg_temp AS $$
+BEGIN
+    UPDATE mapcartacomp.carga_trabalho c
+       SET concluido = d.todas, concluido_em = CASE WHEN d.todas THEN d.quando END
+      FROM (SELECT coalesce(bool_and(i.tratado), true) AS todas, max(i.tratado_em) AS quando
+              FROM mapcartacomp.cq_inspecao i WHERE i.id_lote = p_lote) d,
+           mapcartacomp.lote_etapa le, mapcartacomp.fluxo_etapa fe, mapcartacomp.atividade a
+     WHERE le.id = c.id_lote_etapa AND fe.id = le.id_fluxo_etapa AND a.id = c.id_atividade
+       AND le.id_lote = p_lote AND le.situacao IN ('pendente', 'em_andamento') AND fe.fase = 'correcao_inspecao'
+       AND coalesce(a.geracao, 'manual') <> 'grade' AND c.concluido IS DISTINCT FROM d.todas;
+END
+$$;
+
+CREATE OR REPLACE FUNCTION mapcartacomp.f_correcao_derivar() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP IN ('UPDATE', 'DELETE') THEN
+        PERFORM mapcartacomp.f_correcao_derivar_um(OLD.id_lote);
+    END IF;
+    IF TG_OP = 'INSERT' OR (TG_OP = 'UPDATE' AND NEW.id_lote IS DISTINCT FROM OLD.id_lote) THEN
+        PERFORM mapcartacomp.f_correcao_derivar_um(NEW.id_lote);
+    END IF;
+    RETURN NULL;
+END
+$$;
+
+DROP TRIGGER IF EXISTS t20_correcao ON mapcartacomp.cq_inspecao;
+CREATE TRIGGER t20_correcao AFTER INSERT OR UPDATE OF tratado, id_lote OR DELETE
+    ON mapcartacomp.cq_inspecao FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_correcao_derivar();
 
 -- Revisão de uma passagem de etapa, quando não informada ------------------------------------------------------------
 -- Passagem por etapa que conta revisão: 1 + passagens anteriores (não puladas) por etapas que contam revisão.
@@ -209,7 +342,8 @@ CREATE TRIGGER t10_revisao BEFORE INSERT ON mapcartacomp.lote_etapa
 
 -- Derivações do lote a partir das passagens de etapa ----------------------------------------------------------------
 -- Etapa atual: a em andamento mais recente; sem nenhuma em andamento, a última concluída; sem nenhuma, a primeira
--- pendente. Status nacional: PLANEJADA se nada começou; senão o da fase da etapa atual, e no envio à GCQ o resultado
+-- pendente. Status nacional: PLANEJADA se nada começou; CONCLUIDA se o supervisor encerrou a folha no fim do fluxo
+-- (`encerrar` no histórico da etapa atual, D-153); senão o da fase da etapa atual, e no envio à GCQ o resultado
 -- registrado pelo supervisor decide entre ENTREGUE_GCQ, CONCLUIDA (aprovada) e DEVOLVIDA (devolvida).
 -- Revisão atual: a maior revisão entre as passagens não puladas.
 
@@ -240,6 +374,9 @@ BEGIN
 
     IF v_atual IS NULL OR v_situacao = 'pendente' THEN
         v_status := 'PLANEJADA';
+    ELSIF v_situacao = 'concluida' AND EXISTS (SELECT 1 FROM mapcartacomp.lote_etapa_hist h
+                                                WHERE h.id_lote_etapa = v_atual AND h.acao = 'encerrar') THEN
+        v_status := 'CONCLUIDA';
     ELSIF v_fase = 'envio_gcq' AND v_resultado = 'aprovada' THEN
         v_status := 'CONCLUIDA';
     ELSIF v_fase = 'envio_gcq' AND v_resultado = 'devolvida' THEN
@@ -279,6 +416,31 @@ $$;
 DROP TRIGGER IF EXISTS t20_derivar ON mapcartacomp.lote_etapa;
 CREATE TRIGGER t20_derivar AFTER INSERT OR UPDATE OR DELETE ON mapcartacomp.lote_etapa
     FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_lote_etapa_derivar();
+
+-- Encerrar a folha no fim do fluxo (D-153) é uma linha `encerrar` no histórico da etapa atual: gravá-la ou apagá-la
+-- recalcula o status do lote.
+CREATE OR REPLACE FUNCTION mapcartacomp.f_lote_etapa_hist_derivar() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_lote integer;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.acao = 'encerrar' THEN
+            SELECT id_lote INTO v_lote FROM mapcartacomp.lote_etapa WHERE id = OLD.id_lote_etapa;
+        END IF;
+    ELSIF NEW.acao = 'encerrar' THEN
+        SELECT id_lote INTO v_lote FROM mapcartacomp.lote_etapa WHERE id = NEW.id_lote_etapa;
+    END IF;
+    IF v_lote IS NOT NULL THEN
+        PERFORM mapcartacomp.f_lote_derivar(v_lote);
+    END IF;
+    RETURN NULL;
+END
+$$;
+
+DROP TRIGGER IF EXISTS t20_derivar_encerrar ON mapcartacomp.lote_etapa_hist;
+CREATE TRIGGER t20_derivar_encerrar AFTER INSERT OR DELETE ON mapcartacomp.lote_etapa_hist
+    FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_lote_etapa_hist_derivar();
 
 -- Atividades da etapa ------------------------------------------------------------------------------------------------
 -- A atividade ligada a uma etapa do fluxo tem a fase da etapa e o projeto e o tema do fluxo. Carga e plano de CQ de
