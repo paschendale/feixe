@@ -1,6 +1,6 @@
 # scripts/dev
 
-Ferramentas do ambiente de desenvolvimento (stack `feixe-db` no disbelief: `feixe-ggc` PostgreSQL 9.6 + PostGIS 2.5 na porta 5433, o mais perto do PostGIS 2.4 do DF de produção e `feixe-ccar` PostgreSQL 17 + PostGIS 3.5 na porta 5434). Senha e URLs em `.dev.env` na raiz do repo (symlink para `~/.config/feixe/dev.env`, fora do Git).
+Ferramentas do ambiente de desenvolvimento (stack `feixe-db` no host de dev: `feixe-ggc` PostgreSQL 9.6 + PostGIS 2.5 na porta 5433, o mais perto do PostGIS 2.4 do DF de produção e `feixe-ccar` PostgreSQL 17 + PostGIS 3.5 na porta 5434). Senha e URLs em `.dev.env` na raiz do repo (symlink para `~/.config/feixe/dev.env`, fora do Git).
 
 ## Restaurar os dumps de apoio
 
@@ -18,11 +18,11 @@ pg_restore --section=pre-data  --no-owner --no-privileges --no-tablespaces -n ma
 pg_restore --section=post-data --no-owner --no-privileges                  -n mapcartctrl -n mapcartsis -f $O/mc_post.raw.sql $D/banco_rj.sql
 for f in df_pre df_post rj_pre rj_post mc_post; do python3 scripts/dev/adaptar_ddl.py $O/$f.raw.sql $O/$f.sql; done
 python3 scripts/dev/adaptar_ddl.py $O/mc_pre.raw.sql $O/mc_pre.sql mapcartctrl,mapcartsis
-scp $O/*_pre.sql $O/*_post.sql victor@disbelief:/home/victor/feixe-dumps/sql/
-scp apoio/banco_df.sql apoio/banco_rj.sql scripts/dev/restaurar_dumps.sh victor@disbelief:/home/victor/feixe-dumps/
+scp $O/*_pre.sql $O/*_post.sql <host-dev>:feixe-dumps/sql/
+scp apoio/banco_df.sql apoio/banco_rj.sql scripts/dev/restaurar_dumps.sh <host-dev>:feixe-dumps/
 ```
 
-2. No disbelief, `FEIXE_DB_PASSWORD=... bash /home/victor/feixe-dumps/restaurar_dumps.sh`. O script aplica pre-data com `psql`, carrega os dados com o `pg_restore` 17 do container `feixe-ccar` (apontando para o `feixe-ggc` quando for o caso) e aplica post-data. O banco da GGC recebe também `mapcartctrl` e `mapcartsis` copiados do dump da CCAR, como em produção.
+2. No host de dev, `FEIXE_DB_PASSWORD=... bash ~/feixe-dumps/restaurar_dumps.sh` (outra pasta: `FEIXE_DUMPS=...`). O script aplica pre-data com `psql`, carrega os dados com o `pg_restore` 17 do container `feixe-ccar` (apontando para o `feixe-ggc` quando for o caso) e aplica post-data. O banco da GGC recebe também `mapcartctrl` e `mapcartsis` copiados do dump da CCAR, como em produção.
 
 3. Erros esperados e inofensivos: triggers de histórico (`*_hist`), duas views de `mapcartctrl` que dependem de `ccar.*`, e `SET` de parâmetros do 17 que o 9.6 não conhece.
 
@@ -39,10 +39,10 @@ O=/tmp/feixe-recorte; mkdir -p $O
 pg_restore --section=pre-data  --no-owner --no-privileges --no-tablespaces -f $O/pre.raw.sql  apoio/<dump>
 pg_restore --section=post-data --no-owner --no-privileges                  -f $O/post.raw.sql apoio/<dump>
 for f in pre post; do python3 scripts/dev/adaptar_ddl.py $O/$f.raw.sql $O/$f.sql --com-dominios; done
-scp apoio/<dump> $O/pre.sql $O/post.sql scripts/dev/restaurar_recorte.sh victor@disbelief:/home/victor/feixe-dumps/recorte/
+scp apoio/<dump> $O/pre.sql $O/post.sql scripts/dev/restaurar_recorte.sh <host-dev>:feixe-dumps/recorte/
 ```
 
-2. No disbelief, `FEIXE_DB_PASSWORD=... bash restaurar_recorte.sh <feixe-ggc|feixe-ccar> <dump> pre.sql post.sql <schema,...>`. Os schemas listados são removidos antes (inclua `mapcartacomp`, porque as FKs dele para `mapcartctrl` caem junto). Restaurar pela própria máquina pela tailnet funciona, mas o link é lento e já caiu no meio da carga; pelo disbelief é mais seguro.
+2. No host de dev, `FEIXE_DB_PASSWORD=... bash restaurar_recorte.sh <feixe-ggc|feixe-ccar> <dump> pre.sql post.sql <schema,...>`. Os schemas listados são removidos antes (inclua `mapcartacomp`, porque as FKs dele para `mapcartctrl` caem junto). Restaurar pela própria máquina pela rede funciona, mas o link é lento e já caiu no meio da carga; pelo host de dev é mais seguro.
 
 3. Depois: `scripts/db/aplicar.sh` na CCAR de dev, `scripts/db/testar_espelho.sh` no GGC de dev e, como a CCAR de dev não é a de produção e não tem as contas do DF, `scripts/dev/copiar_usuarios_df.sh "$FEIXE_GGC" "$FEIXE_CCAR"` (copia as contas lotadas no DF e as citadas em `bc100ggcdf_apoio`, sem senha e sem disparar os triggers de sincronização).
 
@@ -56,7 +56,7 @@ Resultado em 2026-10-14: GGC com 45.009 cargas, 10.974 amostras e 19 ocorrência
 /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 scripts/dev/medir_pull.py 3
 ```
 
-Com o Python do QGIS ele usa as conexões do plugin e confere também a sincronização de ponta a ponta (CCAR de dev e uma porta fechada, que tem de dar `offline`). Sem o QGIS (só `psycopg2`), conecta pela URL `FEIXE_CCAR`; é o jeito de medir no disbelief, num container descartável com `python:3.9-slim` e `pip install psycopg2-binary`, com o código copiado por `rsync` (sem `.git` e sem `node_modules`).
+Com o Python do QGIS ele usa as conexões do plugin e confere também a sincronização de ponta a ponta (CCAR de dev e uma porta fechada, que tem de dar `offline`). Sem o QGIS (só `psycopg2`), conecta pela URL `FEIXE_CCAR`; é o jeito de medir no host de dev, num container descartável com `python:3.9-slim` e `pip install psycopg2-binary`, com o código copiado por `rsync` (sem `.git` e sem `node_modules`).
 
 ## Verificar a fase C e testar o offline (C4)
 

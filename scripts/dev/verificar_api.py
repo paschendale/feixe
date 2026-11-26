@@ -45,6 +45,7 @@ from feixe.server.api import Contexto, criar_roteador  # noqa: E402
 from feixe.server.http import ServidorLocal  # noqa: E402
 from feixe.server.sse import Broker  # noqa: E402
 from qgis.core import QgsApplication  # noqa: E402
+from scripts.dev.ambiente_dev import carregar as ambiente_dev_dict  # noqa: E402
 
 
 def _credencial_dev():
@@ -74,8 +75,7 @@ def main() -> int:
         am = QgsApplication.authManager()
         if not am.setMasterPassword("feixe-verificacao", True):
             raise SystemExit("não foi possível iniciar o Authentication Manager temporário")
-        with open(os.path.join(RAIZ, "config", "ambientes.json"), encoding="utf-8") as f:
-            amb = ambiente.de_dict(json.load(f)["dev"])
+        amb = ambiente.de_dict(ambiente_dev_dict())
         usuario, senha = _credencial_dev()
         config.salvar_credenciais(amb, usuario, senha)
         assert config.credenciais(amb) == (usuario, senha), "credencial não foi relida do Authentication Manager"

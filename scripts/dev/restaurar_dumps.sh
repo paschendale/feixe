@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Executa no disbelief. Espera os dumps em /home/victor/feixe-dumps e a DDL adaptada em /home/victor/feixe-dumps/sql.
+# Executa no host de dev. Espera os dumps em $FEIXE_DUMPS (padrão ~/feixe-dumps) e a DDL adaptada em $FEIXE_DUMPS/sql.
 set -uo pipefail
 : "${FEIXE_DB_PASSWORD:?}"
-D=/home/victor/feixe-dumps
+D="${FEIXE_DUMPS:-$HOME/feixe-dumps}"
 export PGPASSWORD="$FEIXE_DB_PASSWORD"
 docker cp "$D/sql" feixe-ccar:/tmp/sql
 docker cp "$D/banco_df.sql" feixe-ccar:/tmp/banco_df.sql
