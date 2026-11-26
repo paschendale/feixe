@@ -30,7 +30,8 @@ def mundo(banco):
     with banco.cursor() as cur:
         with open(os.path.join(RAIZ, "scripts", "dev", "roles_teste.sql"), encoding="utf-8") as f:
             cur.execute(f.read())
-        cur.execute(gerar(ler_roles(["feixe_teste_grupo"])).replace("BEGIN;", "").replace("COMMIT;", ""))
+        grants = gerar(ler_roles(["feixe_teste_grupo"]), ["feixe_teste_cons"])
+        cur.execute(grants.replace("BEGIN;", "").replace("COMMIT;", ""))
         tema = _um(cur, "INSERT INTO mapcartacomp.tema (nome) VALUES ('teste_grants') RETURNING id")
         ativ = _um(
             cur,
@@ -140,6 +141,18 @@ def test_quem_nao_tem_grant_nao_le(mundo, psycopg2):
     cur, _ = mundo
     _como(cur, "feixe_teste_fora")
     assert _negado(cur, psycopg2, "SELECT count(*) FROM mapcartacomp.carga_trabalho")
+
+
+def test_consulta_le_tudo_e_nao_altera_nada(mundo, psycopg2):
+    """Role de consulta (padrão da DBA, sufixo _cons): SELECT em tabelas e views, nenhuma escrita."""
+    cur, d = mundo
+    _como(cur, "feixe_teste_cons")
+    assert _um(cur, "SELECT count(*) FROM mapcartacomp.lote WHERE id_tema = %s", (d["tema"],)) == 2
+    assert _um(cur, "SELECT count(*) FROM mapcartacomp.ctrl_lote WHERE id_tema = %s", (d["tema"],)) == 2
+    cur.execute("SELECT count(*) FROM mapcartacomp.vw_carga_trabalho")
+    assert _negado(cur, psycopg2, "UPDATE mapcartacomp.carga_trabalho SET concluido = true WHERE id = %s",
+                   (d["DF"]["carga"],))  # fmt: skip
+    assert _negado(cur, psycopg2, "DELETE FROM mapcartacomp.sync_log")
 
 
 def test_avaliacao_recalcula_plano(mundo):
