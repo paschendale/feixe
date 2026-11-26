@@ -102,7 +102,8 @@ CREATE TABLE IF NOT EXISTS mapcartacomp.lote_etapa_hist (
 
 COMMENT ON COLUMN mapcartacomp.lote_etapa_hist.acao IS
     'Valores previstos: abrir, iniciar, concluir, pular, voltar, reabrir, repetir, gcq_aprovada, gcq_devolvida, '
-    'cq_aprovada, cq_reprovada (a observação traz o resultado por elemento), importar.';
+    'cq_aprovada, cq_reprovada (a observação traz o resultado por elemento), importar, encerrar (folha concluída no '
+    'fim do fluxo pelo supervisor: a etapa atual com esta linha deixa o lote CONCLUIDA).';
 
 CREATE INDEX IF NOT EXISTS lote_etapa_hist_etapa_idx ON mapcartacomp.lote_etapa_hist (id_lote_etapa);
 CREATE INDEX IF NOT EXISTS lote_etapa_hist_atualizado_em_idx ON mapcartacomp.lote_etapa_hist (uf, atualizado_em);

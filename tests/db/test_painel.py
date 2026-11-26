@@ -108,3 +108,37 @@ def test_depois_de_pular_a_seguinte_e_a_que_vem_depois_da_pulada(amb):  # noqa: 
     assert [x["etapa"] for x in r["abertas"]] == ["E correcao_topologica"], r
     status = ex.um("SELECT status_nacional FROM mapcartacomp.lote WHERE id = %s", (a,))["status_nacional"]
     assert status == "EM_PRODUCAO"
+
+
+def test_encerrar_a_folha_no_fim_do_fluxo(amb):  # noqa: F811
+    # D-153 (P-26): a última etapa do fluxo terminou e não há seguinte; o supervisor encerra e a folha fica CONCLUIDA.
+    cen, ex = amb
+    fluxo = df.criar(ex, "GO", 5, cen.tema, "GO fim", [
+        _etapa("aquisicao", conta=True, repetivel=False, atividades=[cen.ativ["aquisicao"]]),
+        _etapa("revisao", conta=True, obrigatoria=False),
+    ])  # fmt: skip
+    a, e = _folha(ex, "GO", fluxo, "2535")
+    b, _ = _folha(ex, "GO", fluxo, "2536")
+    for lote in (a, b):
+        df.acao(ex, "GO", _aberta(ex, lote), "iniciar", OBS)
+        df.acao(ex, "GO", _aberta(ex, lote), "concluir", OBS)
+    df.nova_passagem(ex, "GO", a, e["revisao"], OBS)
+    df.acao(ex, "GO", _aberta(ex, a), "iniciar", OBS)
+    df.acao(ex, "GO", _aberta(ex, a), "concluir", OBS)
+
+    status = lambda lote: ex.um("SELECT status_nacional AS s FROM mapcartacomp.lote WHERE id = %s", (lote,))["s"]  # noqa: E731
+    assert status(a) == "EM_PRODUCAO"
+    p = {i["id_lote"]: i for i in df.encerrar(ex, "GO", [a, b], None, previa=True)["itens"]}
+    assert p[a]["erro"] is None and "abra a próxima etapa" in p[b]["erro"]  # b ainda tem a revisão no fluxo
+    assert status(a) == "EM_PRODUCAO"  # a prévia não muda nada
+
+    r = df.encerrar(ex, "GO", [a, b], "", previa=False)
+    assert [x["id_lote"] for x in r["encerradas"]] == [a] and [x["id_lote"] for x in r["erros"]] == [b]
+    assert status(a) == "CONCLUIDA" and df.historico(ex, a)[0]["acao"] == "encerrar"
+    assert "já está concluída" in df.encerrar(ex, "GO", [a], None, previa=True)["itens"][0]["erro"]
+    assert dl.um(ex, a)["status_nacional"] == "CONCLUIDA"
+
+    # Abrir outra etapa depois reabre a folha: a etapa atual muda e o encerramento fica no histórico.
+    df.nova_passagem(ex, "GO", a, e["revisao"], OBS)
+    df.acao(ex, "GO", _aberta(ex, a), "iniciar", OBS)
+    assert status(a) == "EM_PRODUCAO"

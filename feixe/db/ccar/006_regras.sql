@@ -342,7 +342,8 @@ CREATE TRIGGER t10_revisao BEFORE INSERT ON mapcartacomp.lote_etapa
 
 -- Derivações do lote a partir das passagens de etapa ----------------------------------------------------------------
 -- Etapa atual: a em andamento mais recente; sem nenhuma em andamento, a última concluída; sem nenhuma, a primeira
--- pendente. Status nacional: PLANEJADA se nada começou; senão o da fase da etapa atual, e no envio à GCQ o resultado
+-- pendente. Status nacional: PLANEJADA se nada começou; CONCLUIDA se o supervisor encerrou a folha no fim do fluxo
+-- (`encerrar` no histórico da etapa atual, D-153); senão o da fase da etapa atual, e no envio à GCQ o resultado
 -- registrado pelo supervisor decide entre ENTREGUE_GCQ, CONCLUIDA (aprovada) e DEVOLVIDA (devolvida).
 -- Revisão atual: a maior revisão entre as passagens não puladas.
 
@@ -373,6 +374,9 @@ BEGIN
 
     IF v_atual IS NULL OR v_situacao = 'pendente' THEN
         v_status := 'PLANEJADA';
+    ELSIF v_situacao = 'concluida' AND EXISTS (SELECT 1 FROM mapcartacomp.lote_etapa_hist h
+                                                WHERE h.id_lote_etapa = v_atual AND h.acao = 'encerrar') THEN
+        v_status := 'CONCLUIDA';
     ELSIF v_fase = 'envio_gcq' AND v_resultado = 'aprovada' THEN
         v_status := 'CONCLUIDA';
     ELSIF v_fase = 'envio_gcq' AND v_resultado = 'devolvida' THEN
@@ -412,6 +416,31 @@ $$;
 DROP TRIGGER IF EXISTS t20_derivar ON mapcartacomp.lote_etapa;
 CREATE TRIGGER t20_derivar AFTER INSERT OR UPDATE OR DELETE ON mapcartacomp.lote_etapa
     FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_lote_etapa_derivar();
+
+-- Encerrar a folha no fim do fluxo (D-153) é uma linha `encerrar` no histórico da etapa atual: gravá-la ou apagá-la
+-- recalcula o status do lote.
+CREATE OR REPLACE FUNCTION mapcartacomp.f_lote_etapa_hist_derivar() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_lote integer;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.acao = 'encerrar' THEN
+            SELECT id_lote INTO v_lote FROM mapcartacomp.lote_etapa WHERE id = OLD.id_lote_etapa;
+        END IF;
+    ELSIF NEW.acao = 'encerrar' THEN
+        SELECT id_lote INTO v_lote FROM mapcartacomp.lote_etapa WHERE id = NEW.id_lote_etapa;
+    END IF;
+    IF v_lote IS NOT NULL THEN
+        PERFORM mapcartacomp.f_lote_derivar(v_lote);
+    END IF;
+    RETURN NULL;
+END
+$$;
+
+DROP TRIGGER IF EXISTS t20_derivar_encerrar ON mapcartacomp.lote_etapa_hist;
+CREATE TRIGGER t20_derivar_encerrar AFTER INSERT OR DELETE ON mapcartacomp.lote_etapa_hist
+    FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_lote_etapa_hist_derivar();
 
 -- Atividades da etapa ------------------------------------------------------------------------------------------------
 -- A atividade ligada a uma etapa do fluxo tem a fase da etapa e o projeto e o tema do fluxo. Carga e plano de CQ de

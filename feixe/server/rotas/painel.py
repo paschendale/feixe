@@ -125,6 +125,19 @@ def registrar(r, ctx) -> None:
             campo(req, "expor_ocorrencias", bool, padrao=False),
         )  # fmt: skip
 
+    @r.rota("POST", "/api/lotes/encerrar", exige=("supervisor",))
+    def _encerrar(req):
+        # Fim do fluxo (D-153): a folha passa a CONCLUIDA para a CCAR, por decisão do supervisor, em lote, com prévia.
+        ids = campo(req, "lotes", lambda v: [int(x) for x in v])
+        if not ids:
+            raise ErroApi(400, "escolha pelo menos uma folha")
+        previa = campo(req, "previa", bool, padrao=True)
+        with ctx.tx() as ex:
+            r = df.encerrar(ex, uf_de(ctx.eu()), ids, campo(req, "observacao", str, padrao=""), previa)
+        if not previa and r["encerradas"]:
+            ctx.publicar("lote", {"acao": "encerrar", "ids": [i["id_lote"] for i in r["encerradas"]]})
+        return 200, r
+
     @r.rota("POST", "/api/lotes/avancar", exige=("supervisor",))
     def _avancar(req):
         ids = campo(req, "lotes", lambda v: [int(x) for x in v])
