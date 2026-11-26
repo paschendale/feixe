@@ -1,8 +1,9 @@
 """A3: conversão do bc100ggcdf_apoio (GGC de dev) para o mapcartacomp (CCAR de dev).
 
 A conversão roda duas vezes dentro de uma transação da CCAR que é desfeita no fim (leva alguns minutos: lê ~45 mil
-cargas pela rede). Confere que nada se perde sem registro, que rodar de novo não duplica e que ctrl_lote_etapa
-reproduz o ctrl_folha_revisao do sistema atual nas folhas de hidrografia.
+cargas pela rede). Confere que nada se perde sem registro, que rodar de novo não duplica, que ctrl_lote_etapa
+reproduz o ctrl_folha_revisao do sistema atual nas folhas de hidrografia concluídas e que as passagens em andamento
+vão para a grade estatística com o andamento próximo do original (D-158).
 """
 
 from __future__ import annotations
@@ -129,7 +130,9 @@ def test_ctrl_lote_reproduz_ctrl_folha_revisao(convertido):
             "SELECT DISTINCT folha_revisao FROM bc100ggcdf_apoio.carga_trabalho WHERE id_carga_trabalho = ANY(%s)",
             (ignoradas,),
         )
-        excluir = {r[0] for r in cur.fetchall()} | ROTULOS_CORRIGIDOS
+        # Passagens levadas para a grade (D-158) mudam de células: comparadas no teste da grade.
+        na_grade = {g["rotulo"].split(" ")[-1] for g in convertido["rel"].grade if g["rotulo"].startswith("Hidro")}
+        excluir = {r[0] for r in cur.fetchall()} | ROTULOS_CORRIGIDOS | na_grade
         cur.execute(
             """
             SELECT folha_revisao, rev_porcentagem_conclusao, cq_n_amostras,
@@ -225,3 +228,32 @@ def test_cq_do_df_tem_o_padrao_dos_planos(convertido):
         linhas = cur.fetchall()
     assert {(n, lqa, fc) for cq, n, lqa, fc in linhas if cq} == {("II", 2.5, 2.5)}
     assert {(n, lqa, fc) for cq, n, lqa, fc in linhas if not cq} == {(None, None, None)}
+
+
+def test_passagens_em_andamento_vao_para_a_grade(convertido):
+    """D-158: cada passagem em andamento de atividade pela grade vira células inteiras da grade no nível da
+    atividade, uma vez cada, sem sobrar carga antiga, com o andamento perto do original."""
+    grade = convertido["rel"].grade
+    assert grade, "o dump do dev tem passagens de LML em andamento"
+    for g in grade:
+        assert g["celulas"] > 0, g["rotulo"]
+        assert abs(g["perc"] - g["perc_antes"]) <= 5, g
+    with convertido["ccar"].cursor() as cur:
+        cur.execute(
+            """
+            SELECT le.id, count(*), count(c.geocodigo), count(DISTINCT c.geocodigo),
+                   bool_and(c.geocodigo LIKE a.grade_nivel || 'M%%'
+                            OR c.geocodigo LIKE (a.grade_nivel / 1000) || 'KM%%')
+              FROM mapcartacomp.carga_trabalho c
+              JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa
+              JOIN mapcartacomp.atividade a ON a.id = c.id_atividade
+             WHERE le.uf = 'DF' AND le.situacao = 'em_andamento' AND c.criado_por = current_user
+               AND a.geracao = 'grade'
+             GROUP BY le.id
+            """
+        )
+        linhas = cur.fetchall()
+    assert len(linhas) == len(grade)
+    for _le, total, com_geocodigo, distintos, nivel_certo in linhas:
+        assert total == com_geocodigo == distintos
+        assert nivel_certo
