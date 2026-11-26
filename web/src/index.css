@@ -151,7 +151,8 @@
 
 @layer base {
   * { @apply border-border outline-ring/50; }
-  html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  /* Espaço da barra de rolagem sempre reservado: trocar de uma aba longa para uma curta não desloca a página. */
+  html { scrollbar-gutter: stable; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
   body { @apply bg-background text-foreground font-sans text-corpo; }
   .tab { font-variant-numeric: tabular-nums; }
 }
