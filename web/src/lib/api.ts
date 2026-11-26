@@ -190,8 +190,10 @@ type PassagemPreparada = { id_lote_etapa: number; folha_revisao: string; etapa: 
 // No CQ, `planos` = quantos planos de amostragem saíram com o padrão da etapa (D-136) e `gravadas` = as amostras;
 // `cq_sem_padrao` = a etapa não tem nível e LQA padrão, e os planos se criam na gaveta.
 export type Preparo = {
-  geradas: (PassagemPreparada & { gravadas: number; planos?: number })[]
-  iniciadas: PassagemPreparada[]
+  // Na correção de inspeção (D5), `ocorrencias` = quantas a tratar na carga da folha.
+  geradas: (PassagemPreparada & { gravadas: number; planos?: number; ocorrencias?: number })[]
+  // `nada_a_tratar`: correção de inspeção sem ocorrência por tratar (D5), que começa já e vai para Esperando você.
+  iniciadas: (PassagemPreparada & { nada_a_tratar?: boolean })[]
   avisos: (PassagemPreparada & { aviso: string; cq_sem_padrao?: boolean })[]
   erro?: string
 }
@@ -362,6 +364,9 @@ export type Ocorrencia = {
   enviada: boolean
   pode_editar: boolean
   pode_ciente: boolean
+  // Correção de inspeção (D5): estou com a folha na passagem de correção aberta, então marco e desmarco.
+  pode_tratar: boolean
+  revisao: number | null
   motivo: MotivoOcorrencia
 }
 
@@ -423,10 +428,36 @@ export type ResumoCQ = {
 export type OcorrenciaCiencia = Ocorrencia & { geocodigo_avaliada: string | null; avaliador: string }
 export type ParaCiencia = { pendentes: OcorrenciaCiencia[]; cientes: OcorrenciaCiencia[]; dias: number }
 
+// Execução › Correção (D5): as minhas folhas na correção de inspeção aberta, com as ocorrências da folha (todas as
+// revisões). `so_folha`: a minha parte é só a varredura (a carga da folha); senão há cargas pela grade a concluir.
+export type OcorrenciaCorrecao = Ocorrencia & { avaliador: string }
+export type FolhaCorrecao = {
+  id_lote: number
+  id_lote_etapa: number
+  folha_revisao: string
+  tema: string | null
+  etapa: string | null
+  situacao: string
+  total: number
+  tratadas: number
+  pendentes: number
+  so_folha: boolean
+  cargas_pendentes: number
+  ocorrencias: OcorrenciaCorrecao[]
+}
+export type ProgressoCorrecao = { id_lote: number; id_lote_etapa: number; folha_revisao: string; total: number; tratadas: number; pendentes: number }
+export type ResultadoTratar = {
+  ocorrencia: Ocorrencia
+  progresso: ProgressoCorrecao | null
+  fila: { folha_revisao: string; atribuidas: number } | null
+  proxima: Ocorrencia | null
+}
+
 export type PainelExecucao = {
   por_dia: { dia: string; n: number }[]
   cq: ResumoCQ[]
   ciencia: ParaCiencia
+  correcao: FolhaCorrecao[]
   preparando?: boolean
 }
 
@@ -457,6 +488,8 @@ export type ItemAvanco = {
   pendentes: number
   proxima: string | null
   erro: string | null
+  // Correção de inspeção (D5): ocorrências da folha ainda não tratadas (o diálogo avisa; quem decide é o supervisor).
+  a_tratar: number
 }
 // Aprovar ou Nova revisão no CQ (D4): a prévia por folha e o que voltou ao confirmar.
 export type DecisaoCQ = 'aprovar' | 'nova_revisao'
@@ -629,12 +662,14 @@ export type GrupoEsperando = {
   resultado: ResultadoCQ | null
   desde: string | null
   ate: string | null
-  folhas: { id_lote: number; folha_revisao: string; situacao: string; desde: string | null; cq: (ResultadoPassagemCQ & { planos: ResultadoPlano[] }) | null }[]
+  // Na correção de inspeção (D5), quantas ocorrências da folha foram tratadas; fora dela, nulo.
+  folhas: { id_lote: number; folha_revisao: string; situacao: string; desde: string | null; cq: (ResultadoPassagemCQ & { planos: ResultadoPlano[] }) | null; ocorrencias_tratadas: number | null }[]
 }
 
 export type PessoaLote = { conta: string | null; nome: string | null; total: number; concluidas: number; ultima: string | null }
 
-export type LoteCompleto = Lote & { passagens: PassagemLote[]; pessoas: PessoaLote[] }
+// `ocorrencias`: as da folha, de todas as revisões (o andamento da correção de inspeção na gaveta, D5).
+export type LoteCompleto = Lote & { passagens: PassagemLote[]; pessoas: PessoaLote[]; ocorrencias: { total: number; tratadas: number } }
 
 // --- Fila de folhas por pessoa (B8, D-106) ---
 

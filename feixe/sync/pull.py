@@ -9,8 +9,9 @@ workspace fica no disco, então a regra vale já aqui, e de novo nas rotas, `cor
 registrou ou que caem numa carga de CQ do escopo (o avaliador); as que apontam uma carga dela (`id_carga_avaliada`:
 o APM autor, que dá ciência); e, só quando a pessoa tem carga numa passagem aberta com `expor_ocorrencias` ("incluir
 correções a serem feitas"), as ainda não tratadas da folha, como lista de correção. Quem faz a revisão seguinte sem
-isso não recebe as das passagens anteriores: a revisão é às cegas. `lote_etapa_hist` não é puxada: no workspace ela
-só guarda o que a execução grava para o push.
+isso não recebe as das passagens anteriores: a revisão é às cegas. Na correção de inspeção (D5), quem tem carga na
+passagem de correção aberta recebe todas as ocorrências da folha, de todas as revisões, tratadas ou não.
+`lote_etapa_hist` não é puxada: no workspace ela só guarda o que a execução grava para o push.
 
 Como se acha o que mudou: comparação de versões, não marca d'água. Cada linha do espelho guarda em `versao_base` o
 `atualizado_em` que veio do servidor. Um `atualizado_em > :ultimo_pull` não serviria sozinho: (1) o gatilho
@@ -48,6 +49,7 @@ import hashlib
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from ..core.dados.local import carga_da_folha
 from . import esquema
 from .workspace import Workspace, _valores, iso_exato
 
@@ -92,7 +94,13 @@ def escopos(cargas: Callable[[str], str] = escopo_cargas_pessoa) -> Dict[str, st
             # Lista de correção (D-66): só com "incluir correções a serem feitas" na passagem aberta da pessoa.
             f"OR (NOT t.tratado AND t.id_lote IN (SELECT le.id_lote FROM {S}.lote_etapa le WHERE le.uf = %(uf)s "
             "AND le.expor_ocorrencias AND le.situacao IN ('pendente', 'em_andamento') AND EXISTS (SELECT 1 FROM "
-            f"{S}.carga_trabalho c WHERE c.id_lote_etapa = le.id AND c.responsavel = %(usuario)s))))"
+            f"{S}.carga_trabalho c WHERE c.id_lote_etapa = le.id AND c.responsavel = %(usuario)s))) "
+            # Correção de inspeção (D5): quem está na passagem de correção aberta recebe todas as da folha, de todas
+            # as revisões, tratadas ou não (a varredura final, sem revisão às cegas).
+            f"OR t.id_lote IN (SELECT le.id_lote FROM {S}.lote_etapa le JOIN {S}.fluxo_etapa fe "
+            "ON fe.id = le.id_fluxo_etapa WHERE le.uf = %(uf)s AND fe.fase = 'correcao_inspecao' "
+            "AND le.situacao IN ('pendente', 'em_andamento') AND EXISTS (SELECT 1 FROM "
+            f"{S}.carga_trabalho c WHERE c.id_lote_etapa = le.id AND c.responsavel = %(usuario)s)))"
         ),
     }
 
@@ -181,6 +189,16 @@ def _pendentes(ex, tabela: str) -> set:
             for x in ex.todos(
                 "SELECT c.uuid FROM carga_trabalho c JOIN cq_amostra a ON a.id_carga_trabalho = c.id "
                 "WHERE a.uuid IN (SELECT uuid FROM outbox WHERE tabela = 'cq_amostra')"
+            )
+        }
+        # Do mesmo jeito, a carga da folha na correção de inspeção (D5), que conclui no workspace com a última
+        # ocorrência tratada (`local.cq.tratar`): espera as ocorrências da folha irem.
+        r |= {
+            x["uuid"]
+            for x in ex.todos(
+                "SELECT c.uuid FROM carga_trabalho c JOIN lote_etapa le ON le.id = c.id_lote_etapa "
+                f"WHERE {carga_da_folha()} AND le.id_lote IN (SELECT i.id_lote FROM cq_inspecao i "
+                "WHERE i.uuid IN (SELECT uuid FROM outbox WHERE tabela = 'cq_inspecao'))"
             )
         }
     return r

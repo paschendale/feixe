@@ -87,14 +87,14 @@ def test_subgrupos_da_execucao_com_elementos_e_correcoes(ws, cq):  # noqa: F811
 
 def test_estado_do_cq_para_a_barra(ws, cq):  # noqa: F811
     with ws.leitura() as ex:
-        assert lg.estado_cq(ex) == {"amostras": 2, "pendentes": 2, "ciencia": 1}
+        assert lg.estado_cq(ex) == {"amostras": 2, "pendentes": 2, "ciencia": 1, "correcao": 0, "correcao_pendentes": 0}
         assert sorted(lg.cargas_cq_pendentes(ex)) == [4001, 4002, 4009]
         assert lg.e_cq(ex, 12) and not lg.e_cq(ex, 11) and not lg.e_cq(ex, None)
     with ws.transacao() as ex:
         lq.avaliar(ex, 9001, 1)
         lq.ciente(ex, cq["autor"])
     with ws.leitura() as ex:
-        assert lg.estado_cq(ex) == {"amostras": 2, "pendentes": 1, "ciencia": 0}
+        assert lg.estado_cq(ex) == {"amostras": 2, "pendentes": 1, "ciencia": 0, "correcao": 0, "correcao_pendentes": 0}
 
 
 def test_migracao_5_para_6_cria_as_views_do_cq(tmp_path):

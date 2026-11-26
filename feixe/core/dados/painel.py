@@ -241,12 +241,16 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
         (uf,),
     )
     # E as que terminaram as cargas (D-109): etapa em andamento com todas as cargas concluídas. Para o supervisor é a
-    # mesma decisão; abrir a próxima conclui a etapa (`fluxos.avancar`).
+    # mesma decisão; abrir a próxima conclui a etapa (`fluxos.avancar`). Na correção de inspeção (D5), os dois
+    # critérios juntos: todas as ocorrências da folha tratadas (de todas as revisões) e todas as cargas concluídas (a
+    # carga da folha conclui sozinha com a última tratada; carga pela grade, quem a tem conclui); sem carga nenhuma
+    # (nada a tratar ao abrir), basta não ter ocorrência por tratar.
     linhas += ex.todos(
         "SELECT l.id AS id_lote, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, "
         "l.id_tema, t.nome AS tema, fe.id AS id_etapa, fe.nome AS etapa, le.situacao, le.id AS id_lote_etapa, "
         "fe.fase, le.resultado, "
-        "(SELECT max(c.concluido_em) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id) AS desde, "
+        "coalesce((SELECT max(c.concluido_em) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id), "
+        "(SELECT max(i.tratado_em) FROM mapcartacomp.cq_inspecao i WHERE i.id_lote = l.id), le.iniciada_em) AS desde, "
         "l.id_fluxo, fl.nome AS fluxo, n.id AS id_proxima, n.nome AS proxima "
         "FROM mapcartacomp.lote l "
         "JOIN mapcartacomp.lote_etapa le ON le.id_lote = l.id AND le.situacao = 'em_andamento' "
@@ -256,9 +260,12 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
         "LEFT JOIN LATERAL (SELECT x.id, x.nome FROM mapcartacomp.fluxo_etapa x WHERE x.id_fluxo = l.id_fluxo "
         "AND x.ordem > fe.ordem ORDER BY x.ordem LIMIT 1) n ON true "
         "WHERE l.uf = %s AND fe.fase <> 'envio_gcq' "
-        "AND EXISTS (SELECT 1 FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id) "
+        "AND (fe.fase = 'correcao_inspecao' OR EXISTS (SELECT 1 FROM mapcartacomp.carga_trabalho c "
+        "WHERE c.id_lote_etapa = le.id)) "
         "AND NOT EXISTS (SELECT 1 FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id "
-        "AND NOT c.concluido) ORDER BY t.nome, fe.ordem, folha_revisao",
+        "AND NOT c.concluido) "
+        "AND (fe.fase <> 'correcao_inspecao' OR NOT EXISTS (SELECT 1 FROM mapcartacomp.cq_inspecao i "
+        "WHERE i.id_lote = l.id AND NOT i.tratado)) ORDER BY t.nome, fe.ordem, folha_revisao",
         (uf,),
     )
     # CQ (D4): a folha com o CQ avaliado espera a decisão sobre o resultado (Aprovar ou Nova revisão), e as folhas com
@@ -267,6 +274,15 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
         if r["fase"] == "cq" and r["resultado"]:
             r["fase"] = None
     res = dcq.resultados(ex, [r["id_lote_etapa"] for r in linhas if r["fase"] == "cq"])
+    # Correção (D5): quantas ocorrências a folha teve e foram tratadas, para a frase do grupo.
+    tratadas = {
+        o["id_lote"]: o["n"]
+        for o in ex.todos(
+            "SELECT id_lote, count(*) AS n FROM mapcartacomp.cq_inspecao WHERE id_lote = ANY(%s) AND tratado "
+            "GROUP BY id_lote",
+            ([r["id_lote"] for r in linhas if r["fase"] == "correcao_inspecao"],),
+        )
+    } if any(r["fase"] == "correcao_inspecao" for r in linhas) else {}  # fmt: skip
     grupos: Dict[tuple, Dict] = {}
     for r in linhas:
         cq = res.get(r["id_lote_etapa"]) if r["fase"] == "cq" else None
@@ -284,6 +300,7 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
                 "situacao": r["situacao"],
                 "desde": r["desde"],
                 "cq": cq,
+                "ocorrencias_tratadas": tratadas.get(r["id_lote"], 0) if r["fase"] == "correcao_inspecao" else None,
             }
         )
         if r["desde"] is not None:

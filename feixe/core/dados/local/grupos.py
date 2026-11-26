@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from ..grupos import _agrupar
-from . import SQL_ABERTAS
+from . import SQL_ABERTAS, carga_da_folha
 
 EU = "(SELECT valor FROM meta WHERE chave = 'usuario')"  # a conta do workspace, sem citar nada no filtro
 _ABERTA = f"(SELECT id FROM lote_etapa WHERE situacao IN {SQL_ABERTAS})"
@@ -55,8 +55,19 @@ def execucao(ex) -> List[Dict]:
             (ex.usuario,),
         )
     }
+    # Correção de inspeção (D5): atividades em que tenho, além da carga da folha, cargas pela grade a concluir.
+    com_cargas = {
+        r["id_atividade"]
+        for r in ex.todos(
+            "SELECT DISTINCT c.id_atividade FROM carga_trabalho c JOIN lote_etapa le ON le.id = c.id_lote_etapa "
+            f"WHERE c.responsavel = ? AND le.situacao IN {SQL_ABERTAS} AND NOT {carga_da_folha()}",
+            (ex.usuario,),
+        )
+    }
     for g in grupos:
-        if g["fase"] == "cq":
+        if g["fase"] == "correcao_inspecao":
+            g["cargas"] = any(i in com_cargas for i in g["atividades"])
+        elif g["fase"] == "cq":
             g["elementos"] = sorted(
                 ({"id_atividade": i, "elemento": nomes.get(i) or f"atividade {i}"} for i in g["atividades"]),
                 key=lambda e: (e["elemento"].lower(), e["id_atividade"]),
@@ -73,6 +84,9 @@ def plano_execucao(grupos: List[Dict]) -> List[Dict]:
       subgrupo intermediário e sem filtro de atividade (`rotulo` e `atividades` None), como no D-102.
     - CQ (D3c): sempre num subgrupo "CQ · tema", com Ocorrências e Amostras por elemento (uma atividade por medida) e
       Minhas folhas; só o primeiro elemento vem ligado.
+    - Correção de inspeção (D5): sempre num subgrupo "Correção · tema", com Ocorrências pendentes (ligada),
+      Ocorrências tratadas (desligada), Minhas cargas só se há cargas pela grade além da carga da folha (`cargas`), e
+      Minhas folhas.
     - Ninguém com carga aberta: Minhas cargas e Minhas folhas vazias, para a barra ter onde mostrar a próxima.
     """
     if not grupos:
@@ -80,7 +94,10 @@ def plano_execucao(grupos: List[Dict]) -> List[Dict]:
     varios = len(grupos) > 1
     plano = []
     for g in grupos:
-        if g.get("fase") == "cq":
+        if g.get("fase") == "correcao_inspecao":
+            plano.append({"tipo": "correcao", "rotulo": f"Correção · {g['tema']}", "atividades": g["atividades"],
+                          "cargas": bool(g.get("cargas"))})  # fmt: skip
+        elif g.get("fase") == "cq":
             elementos = [dict(e, visivel=i == 0) for i, e in enumerate(g.get("elementos") or [])]
             plano.append({"tipo": "cq", "rotulo": g["rotulo"], "atividades": g["atividades"], "elementos": elementos})
         else:
@@ -127,12 +144,24 @@ def filtro_correcoes(atividades: Optional[List[int]] = None) -> str:
     )
 
 
+def filtro_correcao(tratado: bool, atividades: Optional[List[int]] = None) -> str:
+    """Correção de inspeção (D5): as ocorrências (todas as revisões) das folhas em que tenho carga numa passagem de
+    correção aberta (e da atividade do subgrupo, se houver): as pendentes (`tratado` False) ou as já tratadas."""
+    extra = f" AND c.id_atividade IN ({_em(atividades)})" if atividades else ""
+    return (
+        f"{'' if tratado else 'NOT '}tratado AND id_lote IN (SELECT le.id_lote FROM lote_etapa le JOIN fluxo_etapa fe "
+        f"ON fe.id = le.id_fluxo_etapa WHERE fe.fase = 'correcao_inspecao' AND le.situacao IN {SQL_ABERTAS} "
+        f"AND EXISTS (SELECT 1 FROM carga_trabalho c WHERE c.id_lote_etapa = le.id AND c.responsavel = {EU}{extra}))"
+    )
+
+
 # --- estado do CQ para a barra ----------------------------------------------------------------------------------------
 
 
 def estado_cq(ex) -> Dict[str, int]:
-    """Quantas amostras tenho em passagens abertas (e quantas pendentes) e quantas ocorrências esperam a minha ciência:
-    a barra mostra as ações do avaliador e o Ciente só para quem tem o que fazer."""
+    """Quantas amostras tenho em passagens abertas (e quantas pendentes), quantas ocorrências esperam a minha ciência e
+    quantas estão nas minhas folhas na correção de inspeção (e quantas por tratar): a barra mostra as ações do
+    avaliador, o Ciente e as da correção só para quem tem o que fazer."""
     a = ex.um(
         "SELECT count(*) AS n, coalesce(sum(CASE WHEN a.status IS NULL THEN 1 ELSE 0 END), 0) AS pendentes "
         "FROM carga_trabalho c JOIN cq_amostra a ON a.id_carga_trabalho = c.id "
@@ -144,7 +173,17 @@ def estado_cq(ex) -> Dict[str, int]:
         "AND id_carga_avaliada IN (SELECT id FROM carga_trabalho WHERE responsavel = ?)",
         (ex.usuario,),
     )
-    return {"amostras": int(a["n"]), "pendentes": int(a["pendentes"]), "ciencia": int(c["n"])}
+    corr = ex.um(
+        "SELECT count(*) AS n, coalesce(sum(CASE WHEN tratado THEN 0 ELSE 1 END), 0) AS pendentes FROM cq_inspecao "
+        "WHERE id_lote IN (SELECT le.id_lote FROM lote_etapa le JOIN fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+        f"WHERE fe.fase = 'correcao_inspecao' AND le.situacao IN {SQL_ABERTAS} AND EXISTS (SELECT 1 FROM "
+        "carga_trabalho c WHERE c.id_lote_etapa = le.id AND c.responsavel = ?))",
+        (ex.usuario,),
+    )
+    return {
+        "amostras": int(a["n"]), "pendentes": int(a["pendentes"]), "ciencia": int(c["n"]),
+        "correcao": int(corr["n"]), "correcao_pendentes": int(corr["pendentes"]),
+    }  # fmt: skip
 
 
 def cargas_cq_pendentes(ex) -> List[int]:
@@ -153,6 +192,18 @@ def cargas_cq_pendentes(ex) -> List[int]:
         r["id"]
         for r in ex.todos(
             "SELECT id FROM carga_trabalho WHERE responsavel = ? AND NOT concluido AND id_cq_plano IS NOT NULL",
+            (ex.usuario,),
+        )
+    ]
+
+
+def fora_da_producao(ex) -> List[int]:
+    """As minhas cargas pendentes que "Próxima carga" deixa de fora: as de CQ (andam por "Próxima amostra") e a carga
+    da folha na correção de inspeção (anda por "Próxima ocorrência", D5)."""
+    return cargas_cq_pendentes(ex) + [
+        r["id"]
+        for r in ex.todos(
+            f"SELECT c.id FROM carga_trabalho c WHERE c.responsavel = ? AND NOT c.concluido AND {carga_da_folha()}",
             (ex.usuario,),
         )
     ]

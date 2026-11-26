@@ -33,6 +33,11 @@ function aoAbrir(e: EtapaFluxo) {
     return { texto: 'sem nível e LQA padrão: os planos de CQ se criam na gaveta de cada folha', alerta: true }
   }
   if (geram.some((a) => a.geracao === 'grade')) return null
+  // Correção de inspeção (D5): a carga é a folha inteira, e quem a recebe trata as ocorrências de todas as revisões.
+  if (e.fase === 'correcao_inspecao')
+    return geram.length
+      ? { texto: 'a folha inteira vai a quem você distribuir, que trata as ocorrências de todas as revisões', alerta: false }
+      : { texto: 'sem atividade de correção: ninguém recebe a folha para tratar as ocorrências; escolha a atividade no editor', alerta: true }
   if (geram.length) return { texto: 'cargas não saem da grade: inicie pela gaveta', alerta: true }
   return { texto: 'sem cargas: começa assim que abre, sem nada a distribuir', alerta: true }
 }
@@ -110,10 +115,10 @@ export default function Fluxos() {
               {f.projeto} · {f.tema} · {f.ativo ? 'ativo' : 'inativo'}
             </span>
           </div>
-          {f.etapas.filter((e) => aoAbrir(e)?.alerta && ['aquisicao', 'revisao', 'correcao_inspecao', 'correcao_topologica'].includes(e.fase)).length > 0 && (
+          {f.etapas.filter((e) => aoAbrir(e)?.alerta && ['aquisicao', 'revisao', 'correcao_topologica'].includes(e.fase)).length > 0 && (
             <div className="rounded-lg px-3.5 py-2.5 text-[13px]" style={{ background: COR.alertaFundo, color: '#5C3D00' }}>
               {(() => {
-                const sem = f.etapas.filter((e) => aoAbrir(e)?.alerta && ['aquisicao', 'revisao', 'correcao_inspecao', 'correcao_topologica'].includes(e.fase))
+                const sem = f.etapas.filter((e) => aoAbrir(e)?.alerta && ['aquisicao', 'revisao', 'correcao_topologica'].includes(e.fase))
                 return (
                   <>
                     {sem.map((e) => e.nome).join(', ')} {sem.length === 1 ? 'não gera' : 'não geram'} cargas pela grade: ao abrir, não há o que distribuir. Se a etapa tem trabalho a dividir entre a equipe, escolha no editor uma atividade com cargas pela grade.

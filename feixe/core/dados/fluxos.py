@@ -471,7 +471,8 @@ def avancar(ex: Executor, uf: str, ids: List[int], observacao: Optional[str], pr
         "t.nome AS tema, le.id AS id_lote_etapa, le.situacao, fe.nome AS etapa, fe.fase, "
         "(SELECT count(*) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id) AS cargas, "
         "(SELECT count(*) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id AND NOT c.concluido) "
-        "AS pendentes, n.nome AS proxima, n.repetivel, "
+        "AS pendentes, (SELECT count(*) FROM mapcartacomp.cq_inspecao i WHERE i.id_lote = l.id AND NOT i.tratado) "
+        "AS a_tratar, n.nome AS proxima, n.repetivel, "
         "(SELECT count(*) FROM mapcartacomp.lote_etapa x WHERE x.id_lote = l.id AND x.id_fluxo_etapa = n.id "
         " AND x.situacao <> 'pulada') AS nao_puladas "
         "FROM mapcartacomp.lote l JOIN mapcartacomp.tema t ON t.id = l.id_tema "
@@ -505,6 +506,8 @@ def avancar(ex: Executor, uf: str, ids: List[int], observacao: Optional[str], pr
             "id_lote": r["id_lote"], "folha_revisao": r["folha_revisao"], "tema": r["tema"], "etapa": r["etapa"],
             "concluir": r["situacao"] == "em_andamento", "cargas": r["cargas"], "pendentes": r["pendentes"],
             "proxima": r["proxima"], "erro": erro,
+            # Correção de inspeção (D5): ocorrências da folha ainda não tratadas; o diálogo avisa, quem decide é você.
+            "a_tratar": r["a_tratar"] if r["fase"] == "correcao_inspecao" else 0,
         })  # fmt: skip
     if previa:
         return {"itens": itens}

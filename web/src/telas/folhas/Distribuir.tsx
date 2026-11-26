@@ -153,7 +153,7 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
                       <td className="py-2 pr-2 pl-3">
                         <b className="tab">{f.folha_revisao}</b>
                         <span className="block text-xs text-muted-foreground">
-                          {f.etapa} · {plural(f.a_atribuir + f.com.reduce((n, p) => n + p.pendentes, 0), ehCq(f) ? 'amostra' : 'carga', ehCq(f) ? 'amostras' : 'cargas')}
+                          {f.etapa} · {f.fase === 'correcao_inspecao' && f.cargas === 1 ? 'a folha inteira: tratar as ocorrências' : plural(f.a_atribuir + f.com.reduce((n, p) => n + p.pendentes, 0), ehCq(f) ? 'amostra' : 'carga', ehCq(f) ? 'amostras' : 'cargas')}
                         </span>
                       </td>
                       <td className="px-2 py-2">

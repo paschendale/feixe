@@ -33,17 +33,20 @@ def _nomes(ctx, contas: Iterable[str]) -> Dict[str, str]:
 
 def execucao(ctx, ex, tz) -> Dict:
     """Início e Execução de quem executa, do workspace (C3): conclusões por dia, minhas amostras de CQ por folha e
-    elemento (D3d) e as ocorrências das minhas cargas para dar ciência (D-66)."""
+    elemento (D3d), as ocorrências das minhas cargas para dar ciência (D-66) e as minhas folhas na correção de
+    inspeção, com as ocorrências a tratar (D5)."""
     r = lc.execucao(ex, tz)
     r["cq"] = lq.resumo(ex)
     r["ciencia"] = lq.para_ciencia(ex)
+    r["correcao"] = lq.correcao(ex)
     return r
 
 
 def _com_nomes(ctx, r: Dict) -> Dict:
     ciencia = r["ciencia"]
-    nomes = _nomes(ctx, [o["responsavel"] for o in ciencia["pendentes"] + ciencia["cientes"]])
-    for o in ciencia["pendentes"] + ciencia["cientes"]:
+    todas = ciencia["pendentes"] + ciencia["cientes"] + [o for f in r.get("correcao") or [] for o in f["ocorrencias"]]
+    nomes = _nomes(ctx, [o["responsavel"] for o in todas])
+    for o in todas:
         o["avaliador"] = nomes.get(o["responsavel"], o["responsavel"])
     return r
 
@@ -105,7 +108,7 @@ def registrar(r, ctx) -> None:
         # Execução: do workspace, como Minhas cargas (C3).
         if ctx.preparando():
             return 200, {"por_dia": [], "cq": [], "ciencia": {"pendentes": [], "cientes": [], "dias": 30},
-                         "preparando": True}  # fmt: skip
+                         "correcao": [], "preparando": True}  # fmt: skip
         with ctx.leitura() as ex:
             r = execucao(ctx, ex, tz)
         # Os nomes fora da leitura do workspace: a consulta à CCAR (quando falta um nome) não segura o GeoPackage.

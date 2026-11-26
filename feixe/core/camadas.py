@@ -24,6 +24,10 @@ Execução (todos), do workspace:
   passa pelo buffer do QGIS: Amostras é só leitura, e Conforme e Não conforme são ações da camada e da barra.
 - Ocorrências para ciência (o APM): as que apontam uma carga minha, ainda sem ciência; só quando houver alguma.
   Correções a fazer: na revisão planejada com "incluir correções a serem feitas", as não tratadas da folha.
+- Correção de inspeção (D5), num subgrupo "Correção · tema": Ocorrências pendentes (as não tratadas da folha, de
+  todas as revisões; a ocorrência atual com o pino maior em magenta), Ocorrências tratadas (desligada) e Minhas
+  folhas; Minhas cargas só se a etapa tem cargas pela grade além da carga da folha, que nunca aparece (é a folha
+  inteira). Só leitura: Tratada e Desfazer são ações da camada e da barra.
 
 Supervisão (só supervisor, e só com a CCAR respondendo), das passagens abertas dos lotes da UF:
 - Cargas por responsável: uma cor bem distinta por pessoa, estável entre uma montagem e outra.
@@ -64,7 +68,7 @@ from qgis.PyQt.QtGui import QColor
 
 from .ambiente import Ambiente
 from .dados.cargas import SQL_PASSAGENS_ATUAIS
-from .dados.local import SQL_ABERTAS
+from .dados.local import SQL_ABERTAS, carga_da_folha
 from .dados.local import grupos as lgrupos
 
 GRUPO = "Feixe"
@@ -160,8 +164,9 @@ def _filtro_minhas(atividades: Optional[List[int]] = None) -> str:
     """Minhas cargas de passagens abertas (e das atividades do subgrupo), sobre o workspace. As cargas de CQ (as
     amostras) ficam nas camadas do CQ."""
     extra = f" AND id_atividade IN ({_em(atividades)})" if atividades else ""
+    # A carga da folha na correção de inspeção (D5) fica fora: é a folha inteira, e a correção anda pelas ocorrências.
     return (
-        f"responsavel = {_EU} AND id_cq_plano IS NULL "
+        f"responsavel = {_EU} AND id_cq_plano IS NULL AND NOT {carga_da_folha('')} "
         f"AND id_lote_etapa IN (SELECT id FROM lote_etapa WHERE situacao IN {SQL_ABERTAS}){extra}"
     )
 
@@ -305,8 +310,14 @@ def carga_atual() -> Optional[int]:
 VAR_AMOSTRA = "feixe_amostra_atual"  # a amostra atual (a carga de CQ), separada da carga atual da produção
 _AMOSTRA_ATUAL = f'coalesce("id" = to_int(@{VAR_AMOSTRA}), false)'
 PINO = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icones", "pino.svg")
-COR_OCORRENCIA = {"ocorrencias": "#FF3B30", "ocorrencias_ciencia": "#FF9F0A", "correcoes": "#FFD60A"}
+COR_OCORRENCIA = {
+    "ocorrencias": "#FF3B30", "ocorrencias_ciencia": "#FF9F0A", "correcoes": "#FFD60A",
+    "correcao_pendentes": "#FFD60A", "correcao_tratadas": "#34C759",
+}  # fmt: skip
 NOME_CIENCIA, NOME_CORRECOES = "Ocorrências para ciência", "Correções a fazer"
+NOME_PENDENTES, NOME_TRATADAS = "Ocorrências pendentes", "Ocorrências tratadas"  # correção de inspeção (D5)
+VAR_OCORRENCIA = "feixe_ocorrencia_atual"  # o uuid da ocorrência atual na correção
+_OCORRENCIA_ATUAL = f'coalesce("uuid" = @{VAR_OCORRENCIA}, false)'
 
 
 def estilo_amostras(camada: QgsVectorLayer) -> None:
@@ -341,14 +352,29 @@ def estilo_ocorrencias(camada: QgsVectorLayer, papel_: str) -> None:
     por quem olha: vermelho para o avaliador, laranja para ciência, amarelo para a lista de correção."""
     from qgis.core import QgsMarkerSymbol, QgsMarkerSymbolLayer, QgsSvgMarkerSymbolLayer
 
-    pino = QgsSvgMarkerSymbolLayer(PINO, 7.0, 0)
-    pino.setFillColor(QColor(COR_OCORRENCIA.get(papel_, "#FF3B30")))
-    pino.setStrokeColor(QColor("#FFFFFF"))
-    pino.setStrokeWidth(0.4)
-    pino.setVerticalAnchorPoint(QgsMarkerSymbolLayer.Bottom)
-    simbolo = QgsMarkerSymbol()
-    simbolo.changeSymbolLayer(0, pino)
-    camada.setRenderer(QgsSingleSymbolRenderer(simbolo))
+    def simbolo_pino(cor: str, tamanho: float = 7.0, contorno: str = "#FFFFFF", largura: float = 0.4):
+        pino = QgsSvgMarkerSymbolLayer(PINO, tamanho, 0)
+        pino.setFillColor(QColor(cor))
+        pino.setStrokeColor(QColor(contorno))
+        pino.setStrokeWidth(largura)
+        pino.setVerticalAnchorPoint(QgsMarkerSymbolLayer.Bottom)
+        simbolo = QgsMarkerSymbol()
+        simbolo.changeSymbolLayer(0, pino)
+        return simbolo
+
+    cor = COR_OCORRENCIA.get(papel_, "#FF3B30")
+    if papel_ == "correcao_pendentes":
+        # A ocorrência atual (Próxima ocorrência) com o pino maior em magenta, como a carga e a amostra atuais.
+        raiz = QgsRuleBasedRenderer.Rule(None)
+        for rotulo, expressao, simbolo in (
+            ("Ocorrência atual", _OCORRENCIA_ATUAL, simbolo_pino("#FF2BD6", 10.0, "#FFFFFF", 0.6)),
+            ("Por tratar", f"NOT {_OCORRENCIA_ATUAL}", simbolo_pino(cor)),
+        ):
+            regra = QgsRuleBasedRenderer.Rule(simbolo, 0, 0, expressao, rotulo)
+            raiz.appendChild(regra)
+        camada.setRenderer(QgsRuleBasedRenderer(raiz))
+    else:
+        camada.setRenderer(QgsSingleSymbolRenderer(simbolo_pino(cor)))
     rot = QgsPalLayerSettings()
     rot.isExpression = True
     rot.fieldName = (
@@ -386,6 +412,27 @@ def amostra_atual() -> Optional[int]:
         return int(v)
     except (TypeError, ValueError):
         return None
+
+
+def definir_ocorrencia_atual(uuid: Optional[str]) -> None:
+    """Marca a ocorrência atual da correção (variável do projeto; o estilo de Ocorrências pendentes lê dela) e
+    redesenha, sem a seleção."""
+    QgsExpressionContextUtils.setProjectVariable(QgsProject.instance(), VAR_OCORRENCIA, uuid or "")
+    for camada in camadas_do_papel("correcao_pendentes", "correcao_tratadas"):
+        camada.removeSelection()
+        camada.triggerRepaint()
+
+
+def ocorrencia_atual() -> Optional[str]:
+    v = QgsExpressionContextUtils.projectScope(QgsProject.instance()).variable(VAR_OCORRENCIA)
+    return str(v) if v else None
+
+
+def camada_com_ocorrencia(uuid: str, *papeis: str) -> Optional[QgsVectorLayer]:
+    for camada in camadas_do_papel(*(papeis or ("correcao_pendentes", "correcao_tratadas"))):
+        if next(camada.getFeatures(f"\"uuid\" = '{uuid}'"), None) is not None:
+            return camada
+    return None
 
 
 EXECUCAO, SUPERVISAO = "Execução", "Supervisão"
@@ -551,6 +598,27 @@ def montar(
     for spec in lgrupos.plano_execucao(grupos_execucao or []):
         sub = execucao if spec["rotulo"] is None else execucao.addGroup(spec["rotulo"])
         atividades = spec["atividades"]
+        if spec["tipo"] == "correcao":
+            # Correção de inspeção (D5): as ocorrências da folha, de todas as revisões; as tratadas desligadas.
+            sub.setCustomProperty(_PAPEL, "correcao")
+            pend = _camada_ocorrencias(gpkg, infos, NOME_PENDENTES, "correcao_pendentes",
+                                       lgrupos.filtro_correcao(False, atividades))  # fmt: skip
+            por(sub, pend, "correcao_pendentes")
+            trat = _camada_ocorrencias(gpkg, infos, NOME_TRATADAS, "correcao_tratadas",
+                                       lgrupos.filtro_correcao(True, atividades))  # fmt: skip
+            por(sub, trat, "correcao_tratadas", False)
+            if spec["cargas"]:
+                minhas = _camada_gpkg(gpkg, "carga_trabalho", "Minhas cargas", _filtro_minhas(atividades))
+                _juntar_info(minhas, infos.de(PAPEL_INFO))
+                estilo_minhas(minhas)
+                formularios.minhas_cargas(minhas)
+                _esconder_colunas(minhas)
+                por(sub, minhas, "minhas_cargas")
+            folhas = _camada_gpkg(gpkg, VW_MINHAS_FOLHAS, "Minhas folhas", _filtro_minhas_folhas(atividades))
+            _estilo_minhas_folhas(folhas)
+            formularios.folhas_cq(folhas)
+            por(sub, folhas, "minhas_folhas")
+            continue
         if spec["tipo"] == "cq":
             sub.setCustomProperty(_PAPEL, "cq")
             for e in spec["elementos"]:

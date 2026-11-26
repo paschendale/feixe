@@ -8,6 +8,7 @@ from typing import Dict, Optional
 # Ações da barra (e do menu Complementos > Feixe) que só aparecem para quem tem o que fazer com elas.
 ACOES_AVALIADOR = ("proxima_amostra", "conforme", "nao_conforme", "ocorrencia")
 ACAO_CIENTE = "ciente"
+ACOES_CORRECAO = ("proxima_ocorrencia", "tratada")  # correção de inspeção (D5)
 
 
 def acoes_visiveis(estado: Optional[Dict]) -> Dict[str, bool]:
@@ -17,14 +18,21 @@ def acoes_visiveis(estado: Optional[Dict]) -> Dict[str, bool]:
     avaliador = (estado.get("amostras") or 0) > 0
     vis = dict.fromkeys(ACOES_AVALIADOR, avaliador)
     vis[ACAO_CIENTE] = (estado.get("ciencia") or 0) > 0
+    # Correção de inspeção: para quem está com uma folha na correção aberta (mesmo com tudo tratado: desmarcar vale
+    # enquanto a etapa está aberta).
+    for chave in ACOES_CORRECAO:
+        vis[chave] = (estado.get("correcao") or 0) > 0
     return vis
 
 
 def texto_status(progresso: Optional[Dict], cq: bool = False) -> str:
-    """Barra de status do QGIS: "Feixe · 2534-1 · 35/93" nas cargas, "Feixe · CQ 2534-1 · 7/20 amostras" no CQ."""
+    """Barra de status do QGIS: "Feixe · 2534-1 · 35/93" nas cargas, "Feixe · CQ 2534-1 · 7/20 amostras" no CQ e
+    "Feixe · Correção 2534-3 · 12/40 tratadas" na correção de inspeção (o andamento traz `tratadas`)."""
     if not progresso:
         return "Feixe"
     p = progresso
+    if "tratadas" in p:
+        return f"Feixe · Correção {p['folha_revisao']} · {p['tratadas']}/{p['total']} tratadas"
     if cq:
         return f"Feixe · CQ {p['folha_revisao']} · {p['concluidas']}/{p['total']} amostras"
     return f"Feixe · {p['folha_revisao']} · {p['concluidas']}/{p['total']}"
@@ -80,3 +88,39 @@ FORA_DAS_AMOSTRAS = (
     "O ponto ficou fora das suas amostras: a ocorrência vai dentro de uma amostra sua de uma passagem de CQ aberta. "
     "Clique dentro da amostra (contorno em Amostras)."
 )
+
+
+# --- correção de inspeção (D5) ----------------------------------------------------------------------------------------
+
+FIM_DA_CORRECAO = (
+    "Todas as ocorrências da folha estão tratadas: a sua parte na correção terminou. Agora é com o supervisor: a folha "
+    "aparece para ele em Esperando você, e ele decide o próximo passo."
+)
+
+
+def mensagem_tratada(r: Dict) -> str:
+    """Depois de marcar (ou desmarcar): o andamento da folha e a próxima, ou que a folha terminou e quem decide."""
+    o = r.get("ocorrencia") or {}
+    p = r.get("progresso") or {}
+    feito = "Tratada" if o.get("tratado") else "Tratamento desfeito"
+    partes = [feito, o.get("elemento") or "ocorrência"]
+    if p:
+        partes.append(f"{p['folha_revisao']} {p['tratadas']}/{p['total']}")
+    texto = " · ".join(partes) + "."
+    f = r.get("fila")
+    if f:
+        texto += f" A próxima folha da sua fila é a {f['folha_revisao']} ({f['atribuidas']} cargas), já com você."
+    if p and not p.get("pendentes"):
+        return f"{texto} {FIM_DA_CORRECAO}"
+    prox = r.get("proxima")
+    if prox:
+        return f"{texto} Próxima: {prox.get('elemento') or 'ocorrência'} na {prox.get('folha_revisao')}."
+    return texto
+
+
+def mensagem_ocorrencia_atual(o: Dict, p: Optional[Dict]) -> str:
+    """Ao chegar numa ocorrência (Próxima ocorrência): o que corrigir ali, para a pessoa ler sem abrir o formulário."""
+    anotacao = o.get("anotacao") or "(sem anotação)"
+    onde = f" · {p['tratadas']}/{p['total']} tratadas" if p else ""
+    elemento = o.get("elemento") or "Ocorrência"
+    return f"{elemento} ({o.get('folha_revisao')}): {anotacao}{onde}. Corrija e marque Tratada."

@@ -322,6 +322,28 @@ def ocorrencias(camada: QgsVectorLayer, papel: str) -> None:
             ("Detalhes", ["registrada_txt", "ciencia_txt"], None, True),
         ]
         editaveis: Tuple[str, ...] = ("anotacao",)
+    elif papel in ("correcao_pendentes", "correcao_tratadas"):
+        # Correção de inspeção (D5): o que corrigir, de que revisão veio, quem avaliou, se o APM deu ciência e, na
+        # tratada, quando. Marcar e desmarcar são ações (camada e barra), nunca o buffer do QGIS.
+        camada.setFieldAlias(camada.fields().indexOf("folha_revisao"), "Revisão avaliada")
+        _campo_expressao(
+            camada, "tratada_txt", "Tratada",
+            "CASE WHEN \"tratado\" THEN 'tratada em ' || format_date(\"tratado_em\", 'dd/MM/yyyy HH:mm') || "
+            "coalesce(' por ' || \"tratado_por\", '') ELSE 'por tratar' END",
+        )  # fmt: skip
+        grupos = [
+            ("Ocorrência", ["anotacao", "elemento"], None, False),
+            ("Revisão", ["folha_revisao", "amostra_txt"], None, False),
+            ("Avaliação", ["responsavel", "registrada_txt", "ciencia_txt", "tratada_txt"], None, False),
+        ]
+        editaveis = ()
+        if papel == "correcao_pendentes":
+            acoes = (
+                _acao(camada, "Tratada", "tratar('[% \"uuid\" %]', True)"),
+                _acao(camada, "Trabalhar nesta ocorrência", "trabalhar_na_ocorrencia('[% \"uuid\" %]')"),
+            )
+        else:
+            acoes = (_acao(camada, "Desfazer tratada", "tratar('[% \"uuid\" %]', False)"),)
     else:
         grupos = [
             ("Ocorrência", ["anotacao", "elemento"], None, False),

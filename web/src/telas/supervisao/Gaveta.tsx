@@ -48,7 +48,10 @@ function Trilho({ fluxo, lote, estado }: { fluxo: FluxoCompleto; lote: LoteCompl
         const atual = ps.some((p) => p.id === lote.id_lote_etapa_atual)
         const proxima = estado?.sugestao?.id === e.id
         let lado = ''
-        if (aberta) lado = aberta.situacao === 'pendente' ? 'agora · a iniciar' : `agora${aberta.cargas_total ? ` · ${pc(aberta.cargas_concluidas, aberta.cargas_total)}%` : ''}`
+        if (aberta && aberta.fase === 'correcao_inspecao' && aberta.situacao !== 'pendente')
+          // Correção de inspeção (D5): o andamento é das ocorrências tratadas, não das cargas.
+          lado = `agora${lote.ocorrencias.total ? ` · ${pc(lote.ocorrencias.tratadas, lote.ocorrencias.total)}% tratadas` : ''}`
+        else if (aberta) lado = aberta.situacao === 'pendente' ? 'agora · a iniciar' : `agora${aberta.cargas_total ? ` · ${pc(aberta.cargas_concluidas, aberta.cargas_total)}%` : ''}`
         else if (proxima) lado = 'próxima sugerida'
         else if (ultima?.situacao === 'concluida') lado = `concluída ${diaMes(ultima.concluida_em)}${ps.length > 1 ? ` · ${ps.length}×` : ''}`
         else if (ultima?.situacao === 'pulada') lado = 'pulada'
@@ -98,6 +101,9 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
   const eAberta = aberta ? etapaDe(aberta) : undefined
   const seguinte = eAberta ? fluxo?.etapas.find((e) => (e.ordem ?? 0) > (eAberta.ordem ?? 0)) : undefined
   const faltam = aberta ? aberta.cargas_total - aberta.cargas_concluidas : 0
+  // Correção de inspeção (D5): a folha anda pelas ocorrências da folha (todas as revisões), não pelas cargas.
+  const correcao = aberta?.fase === 'correcao_inspecao'
+  const aTratar = lote.ocorrencias.total - lote.ocorrencias.tratadas
 
   async function rodar(p: Pedido) {
     setOcupado(true)
@@ -159,6 +165,33 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
       ) : (
         <>
           amostras avaliadas, mas o plano não tem Ac ({resultado.frase}): confira os não conformes e decida entre aprovar e nova revisão.
+        </>
+      )
+  else if (correcao && aberta?.situacao === 'pendente' && aberta.cargas_total)
+    sugestao = (
+      <>
+        distribuir a folha: quem receber trata as <b>{plural(aTratar, 'ocorrência', 'ocorrências')}</b> da folha (de todas as revisões), marcando cada uma como tratada. A etapa começa quando alguém receber.
+      </>
+    )
+  else if (correcao && aberta && !aberta.cargas_total && aTratar > 0)
+    sugestao = (
+      <>
+        a etapa não tem atividade de correção de inspeção no fluxo, então ninguém recebe a folha para tratar as {plural(aTratar, 'ocorrência', 'ocorrências')}. Acrescente a atividade à etapa em Fluxos e use <b>Gerar as cargas</b>; ou conclua a etapa se a correção foi feita por fora.
+      </>
+    )
+  else if (correcao && aberta?.situacao === 'em_andamento' && seguinte)
+    sugestao =
+      aTratar > 0 ? (
+        <>
+          quando {aTratar === 1 ? 'a' : 'as'} <b>{plural(aTratar, 'ocorrência restante', 'ocorrências restantes')}</b> {aTratar === 1 ? 'for tratada' : 'forem tratadas'}{faltam > 0 && aberta.cargas_total > 1 ? ' e as cargas concluídas' : ''}, a folha vai para Esperando você: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
+        </>
+      ) : faltam > 0 ? (
+        <>
+          as ocorrências estão tratadas; {plural(faltam, 'carga falta', 'cargas faltam')} concluir. Depois, concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
+        </>
+      ) : (
+        <>
+          todas as ocorrências da folha estão tratadas: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
         </>
       )
   else if (aberta?.situacao === 'em_andamento' && seguinte && aberta.fase !== 'envio_gcq')
@@ -329,9 +362,9 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                 Ver no QGIS
               </Button>
               {supervisor && aberta && lote.pessoas.some((p) => !p.conta && p.total > p.concluidas) && (
-                <Button onClick={() => distribuir([lote.id])}>{atual?.fase === 'cq' ? 'Distribuir as amostras' : 'Distribuir'}</Button>
+                <Button onClick={() => distribuir([lote.id])}>{atual?.fase === 'cq' ? 'Distribuir as amostras' : atual?.fase === 'correcao_inspecao' ? 'Distribuir a folha' : 'Distribuir'}</Button>
               )}
-              {supervisor && aberta && atual?.fase !== 'cq' && (atual?.cargas_total ?? 0) > atual!.cargas_concluidas && (
+              {supervisor && aberta && atual?.fase !== 'cq' && atual?.fase !== 'correcao_inspecao' && (atual?.cargas_total ?? 0) > atual!.cargas_concluidas && (
                 <Button
                   variant="outline"
                   disabled={!conectado}
@@ -374,7 +407,30 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                     {atual.situacao === 'pulada' && 'pulada, esperando a próxima etapa'}
                   </span>
                 </div>
-                {atual.cargas_total > 0 ? (
+                {atual.fase === 'correcao_inspecao' && (
+                  // Correção de inspeção (D5): o andamento é das ocorrências da folha, de todas as revisões.
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex justify-between text-[13px]">
+                      <span>
+                        <b>{num(lote.ocorrencias.tratadas)}</b> de {plural(lote.ocorrencias.total, 'ocorrência tratada', 'ocorrências tratadas')} · todas as revisões
+                      </span>
+                      <span className="tab">{lote.ocorrencias.total ? `${pc(lote.ocorrencias.tratadas, lote.ocorrencias.total)}%` : ''}</span>
+                    </div>
+                    <Barra total={Math.max(lote.ocorrencias.total, 1)} partes={[{ valor: lote.ocorrencias.tratadas, cor: COR.concluida }]} />
+                  </div>
+                )}
+                {atual.fase === 'correcao_inspecao' && atual.cargas_total === 1 ? (
+                  <span className="text-[13px] text-muted-foreground">
+                    {lote.pessoas.find((p) => p.conta) ? (
+                      <>
+                        Com <b>{lote.pessoas.find((p) => p.conta)!.nome}</b>
+                        {lote.pessoas.find((p) => p.conta)!.conta === eu?.conta ? ' (você)' : ''}, que trata as ocorrências da folha.
+                      </>
+                    ) : (
+                      'A folha ainda não está com ninguém: distribua.'
+                    )}
+                  </span>
+                ) : atual.cargas_total > 0 ? (
                   <>
                     <div className="flex flex-col gap-1.5">
                       <div className="flex justify-between text-[13px]">
@@ -408,8 +464,16 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                   </>
                 ) : (
                   <div className="flex flex-wrap items-center gap-3 text-[13px] text-muted-foreground">
-                    <span>{atual.fase === 'cq' ? 'Sem amostras ainda nesta etapa.' : 'Sem cargas nesta etapa.'}</span>
-                    {aberta && supervisor && atual && atual.fase !== 'cq' && (
+                    <span>
+                      {atual.fase === 'cq'
+                        ? 'Sem amostras ainda nesta etapa.'
+                        : atual.fase === 'correcao_inspecao'
+                          ? lote.ocorrencias.total > lote.ocorrencias.tratadas
+                            ? 'Ninguém está com a folha: a etapa não tem atividade de correção no fluxo.'
+                            : 'Nenhuma ocorrência a tratar.'
+                          : 'Sem cargas nesta etapa.'}
+                    </span>
+                    {aberta && supervisor && atual && atual.fase !== 'cq' && !(atual.fase === 'correcao_inspecao' && lote.ocorrencias.total === lote.ocorrencias.tratadas) && (
                       <Button
                         size="sm"
                         variant="outline"

@@ -62,6 +62,7 @@ class FeixePlugin:
             "selecao_wkt": self.selecao_wkt,
             "cargas_mudaram": self.cargas_mudaram,
             "focar_amostra": self.focar_amostra,
+            "focar_ocorrencia": self.focar_ocorrencia,
         }
         self.barra = None
         self.rotulo_status = None
@@ -121,6 +122,8 @@ class FeixePlugin:
         self.barra.nao_conforme.connect(lambda: self.nao_conforme(None))
         self.barra.ocorrencia.connect(self.ligar_ferramenta_ocorrencia)
         self.barra.ciente.connect(lambda: self.ciente(None))
+        self.barra.proxima_ocorrencia.connect(self.proxima_ocorrencia)
+        self.barra.tratada.connect(lambda: self.tratar(None, True))
         self.iface.addToolBar(self.barra)
         self.barra.show()  # se a pessoa escondeu a barra, abrir o QGIS de novo a traz de volta
         # Atalhos configuráveis em Configurações > Atalhos de teclado (o QGIS aplica o que a pessoa salvou).
@@ -473,8 +476,9 @@ class FeixePlugin:
         voltam à rotação antes de passar para outra folha."""
 
         def excluir():
-            # As amostras de CQ andam por "Próxima amostra", não por "Próxima carga".
-            return [i for ids in self.puladas.values() for i in ids] + self._ler(lgrupos.cargas_cq_pendentes, [])
+            # As amostras de CQ andam por "Próxima amostra", e a carga da folha na correção de inspeção, por
+            # "Próxima ocorrência" (D5): nenhuma das duas por "Próxima carga".
+            return [i for ids in self.puladas.values() for i in ids] + self._ler(lgrupos.fora_da_producao, [])
 
         le, lote = self._passagem_atual
         if id_lote is None and self.puladas.get(le):
@@ -631,6 +635,14 @@ class FeixePlugin:
         antes, self._cq = self._cq, est
         if self.barra:
             self.barra.mostrar_cq(est)
+        if est.get("correcao") and antes is not None and not antes.get("correcao"):
+            self.iface.messageBar().pushMessage(
+                "Feixe",
+                f"Chegou uma folha para a correção de inspeção ({est.get('correcao_pendentes') or 0} ocorrências por "
+                "tratar). Use Próxima ocorrência na barra do Feixe.",
+                Qgis.Info,
+                10,
+            )
         n = est.get("ciencia") or 0
         if not n:
             return
@@ -819,6 +831,86 @@ class FeixePlugin:
         )
         return r
 
+    # --- correção de inspeção (D5) --------------------------------------------------------------------------------
+    # Pelo workspace, como o CQ (D-140): quem está com a folha na correção varre as ocorrências da folha (todas as
+    # revisões) e marca cada uma como tratada; a carga da folha conclui com a última e a folha vai para o supervisor.
+    def _para_correcao(self) -> bool:
+        """Garante as camadas da correção e o modo executar; sem folha na correção, diz e não segue."""
+        if not self._pronto():
+            return False
+        papeis = ("correcao_pendentes", "correcao_tratadas")
+        precisa = not camadas.camadas_do_papel(*papeis) and (self._cq or {}).get("correcao")
+        if precisa and self.montar_camadas() is None:
+            return False
+        if camadas.modo_atual() not in (None, "execucao"):
+            self.trocar_modo("execucao")
+        if not (self._ler(lgrupos.estado_cq, {}) or {}).get("correcao"):
+            self.iface.messageBar().pushMessage(
+                "Feixe", "Você não está com nenhuma folha na correção de inspeção.", Qgis.Info, 5
+            )
+            return False
+        return True
+
+    def proxima_ocorrencia(self):
+        if not self._para_correcao():
+            return None
+        ref = camadas.ocorrencia_selecionada("correcao_pendentes") or camadas.ocorrencia_atual()
+        r = self._executar(rotas_cq.proxima_ocorrencia, ref, None)
+        if r is not None and r["ocorrencia"] is None:
+            self.iface.messageBar().pushMessage(
+                "Feixe", f"Nenhuma ocorrência por tratar. {regras.FIM_DA_CORRECAO}", Qgis.Info, 8
+            )
+        return r
+
+    def focar_ocorrencia(self, o, progresso, avisar=True):
+        """Faz dela a ocorrência atual (pino maior em Ocorrências pendentes), sem mudar a escala, pisca e diz o que
+        corrigir ali."""
+        camadas.definir_ocorrencia_atual(o["uuid"])
+        x, y = o["x"], o["y"]
+        self._enquadrar({"id": 0, "xmin": x, "ymin": y, "xmax": x, "ymax": y}, None)
+        camada = camadas.camada_com_ocorrencia(o["uuid"])
+        if camada is not None:
+            f = next(camada.getFeatures(f"\"uuid\" = '{o['uuid']}'"), None)
+            if f is not None:
+                self.iface.mapCanvas().flashFeatureIds(camada, [f.id()])
+        self.mostrar_progresso(progresso, False)
+        if avisar:
+            self.iface.messageBar().pushMessage("Feixe", regras.mensagem_ocorrencia_atual(o, progresso), Qgis.Info, 8)
+
+    def trabalhar_na_ocorrencia(self, uuid):
+        """Ação da camada Ocorrências pendentes: esta vira a ocorrência atual."""
+        if not self._para_correcao():
+            return
+        with contextlib.suppress(Exception):
+            o = self._ler(lq.ocorrencia, None, str(uuid))
+            if o is not None:
+                self.focar_ocorrencia(o, self._ler(lq.progresso_correcao, None, o["id_lote"]))
+
+    def tratar(self, uuid=None, tratado=True):
+        """Tratada (barra e ação da camada) na ocorrência atual ou na selecionada; Desfazer tratada (ação da camada
+        Ocorrências tratadas). Marcar já leva à próxima (D-136); a última diz que a folha terminou e quem decide."""
+        if not self._para_correcao():
+            return None
+        uuid = uuid or camadas.ocorrencia_selecionada("correcao_pendentes") or camadas.ocorrencia_atual()
+        if uuid is None:
+            self.iface.messageBar().pushMessage(
+                "Feixe", "Nenhuma ocorrência atual: use Próxima ocorrência ou selecione uma em Ocorrências pendentes.",
+                Qgis.Info, 6,
+            )  # fmt: skip
+            return None
+        r = self._executar(rotas_cq.tratar, str(uuid), bool(tratado))
+        if r is None:
+            return None
+        self.iface.messageBar().pushMessage("Feixe", regras.mensagem_tratada(r), Qgis.Success, 8)
+        prox = r.get("proxima")
+        if tratado and prox:
+            self.focar_ocorrencia(prox, self._ler(lq.progresso_correcao, None, prox["id_lote"]), False)
+        else:
+            if tratado:
+                camadas.definir_ocorrencia_atual(None)
+            self.mostrar_progresso(r.get("progresso"), False)
+        return r
+
     # --- edição pela tabela de atributos e pelo formulário (C4) ---------------------------------------------------
     def _ligar_edicao(self, novas):
         for camada in novas:
@@ -913,7 +1005,8 @@ class FeixePlugin:
 
     def mostrar_progresso(self, progresso, cq=None):
         """Barra de status: "Feixe · 2534-1 · 35/93" nas cargas, "Feixe · CQ 2534-1 · 7/20 amostras" no CQ (sem
-        `cq`, pela fase da passagem)."""
+        `cq`, pela fase da passagem) e "Feixe · Correção 2534-3 · 12/40 tratadas" na correção (`regras.texto_status`
+        pelo andamento)."""
         if self.rotulo_status and progresso:
             if cq is None:
                 cq = bool(self._ler(lgrupos.e_cq, False, progresso.get("id_lote_etapa")))

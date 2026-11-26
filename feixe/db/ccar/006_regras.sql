@@ -276,6 +276,44 @@ DROP TRIGGER IF EXISTS t10_tratado ON mapcartacomp.cq_inspecao;
 CREATE TRIGGER t10_tratado BEFORE INSERT OR UPDATE ON mapcartacomp.cq_inspecao
     FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_inspecao_tratado();
 
+-- Carga da folha na correção de inspeção (D5) ----------------------------------------------------------------------
+-- Na correção de inspeção sem atividade pela grade, a passagem tem uma carga só, a folha inteira (`cargas.preparar`):
+-- é por ela que a folha vai a alguém (Distribuir, fila) e que se sabe quem varre as ocorrências. Ela não se conclui à
+-- mão: conclui quando todas as ocorrências da folha (de todas as revisões) estão tratadas, com a hora da última
+-- marcação (tratado_em, que vem explícito da marcação offline), e volta a pendente se alguma for desmarcada enquanto a
+-- passagem estiver aberta. Carga de atividade pela grade na correção é trabalho de cada um e não muda aqui. Como a
+-- carga de CQ pela amostra (t20_derivar), com os direitos do dono do schema.
+CREATE OR REPLACE FUNCTION mapcartacomp.f_correcao_derivar_um(p_lote integer) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = mapcartacomp, public, pg_temp AS $$
+BEGIN
+    UPDATE mapcartacomp.carga_trabalho c
+       SET concluido = d.todas, concluido_em = CASE WHEN d.todas THEN d.quando END
+      FROM (SELECT coalesce(bool_and(i.tratado), true) AS todas, max(i.tratado_em) AS quando
+              FROM mapcartacomp.cq_inspecao i WHERE i.id_lote = p_lote) d,
+           mapcartacomp.lote_etapa le, mapcartacomp.fluxo_etapa fe, mapcartacomp.atividade a
+     WHERE le.id = c.id_lote_etapa AND fe.id = le.id_fluxo_etapa AND a.id = c.id_atividade
+       AND le.id_lote = p_lote AND le.situacao IN ('pendente', 'em_andamento') AND fe.fase = 'correcao_inspecao'
+       AND coalesce(a.geracao, 'manual') <> 'grade' AND c.concluido IS DISTINCT FROM d.todas;
+END
+$$;
+
+CREATE OR REPLACE FUNCTION mapcartacomp.f_correcao_derivar() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP IN ('UPDATE', 'DELETE') THEN
+        PERFORM mapcartacomp.f_correcao_derivar_um(OLD.id_lote);
+    END IF;
+    IF TG_OP = 'INSERT' OR (TG_OP = 'UPDATE' AND NEW.id_lote IS DISTINCT FROM OLD.id_lote) THEN
+        PERFORM mapcartacomp.f_correcao_derivar_um(NEW.id_lote);
+    END IF;
+    RETURN NULL;
+END
+$$;
+
+DROP TRIGGER IF EXISTS t20_correcao ON mapcartacomp.cq_inspecao;
+CREATE TRIGGER t20_correcao AFTER INSERT OR UPDATE OF tratado, id_lote OR DELETE
+    ON mapcartacomp.cq_inspecao FOR EACH ROW EXECUTE PROCEDURE mapcartacomp.f_correcao_derivar();
+
 -- Revisão de uma passagem de etapa, quando não informada ------------------------------------------------------------
 -- Passagem por etapa que conta revisão: 1 + passagens anteriores (não puladas) por etapas que contam revisão.
 -- Demais etapas: a revisão corrente da folha.

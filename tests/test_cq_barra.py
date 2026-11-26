@@ -1,5 +1,5 @@
-"""D3c: regras da barra do Feixe para o CQ, sem o QGIS: que ações aparecem, a barra de status e as mensagens que levam
-a pessoa ao próximo passo (D-136)."""
+"""D3c e D5: regras da barra do Feixe para o CQ e a correção de inspeção, sem o QGIS: que ações aparecem, a barra de
+status e as mensagens que levam a pessoa ao próximo passo (D-136)."""
 
 from feixe.ui import regras
 
@@ -7,6 +7,7 @@ from feixe.ui import regras
 def test_acoes_do_avaliador_so_com_amostras_e_ciente_so_com_ocorrencia():
     assert regras.acoes_visiveis({}) == {
         "proxima_amostra": False, "conforme": False, "nao_conforme": False, "ocorrencia": False, "ciente": False,
+        "proxima_ocorrencia": False, "tratada": False,
     }  # fmt: skip
     avaliador = regras.acoes_visiveis({"amostras": 20, "pendentes": 0, "ciencia": 0})
     assert all(avaliador[a] for a in regras.ACOES_AVALIADOR) and not avaliador["ciente"]
@@ -55,3 +56,37 @@ def test_mensagem_de_ciente_diz_quantas_faltam():
     assert regras.mensagem_ciente(o, 1) == "Ciente · Omissão · 2534-1. Falta 1 para dar ciência."
     assert regras.mensagem_ciente(o, 3).endswith("Faltam 3 para dar ciência.")
     assert regras.mensagem_ciente(o, 0).endswith("Não há mais ocorrências esperando a sua ciência.")
+
+
+def test_correcao_so_para_quem_esta_com_folha_na_correcao():
+    vis = regras.acoes_visiveis({"amostras": 0, "ciencia": 0, "correcao": 40, "correcao_pendentes": 0})
+    # Com tudo tratado as ações continuam: desmarcar vale enquanto a etapa está aberta.
+    assert all(vis[a] for a in regras.ACOES_CORRECAO) and not vis["ciente"] and not vis["conforme"]
+    assert not any(regras.acoes_visiveis({"correcao": 0})[a] for a in regras.ACOES_CORRECAO)
+
+
+def test_texto_da_barra_de_status_na_correcao():
+    p = {"folha_revisao": "2534-3", "tratadas": 12, "total": 40, "pendentes": 28}
+    assert regras.texto_status(p) == "Feixe · Correção 2534-3 · 12/40 tratadas"
+
+
+def _tratada(tratadas, total, proxima, tratado=True, fila=None):
+    return {
+        "ocorrencia": {"tratado": tratado, "elemento": "Omissão", "folha_revisao": "2534-1"},
+        "progresso": {"folha_revisao": "2534-3", "tratadas": tratadas, "total": total,
+                      "pendentes": total - tratadas},
+        "proxima": proxima, "fila": fila,
+    }  # fmt: skip
+
+
+def test_tratada_leva_a_proxima_e_a_ultima_diz_que_o_supervisor_decide():
+    prox = {"elemento": "Comissão", "folha_revisao": "2534-2"}
+    assert regras.mensagem_tratada(_tratada(12, 40, prox)) == (
+        "Tratada · Omissão · 2534-3 12/40. Próxima: Comissão na 2534-2."
+    )
+    fim = regras.mensagem_tratada(_tratada(40, 40, None))
+    assert fim.startswith("Tratada · Omissão · 2534-3 40/40. ") and "supervisor" in fim and "Esperando" in fim
+    desfeita = regras.mensagem_tratada(_tratada(39, 40, prox, tratado=False))
+    assert desfeita.startswith("Tratamento desfeito · Omissão · 2534-3 39/40.")
+    fila = regras.mensagem_tratada(_tratada(40, 40, None, fila={"folha_revisao": "2601-1", "atribuidas": 30}))
+    assert "A próxima folha da sua fila é a 2601-1 (30 cargas)" in fila

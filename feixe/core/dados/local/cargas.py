@@ -13,9 +13,13 @@ import math
 from typing import Dict, List, Optional
 
 from .. import ErroDados
-from . import SQL_ABERTAS, converter, data, rotulo
+from . import SQL_ABERTAS, carga_da_folha, converter, data, rotulo
 
 JANELA_DESFAZER_HORAS = 24
+FOLHA_NA_CORRECAO = (
+    "na correção de inspeção a carga é a folha inteira e conclui sozinha quando todas as ocorrências estiverem "
+    "tratadas: marque Tratada em cada uma (barra do Feixe ou Execução › Correção)"
+)
 
 _CAMPOS = (
     "c.id, c.uuid, c.id_lote_etapa, le.id_lote, "
@@ -104,7 +108,8 @@ def progresso(ex, id_lote_etapa: int) -> Optional[Dict]:
 
 def _minha_para_mudar(ex, id_carga: int) -> Dict:
     linha = ex.um(
-        "SELECT c.id, c.uuid, c.id_lote_etapa, c.concluido, c.concluido_em, c.responsavel, le.situacao "
+        "SELECT c.id, c.uuid, c.id_lote_etapa, c.concluido, c.concluido_em, c.responsavel, le.situacao, "
+        f"CASE WHEN {carga_da_folha()} THEN 1 ELSE 0 END AS da_folha "
         "FROM carga_trabalho c JOIN lote_etapa le ON le.id = c.id_lote_etapa WHERE c.id = ?",
         (id_carga,),
     )
@@ -114,6 +119,8 @@ def _minha_para_mudar(ex, id_carga: int) -> Dict:
         raise ErroDados("esta carga não está atribuída a você", 403)
     if linha["situacao"] not in ("pendente", "em_andamento"):
         raise ErroDados("a etapa desta folha já foi encerrada pelo supervisor")
+    if linha["da_folha"]:
+        raise ErroDados(FOLHA_NA_CORRECAO)
     return converter(linha, datas=("concluido_em",), bools=("concluido",))
 
 

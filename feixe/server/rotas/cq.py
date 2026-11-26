@@ -1,6 +1,7 @@
 """CQ. D2: planos de amostragem numa passagem; só o supervisor cria ou refaz, na CCAR, como o resto da supervisão.
 D3a: a execução do CQ (amostras, ocorrências, ciência) sobre o workspace, online ou offline, como minhas cargas
-(D-111, D-123); cada escrita acorda a sincronização. As ocorrências da folha para o supervisor leem a CCAR.
+(D-111, D-123); cada escrita acorda a sincronização. D5: a correção de inspeção (tratar, próxima ocorrência), do
+mesmo jeito. As ocorrências da folha para o supervisor leem a CCAR.
 
 Registrado antes de `fluxos`, porque `POST /api/lote_etapas/{id}/{acao}` (iniciar, concluir...) casaria também com
 `/cq_plano`."""
@@ -113,8 +114,41 @@ def ciente(ctx, uuid: str) -> Dict:
     return res
 
 
+def tratar(ctx, uuid: str, tratado: bool = True) -> Dict:
+    """Correção de inspeção (D5, rota e barra do Feixe): marca ou desmarca a ocorrência como tratada no workspace; a
+    carga da folha conclui com a última, e a resposta aponta a próxima por tratar."""
+    ctx.exigir_pronto()
+    with ctx.local() as ex:
+        res = lq.tratar(ex, uuid, tratado)
+    if res.get("fila"):
+        ctx.publicar("fila", {"atribuida": res["fila"]})
+        ctx.publicar("lote", {"fila": res["fila"]["id_lote"]})
+    ctx.publicar("carga", {"correcao": res["ocorrencia"]["id_lote"]})
+    _mudou_cq(ctx, {"ocorrencia": uuid, "tratado": bool(tratado)})
+    return res
+
+
+def proxima_ocorrencia(ctx, referencia=None, id_lote=None) -> Dict:
+    """Próxima ocorrência por tratar (barra do Feixe e "Continuar no QGIS" da Execução › Correção): vira a ocorrência
+    atual no QGIS, sem mudar a escala. Nenhuma: ocorrência nula, com o andamento da folha."""
+    ctx.exigir_pronto()
+    with ctx.leitura() as ex:
+        o = lq.proxima_ocorrencia(ex, referencia, id_lote)
+        progresso = lq.progresso_correcao(ex, o["id_lote"] if o else id_lote) if (o or id_lote) else None
+    if o:
+        _no_qgis(ctx, "focar_ocorrencia", o, progresso)
+    return {"ocorrencia": o, "progresso": progresso}
+
+
 def registrar(r, ctx) -> None:
     # --- D3d: antes das rotas com {id}/{uuid} no mesmo lugar, que casariam com "proxima" e "ciente" ---
+
+    @r.rota("POST", "/api/inspecoes/proxima", exige=EXECUTORES)
+    def _proxima_ocorrencia(req):
+        ref = campo(req, "referencia", str, padrao=None)
+        return 200, proxima_ocorrencia(
+            ctx, _uuid(ref) if ref else None, campo(req, "id_lote", int, padrao=None)
+        )  # fmt: skip
 
     @r.rota("POST", "/api/amostras/proxima", exige=EXECUTORES)
     def _proxima(req):
@@ -219,6 +253,10 @@ def registrar(r, ctx) -> None:
     @r.rota("POST", "/api/inspecoes/{uuid}/ciente", exige=EXECUTORES)
     def _ciente(req):
         return 200, ciente(ctx, _uuid(req.params["uuid"]))
+
+    @r.rota("POST", "/api/inspecoes/{uuid}/tratar", exige=EXECUTORES)
+    def _tratar(req):
+        return 200, tratar(ctx, _uuid(req.params["uuid"]), campo(req, "tratado", _bool, padrao=True))
 
     # --- supervisão, na CCAR ---
 

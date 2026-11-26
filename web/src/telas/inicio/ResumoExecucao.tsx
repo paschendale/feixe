@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { Barra, Bloco, COR, Secao } from '@/components/painel'
-import type { Passagem, ResumoCargas, ResumoCQ } from '@/lib/api'
+import type { FolhaCorrecao, Passagem, ResumoCargas, ResumoCQ } from '@/lib/api'
 import { lista, num, pc, plural } from '@/lib/formato'
 import { href } from '@/lib/rotas'
 import { useApi } from '@/lib/useApi'
@@ -78,6 +78,36 @@ function CartaoCQ({ linhas, principal }: { linhas: ResumoCQ[]; principal: boolea
   )
 }
 
+// Folha na correção de inspeção (D5): as ocorrências tratadas de todas as revisões e o caminho para a varredura.
+function CartaoCorrecao({ f, principal }: { f: FolhaCorrecao; principal: boolean }) {
+  return (
+    <Bloco className={principal ? 'flex-[2_1_420px]' : 'flex-[1_1_260px]'}>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="tab text-lg font-bold">{f.folha_revisao}</span>
+        <span className="text-muted-foreground">{[f.tema, f.etapa].filter(Boolean).join(' · ')}</span>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <div className="flex justify-between text-[13px]">
+          <span>
+            <b>{num(f.tratadas)}</b> de {plural(f.total, 'ocorrência tratada', 'ocorrências tratadas')}
+          </span>
+          <span className="tab">{pc(f.tratadas, f.total)}%</span>
+        </div>
+        <Barra partes={[{ valor: f.tratadas, cor: COR.concluida }]} total={Math.max(f.total, 1)} />
+      </div>
+      {f.pendentes > 0 ? (
+        <div className="mt-1 flex flex-wrap gap-2.5">
+          <Button asChild className="font-semibold">
+            <a href={href('execucao/correcao', { folha: f.id_lote })}>Tratar as ocorrências</a>
+          </Button>
+        </div>
+      ) : (
+        <span className="text-[13px]">Todas as ocorrências tratadas: o supervisor decide o próximo passo.</span>
+      )}
+    </Bloco>
+  )
+}
+
 // Execução no Início: frase, as folhas com "Continuar no QGIS" (produção e CQ), o que está para ciência e as
 // conclusões dos últimos dias.
 export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
@@ -87,8 +117,10 @@ export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
   if (!dados || !painel) return null
   if (dados.preparando || painel.preparando) return comTitulo ? <Secao titulo="Execução" sub="as cargas que estão com você"><Preparando /></Secao> : <Preparando />
   // As passagens de CQ aparecem como amostras (CartaoCQ), não como cargas.
-  const cqSet = new Set(painel.cq.map((c) => c.id_lote_etapa))
+  const cqSet = new Set([...painel.cq.map((c) => c.id_lote_etapa), ...painel.correcao.filter((c) => c.so_folha).map((c) => c.id_lote_etapa)])
   const passagens = dados.passagens.filter((p) => !cqSet.has(p.id_lote_etapa))
+  const correcao = painel.correcao
+  const aTratar = correcao.reduce((s, f) => s + f.pendentes, 0)
   const comPendentes = passagens.filter((p) => pendentesDe(p) > 0 && ABERTAS.includes(p.situacao))
   const outras = passagens.filter((p) => !comPendentes.includes(p))
   const pendentesProducao = passagens.reduce((s, p) => s + pendentesDe(p), 0)
@@ -96,14 +128,16 @@ export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
   const cqComPendentes = folhasCQ.filter((ls) => ls[0].aberta && ls.some((r) => r.pendentes > 0))
   const cqOutras = folhasCQ.filter((ls) => ls[0].aberta && !cqComPendentes.includes(ls))
   const amostrasPendentes = cqComPendentes.reduce((s, ls) => s + ls.reduce((t, r) => t + r.pendentes, 0), 0)
-  const cartoes: ({ tipo: 'carga'; p: Passagem } | { tipo: 'cq'; linhas: ResumoCQ[] })[] = [
+  const cartoes: ({ tipo: 'carga'; p: Passagem } | { tipo: 'cq'; linhas: ResumoCQ[] } | { tipo: 'correcao'; f: FolhaCorrecao })[] = [
+    ...correcao.filter((f) => f.pendentes > 0).map((f) => ({ tipo: 'correcao' as const, f })),
     ...comPendentes.map((p) => ({ tipo: 'carga' as const, p })),
     ...cqComPendentes.map((linhas) => ({ tipo: 'cq' as const, linhas })),
     ...outras.map((p) => ({ tipo: 'carga' as const, p })),
     ...cqOutras.map((linhas) => ({ tipo: 'cq' as const, linhas })),
+    ...correcao.filter((f) => f.pendentes === 0).map((f) => ({ tipo: 'correcao' as const, f })),
   ].slice(0, 4)
-  const total = passagens.length + cqComPendentes.length + cqOutras.length
-  const temPendente = (c: (typeof cartoes)[number]) => (c.tipo === 'carga' ? comPendentes.includes(c.p) : cqComPendentes.includes(c.linhas))
+  const total = passagens.length + cqComPendentes.length + cqOutras.length + correcao.length
+  const temPendente = (c: (typeof cartoes)[number]) => (c.tipo === 'carga' ? comPendentes.includes(c.p) : c.tipo === 'cq' ? cqComPendentes.includes(c.linhas) : c.f.pendentes > 0)
   const ciencia = painel.ciencia.pendentes.length
   const frase = (
     <p className={comTitulo ? 'text-[17px]' : 'max-w-[820px] text-[19px] leading-normal'}>
@@ -112,7 +146,7 @@ export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
           Você tem <b>{plural(pendentesProducao, 'carga pendente', 'cargas pendentes')}</b>{' '}
           {comPendentes.length <= 3 ? `na${comPendentes.length > 1 ? 's folhas' : ''} ${lista(comPendentes.map((p) => p.folha_revisao))}` : `em ${num(comPendentes.length)} folhas`}
         </>
-      ) : amostrasPendentes > 0 ? (
+      ) : amostrasPendentes > 0 || aTratar > 0 ? (
         'Você não tem carga de produção pendente'
       ) : (
         'Você não tem carga pendente'
@@ -121,6 +155,12 @@ export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
         <>
           {pendentesProducao > 0 ? ', ' : ', mas '}
           <b>{plural(amostrasPendentes, 'amostra de CQ', 'amostras de CQ')}</b> para avaliar
+        </>
+      )}
+      {aTratar > 0 && (
+        <>
+          {pendentesProducao > 0 || amostrasPendentes > 0 ? ', ' : ', mas '}
+          <b>{plural(aTratar, 'ocorrência', 'ocorrências')}</b> para tratar na correção de inspeção
         </>
       )}
       {hoje > 0 ? (
@@ -157,6 +197,8 @@ export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
         {cartoes.map((c, i) =>
           c.tipo === 'carga' ? (
             <CartaoFolha key={c.p.id_lote_etapa} p={c.p} principal={i === 0 && temPendente(c)} />
+          ) : c.tipo === 'correcao' ? (
+            <CartaoCorrecao key={`corr-${c.f.id_lote_etapa}`} f={c.f} principal={i === 0 && temPendente(c)} />
           ) : (
             <CartaoCQ key={`cq-${c.linhas[0].id_lote_etapa}`} linhas={c.linhas} principal={i === 0 && temPendente(c)} />
           ),

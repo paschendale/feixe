@@ -192,6 +192,12 @@ def um(ex: Executor, id_lote: int) -> Optional[Dict]:
             "GROUP BY 1, 2 ORDER BY c.responsavel IS NULL, 2",
             (lote["id_lote_etapa_atual"],),
         )
+        # Ocorrências da folha, de todas as revisões: o andamento da correção de inspeção na gaveta (D5).
+        lote["ocorrencias"] = ex.um(
+            "SELECT count(*) AS total, count(*) FILTER (WHERE tratado) AS tratadas FROM mapcartacomp.cq_inspecao "
+            "WHERE id_lote = %s",
+            (id_lote,),
+        )
     return lote
 
 

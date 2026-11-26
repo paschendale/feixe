@@ -193,7 +193,7 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
           ) : (
             <label
               key={f.id_lote}
-              title={`${f.situacao === 'pulada' ? 'pulada' : f.situacao === 'em_andamento' ? 'cargas concluídas' : 'concluída'} em ${diaMes(f.desde)}`}
+              title={`${f.situacao === 'pulada' ? 'pulada' : f.ocorrencias_tratadas != null && f.situacao === 'em_andamento' ? `${plural(f.ocorrencias_tratadas, 'ocorrência tratada', 'ocorrências tratadas')}` : f.situacao === 'em_andamento' ? 'cargas concluídas' : 'concluída'} em ${diaMes(f.desde)}`}
               className={cn('tab inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm', marcadas.has(f.id_lote) ? 'border-ibge bg-[#EEF3FA]' : 'hover:bg-accent')}
             >
               <input

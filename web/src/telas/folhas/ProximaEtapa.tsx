@@ -37,6 +37,8 @@ export function ProximaEtapa({ lotes, fechar }: { lotes: number[]; fechar: (aber
     grupos.set(k, [...(grupos.get(k) ?? []), i])
   }
   const comPendentes = validos.filter((i) => i.concluir && i.pendentes > 0)
+  // Correção de inspeção (D5): folhas com ocorrências ainda não tratadas (a carga da folha conta nas pendentes).
+  const comATratar = validos.filter((i) => i.concluir && i.a_tratar > 0)
   const unica = new Set(validos.map((i) => i.proxima)).size === 1 ? validos[0]?.proxima : null
 
   async function confirmar() {
@@ -92,6 +94,11 @@ export function ProximaEtapa({ lotes, fechar }: { lotes: number[]; fechar: (aber
             {comPendentes.length > 0 && (
               <p className="rounded-lg px-3.5 py-2.5 text-[13px]" style={{ background: COR.alertaFundo, color: '#5C3D00' }}>
                 {plural(comPendentes.length, 'folha ainda tem', 'folhas ainda têm')} cargas pendentes ({nomes(comPendentes)}: {num(comPendentes.reduce((s, i) => s + i.pendentes, 0))} cargas). Elas ficam na etapa concluída e ninguém mais trabalha nelas.
+              </p>
+            )}
+            {comATratar.length > 0 && (
+              <p className="rounded-lg px-3.5 py-2.5 text-[13px]" style={{ background: COR.alertaFundo, color: '#5C3D00' }}>
+                Na correção de inspeção, {plural(comATratar.length, 'folha ainda tem', 'folhas ainda têm')} ocorrências por tratar ({nomes(comATratar)}: {num(comATratar.reduce((s, i) => s + i.a_tratar, 0))}). Concluir a etapa encerra a varredura assim mesmo.
               </p>
             )}
             {recusados.length > 0 && (

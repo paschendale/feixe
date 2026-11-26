@@ -2,7 +2,7 @@
 """Verificação headless da fase D contra o banco de dev, sem abrir o QGIS. Cada item acrescenta a sua seção.
 
 Uso (Mac, com o QGIS-LTR):
-    /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 scripts/dev/verificar_fase_d.py [d3a d3c d4 ...]
+    /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 scripts/dev/verificar_fase_d.py [d3a d3c d4 d5 ...]
 
 Sem argumentos roda todas as seções. Lê o banco de config/ambientes.json (dev) e o usuário e a senha de FEIXE_CCAR no
 .dev.env da raiz. Usa perfil do QGIS, banco de autenticação e workspaces temporários, apagados no fim. A CCAR
@@ -585,7 +585,10 @@ def d3c(amb, usuario, senha):
         assert ciencia.readOnly() and fc["uuid"] == r_uuid and fc["anotacao"] == "drenagem omitida no trecho norte"
         assert fc["folha_txt"].startswith("2534-") and fc["responsavel"] == usuario, fc["folha_txt"]
         assert {a.name() for a in ciencia.actions().actions()} == {"Ciente"}
-        assert regras.acoes_visiveis(p2._cq) == {**dict.fromkeys(regras.ACOES_AVALIADOR, False), "ciente": True}
+        assert regras.acoes_visiveis(p2._cq) == {
+            **dict.fromkeys(regras.ACOES_AVALIADOR, False), "ciente": True,
+            **dict.fromkeys(regras.ACOES_CORRECAO, False),
+        }  # fmt: skip
         ok(f"Ocorrências para ciência com anotação, elemento, folha e avaliador ({fc['folha_txt']}) e a ação Ciente")
 
         assert p2.ciente(None) is None and ciencia.selectedFeatureIds() == [fc.id()]
@@ -728,6 +731,217 @@ def d4(amb, usuario, senha):
         with tx() as ex:
             ex.executar(f"DELETE FROM {S}.lote WHERE id = %s", (f.lote,))
             ex.executar(f"DELETE FROM {S}.fluxo_etapa WHERE id = %s", (etapa_ci,))
+            f.apagar(ex)
+
+
+@secao("d5")
+def d5(amb, usuario, senha):
+    """Correção de inspeção: aprovada no CQ, a correção abre com a carga da folha, o Distribuir a dá a alguém, que
+    recebe pelo pull todas as ocorrências da folha, trata uma a uma offline pela barra do QGIS (camadas Ocorrências
+    pendentes e tratadas), sincroniza, e a folha aparece em Esperando você."""
+    from feixe.core import camadas, config
+    from feixe.plugin import FeixePlugin
+    from feixe.server.api import Contexto, criar_roteador
+    from feixe.server.rotas import camadas as rotas_camadas
+    from feixe.sync.sincronizar import Sincronizacao
+    from feixe.sync.workspace import Workspace
+    from feixe.ui import regras
+    from qgis.core import QgsProject
+
+    tag = uuid_mod.uuid4().hex[:8]
+    apm = f"t_d5_apm_{tag}"
+    projeto = QgsProject.instance()
+
+    def tx():
+        return db.transacao(amb, usuario, senha, timeout_conexao=5)
+
+    with tx() as ex:
+        f = Folha(ex, tag)
+        f.ci = ex.um(
+            f"INSERT INTO {S}.atividade (cod_projeto, id_tema, fase, nome, geracao) "
+            "VALUES (5, %s, 'correcao_inspecao', %s, 'manual') RETURNING id",
+            (f.tema, f"correção d5 {tag}"),
+        )["id"]
+        etapa_ci = ex.um(
+            f"INSERT INTO {S}.fluxo_etapa (id_fluxo, ordem, fase, nome, conta_revisao, repetivel) "
+            "VALUES (%s, 3, 'correcao_inspecao', 'Correção de inspeção', false, true) RETURNING id",
+            (f.fluxo,),
+        )["id"]
+        ex.executar(
+            f"INSERT INTO {S}.fluxo_etapa_atividade (id_fluxo_etapa, id_atividade) VALUES (%s, %s)", (etapa_ci, f.ci)
+        )
+        le_aq = f.passagem(ex, f.etapa_aq, "concluida")
+        ex.executar(
+            f"INSERT INTO {S}.carga_trabalho (uuid, id_lote_etapa, id_atividade, responsavel, geom, concluido) "
+            f"SELECT %s, %s, %s, %s, ST_Multi(ST_Buffer(ST_Centroid(ar.geom), 0.05)), true FROM {S}.lote l "
+            "JOIN mapcartctrl.t_articulacao_scn ar ON ar.id_articulacao_scn = l.id_articulacao_scn WHERE l.id = %s",
+            (novo_uuid(), le_aq, f.aq, apm, f.lote),
+        )
+        le_cq = f.passagem(ex, f.etapa_cq, "pendente")
+    ctx = Contexto(transacao=tx, publicar=lambda e, d: None)
+    ctx._eu = {"conta": usuario, "uf": "DF", "papeis": ["supervisor"], "perfis": []}
+    api = criar_roteador(ctx)
+
+    def rota(metodo, caminho, corpo=None):
+        st, obj = api.despachar(metodo, caminho, {}, corpo)
+        assert st == 200, (caminho, st, obj)
+        return obj
+
+    def esperando():
+        return [g for g in rota("GET", "/api/painel/esperando")["grupos"] if g["tema"] == f"verificar_d3a_{tag}"]
+
+    workspaces = []
+    try:
+        # --- CQ avaliado, com três ocorrências, e aprovado: a correção abre com a carga da folha -----------------
+        rota("POST", "/api/lotes/preparar", {"lote_etapas": [le_cq]})
+        with tx() as ex:
+            ex.executar(f"UPDATE {S}.lote_etapa SET situacao = 'em_andamento', iniciada_em = now() WHERE id = %s",
+                        (le_cq,))  # fmt: skip
+            ex.executar(
+                f"UPDATE {S}.cq_amostra a SET status = 1 FROM {S}.cq_plano p WHERE p.id = a.id_cq_plano "
+                "AND p.id_lote_etapa = %s",
+                (le_cq,),
+            )
+            pontos = ex.todos(
+                f"SELECT ST_X(ST_Centroid(c.geom)) AS x, ST_Y(ST_Centroid(c.geom)) AS y FROM {S}.carga_trabalho c "
+                "WHERE c.id_lote_etapa = %s ORDER BY c.geocodigo LIMIT 3",
+                (le_cq,),
+            )
+            for i, pt in enumerate(pontos):
+                ex.executar(
+                    f"INSERT INTO {S}.cq_inspecao (uuid, id_lote, id_lote_etapa, uf, elemento, geom, anotacao) "
+                    "VALUES (%s, %s, %s, 'DF', 'Omissão', ST_SetSRID(ST_MakePoint(%s, %s), 4674), %s)",
+                    (novo_uuid(), f.lote, le_cq, pt["x"], pt["y"], f"trecho omitido nº {i + 1}"),
+                )
+        r = rota("POST", "/api/lotes/cq_decisao", {"lotes": [f.lote], "decisao": "aprovar", "previa": False,
+                                                   "observacao": "dentro do aceito"})  # fmt: skip
+        (aberta,) = r["abertas"]
+        (gerada,) = r["preparo"]["geradas"]
+        le_ci = aberta["id_lote_etapa"]
+        assert aberta["etapa"] == "Correção de inspeção" and gerada == {
+            "id_lote_etapa": le_ci, "folha_revisao": "2534-1", "etapa": "Correção de inspeção", "gravadas": 1,
+            "ocorrencias": 3,
+        }, r  # fmt: skip
+        lote = rota("GET", f"/api/lotes/{f.lote}")
+        assert lote["ocorrencias"] == {"total": 3, "tratadas": 0} and not esperando()
+        ok("aprovada no CQ: a correção de inspeção abriu com a carga da folha (3 ocorrências a tratar)")
+
+        # --- o Distribuir de sempre dá a folha a alguém ---------------------------------------------------------
+        (sug,) = rota("POST", "/api/distribuir/sugestao", {"lotes": [f.lote]})["folhas"]
+        assert sug["a_atribuir"] == 1 and sug["fase"] == "correcao_inspecao", sug
+        d = rota("POST", "/api/distribuir", {"itens": [{"id_lote_etapa": le_ci, "responsavel": usuario}]})
+        if d.get("erros"):
+            with tx() as ex:
+                ex.executar(f"UPDATE {S}.carga_trabalho SET responsavel = %s WHERE id_lote_etapa = %s",
+                            (usuario, le_ci))  # fmt: skip
+                ex.executar(f"UPDATE {S}.lote_etapa SET situacao = 'em_andamento', iniciada_em = now() "
+                            "WHERE id = %s", (le_ci,))  # fmt: skip
+            como = "direto (a conta de dev não tem o perfil no projeto)"
+        else:
+            como = "pelo Distribuir"
+        estado = rota("GET", f"/api/lotes/{f.lote}")
+        (situacao,) = [p["situacao"] for p in estado["passagens"] if p["id"] == le_ci]
+        assert situacao == "em_andamento", estado["passagens"]
+        ok(f"a folha foi para {usuario}, {como}; a etapa começou")
+
+        # --- quem recebeu: pull, camadas e a barra do QGIS --------------------------------------------------------
+        ws = Workspace.abrir(amb.nome, usuario, "DF", raiz=os.path.join(TEMP, "corr"))
+        workspaces.append(ws)
+        sinc = Sincronizacao(lambda: ws, tx, alcancavel=lambda: db.alcancavel(amb))
+        assert sinc.sincronizar()["estado"] == "ok"
+        with ws.leitura() as ex:
+            n = ex.um("SELECT count(*) AS n FROM cq_inspecao WHERE id_lote = ?", (f.lote,))["n"]
+        assert n == 3, n
+        ok("o pull trouxe as três ocorrências da folha a quem está na correção")
+
+        p = FeixePlugin(_Iface())
+        p.amb, p.servidor, p._ws, p.rotulo_status = amb, True, ws, _Rotulo()
+        eu = {"conta": usuario, "uf": "DF", "papeis": ["apm"], "perfis": []}
+        c = Contexto(
+            transacao=tx, workspace=lambda: ws, online=lambda: sinc.online, eu_guardado=lambda: eu,
+            publicar=lambda e, dd: None,
+            qgis=lambda nome, *args: {
+                "montar_camadas": lambda eu_, resp, sup, exe, gpkg: camadas.montar(
+                    amb, config.authcfg_id(amb), eu_, resp, sup, exe, gpkg
+                ),
+                "cargas_mudaram": p.cargas_mudaram,
+                "focar_carga": p.focar_carga,
+                "focar_ocorrencia": p.focar_ocorrencia,
+            }[nome](*args),
+        )  # fmt: skip
+        c._eu = eu
+        p.ctx = c
+        rotas_camadas.montar(p.ctx)
+        p._atualizar_cq()
+        execucao = projeto.layerTreeRoot().findGroup("Feixe").findGroup("Execução")
+        (sub,) = [g for g in execucao.children() if g.name() == f"Correção · verificar_d3a_{tag}"]
+        nomes = [(n.name(), n.itemVisibilityChecked()) for n in sub.children()]
+        esperado = [("Ocorrências pendentes", True), ("Ocorrências tratadas", False), ("Minhas folhas", True)]
+        assert nomes == esperado, nomes
+        pend = next(x for x in camadas.camadas_do_papel("correcao_pendentes"))
+        trat = next(x for x in camadas.camadas_do_papel("correcao_tratadas"))
+        assert pend.readOnly() and sum(1 for _ in pend.getFeatures()) == 3 and sum(1 for _ in trat.getFeatures()) == 0
+        fp = next(pend.getFeatures())
+        textos = {k: fp[k] for k in ("folha_revisao", "registrada_txt", "ciencia_txt", "tratada_txt")}
+        assert textos["folha_revisao"] == "2534-1" and textos["tratada_txt"] == "por tratar", textos
+        assert {a.name() for a in pend.actions().actions()} == {"Tratada", "Trabalhar nesta ocorrência"}
+        vis = regras.acoes_visiveis(p._cq)
+        assert all(vis[a] for a in regras.ACOES_CORRECAO) and not vis["conforme"], p._cq
+        ok(f"camadas da correção {nomes}, formulário {textos} e a barra com Próxima ocorrência e Tratada")
+
+        # --- offline: trata as três pela barra ------------------------------------------------------------------
+        os.environ["FEIXE_DEV_SEM_CCAR"] = "1"
+        db.esquecer()
+        assert sinc.sincronizar()["estado"] == "offline"
+        r = p.proxima_ocorrencia()
+        assert r["ocorrencia"] and camadas.ocorrencia_atual() == r["ocorrencia"]["uuid"], r
+        assert p.rotulo_status.texto == "Feixe · Correção 2534-1 · 0/3 tratadas", p.rotulo_status.texto
+        ok(f"próxima ocorrência: o mapa foi até ela; {p.rotulo_status.texto!r}; {p.iface.barra.mensagens[-1]!r}")
+        for _ in range(3):
+            r = p.tratar(None, True)
+            assert r is not None, p.iface.barra.mensagens
+        assert regras.FIM_DA_CORRECAO in p.iface.barra.mensagens[-1], p.iface.barra.mensagens[-1]
+        assert p.rotulo_status.texto == "Feixe · Correção 2534-1 · 3/3 tratadas", p.rotulo_status.texto
+        assert sum(1 for _ in pend.getFeatures()) == 0 and sum(1 for _ in trat.getFeatures()) == 3
+        with ws.leitura() as ex:
+            assert ex.um("SELECT concluido FROM carga_trabalho WHERE id_lote_etapa = ?", (le_ci,))["concluido"] == 1
+        ok(f"offline, três Tratada pela barra: {p.iface.barra.mensagens[-1]!r}; a carga da folha concluiu no workspace")
+
+        del os.environ["FEIXE_DEV_SEM_CCAR"]
+        r = sinc.sincronizar()
+        assert r["estado"] == "ok" and r["push"]["resultados"]["aplicado"] == 3, r
+        with tx() as ex:
+            ccar = ex.um(
+                f"SELECT count(*) FILTER (WHERE tratado AND tratado_por = %s) AS tratadas FROM {S}.cq_inspecao "
+                "WHERE id_lote = %s",
+                (usuario, f.lote),
+            )
+            carga = ex.um(f"SELECT concluido FROM {S}.carga_trabalho WHERE id_lote_etapa = %s", (le_ci,))
+        assert ccar["tratadas"] == 3 and carga["concluido"], (ccar, carga)
+        (g,) = esperando()
+        (folha,) = g["folhas"]
+        assert g["etapa"] == "Correção de inspeção" and folha["ocorrencias_tratadas"] == 3, g
+        ok(f"sincronizado: as três tratadas na CCAR, a carga da folha concluída e a folha em Esperando você "
+           f"(próxima: {g['proxima']})")  # fmt: skip
+    finally:
+        os.environ.pop("FEIXE_DEV_SEM_CCAR", None)
+        projeto.clear()
+        for w in workspaces:
+            w.fechar()
+        with tx() as ex:
+            ex.executar(
+                f"DELETE FROM {S}.sync_log WHERE uuid IN (SELECT uuid FROM {S}.cq_inspecao WHERE id_lote = %s "
+                f"UNION SELECT a.uuid FROM {S}.cq_amostra a JOIN {S}.carga_trabalho c ON c.id = a.id_carga_trabalho "
+                f"JOIN {S}.lote_etapa le ON le.id = c.id_lote_etapa WHERE le.id_lote = %s "
+                f"UNION SELECT c.uuid FROM {S}.carga_trabalho c JOIN {S}.lote_etapa le ON le.id = c.id_lote_etapa "
+                f"WHERE le.id_lote = %s UNION SELECT uuid FROM {S}.lote_etapa WHERE id_lote = %s)",
+                (f.lote,) * 4,
+            )
+            ex.executar(f"DELETE FROM {S}.fila_folha WHERE id_lote_etapa IN (SELECT id FROM {S}.lote_etapa "
+                        "WHERE id_lote = %s)", (f.lote,))  # fmt: skip
+            ex.executar(f"DELETE FROM {S}.lote WHERE id = %s", (f.lote,))
+            ex.executar(f"DELETE FROM {S}.fluxo_etapa WHERE id = %s", (etapa_ci,))
+            ex.executar(f"DELETE FROM {S}.atividade WHERE id = %s", (f.ci,))
             f.apagar(ex)
 
 

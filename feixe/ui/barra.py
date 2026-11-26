@@ -3,8 +3,9 @@
 Da esquerda para a direita: 1. conectar (o ponto diz o estado da conexão; a dica diz conta e modo), 2. carregar
 camadas (o clique carrega; a seta troca o modo de trabalho, Executar ou Supervisionar), 3. abrir o Feixe no
 navegador (o ícone tem a seta de link externo), 4. próxima carga, 5. pular carga, 6. concluir carga. Depois, só para
-quem tem amostras de CQ (D3c): próxima amostra, conforme, não conforme e registrar ocorrência; e, só com ocorrência
-esperando a ciência, Ciente. Tudo o mais vive no painel web; a barra é Qt puro e deve continuar pequena.
+quem tem amostras de CQ (D3c): próxima amostra, conforme, não conforme e registrar ocorrência; só com ocorrência
+esperando a ciência, Ciente; e, só para quem está com uma folha na correção de inspeção (D5), próxima ocorrência e
+tratada. Tudo o mais vive no painel web; a barra é Qt puro e deve continuar pequena.
 
 Toda ação tem nome próprio (objectName) e é registrada no QGIS pelo plugin, com atalho padrão que a pessoa troca em
 Configurações > Atalhos de teclado. A dica de cada botão mostra o atalho em uso.
@@ -98,6 +99,8 @@ class BarraFeixe(QToolBar):
     nao_conforme = pyqtSignal()
     ocorrencia = pyqtSignal()
     ciente = pyqtSignal()
+    proxima_ocorrencia = pyqtSignal()
+    tratada = pyqtSignal()
 
     # Atalhos padrão (livres no QGIS 3.40: o QGIS não usa Alt+Shift). Configuráveis no QGIS.
     ATALHOS: Dict[str, str] = {
@@ -115,6 +118,8 @@ class BarraFeixe(QToolBar):
         "nao_conforme": "Alt+Shift+X",
         "ocorrencia": "Alt+Shift+O",
         "ciente": "Alt+Shift+I",
+        "proxima_ocorrencia": "Alt+Shift+J",
+        "tratada": "Alt+Shift+T",
     }
 
     TEXTO_SINCRONIZAR = (
@@ -211,6 +216,18 @@ class BarraFeixe(QToolBar):
                 "ciente", "ciente", "Ciente",
                 "Dá ciência da ocorrência selecionada em Ocorrências para ciência (ou da primeira, sem seleção): o "
                 "avaliador encontrou isto numa carga sua.", self.ciente,
+            ),
+            # Correção de inspeção (D5): só para quem está com uma folha na correção aberta.
+            "proxima_ocorrencia": self._acao(
+                "proxima_ocorrencia", "proxima_ocorrencia", "Próxima ocorrência",
+                "Vai para a próxima ocorrência por tratar da folha na correção de inspeção: ela vira a ocorrência "
+                "atual (pino maior em Ocorrências pendentes) e o mapa a mostra, sem mudar a escala.",
+                self.proxima_ocorrencia,
+            ),
+            "tratada": self._acao(
+                "tratada", "tratada", "Tratada",
+                "Marca a ocorrência atual (ou a selecionada em Ocorrências pendentes) como tratada e já vai para a "
+                "próxima. Na última, a folha terminou e o supervisor decide o próximo passo.", self.tratada,
             ),
         }  # fmt: skip
         self.acao_ocorrencia = self.acoes_cq["ocorrencia"]

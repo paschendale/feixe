@@ -9,6 +9,7 @@ import { useSessao } from '@/lib/sessao'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 import { AmostrasCQ } from './AmostrasCQ'
+import { Correcao } from './Correcao'
 import { ABERTAS, Continuar, Preparando, Producao, pendentesDe, usePainelExecucao, usePorDia } from './comum'
 import { MeusConflitos } from './MeusConflitos'
 import { ParaCiencia } from './ParaCiencia'
@@ -150,8 +151,8 @@ function Cargas({ p }: { p: Passagem }) {
   )
 }
 
-// Execução (D-103, D3d): Minhas cargas (produção), Minhas amostras (CQ do avaliador) e Para ciência (ocorrências nas
-// cargas da pessoa, D-66). O trabalho é no QGIS (barra do Feixe); aqui é o acompanhamento e o atalho para levar o QGIS
+// Execução (D-103, D3d, D5): Minhas cargas (produção), Minhas amostras (CQ do avaliador), Correção (as folhas na
+// correção de inspeção) e Para ciência (ocorrências nas cargas da pessoa, D-66). O trabalho é no QGIS (barra do Feixe); aqui é o acompanhamento e o atalho para levar o QGIS
 // até uma carga, uma amostra ou uma ocorrência.
 export default function Execucao() {
   const rota = useRota()
@@ -161,14 +162,30 @@ export default function Execucao() {
   const nCiencia = painel?.ciencia.pendentes.length ?? 0
   const temCQ = tem('avaliador') || !!painel?.cq.length
   const temCiencia = tem('apm') || nCiencia > 0 || !!painel?.ciencia.cientes.length
-  const cqSet = painel ? new Set(painel.cq.map((c) => c.id_lote_etapa)) : null
-  const producao = cargas && cqSet ? cargas.passagens.filter((p) => !cqSet.has(p.id_lote_etapa)) : []
-  // Sem aba no endereço: a de produção; quem só tem amostras (avaliador) cai direto no CQ.
+  // Passagens de CQ e as de correção de inspeção em que a minha parte é só a varredura (a carga da folha, D5) ficam
+  // nas abas delas.
+  const fora = painel ? new Set([...painel.cq.map((c) => c.id_lote_etapa), ...painel.correcao.filter((c) => c.so_folha).map((c) => c.id_lote_etapa)]) : null
+  const producao = cargas && fora ? cargas.passagens.filter((p) => !fora.has(p.id_lote_etapa)) : []
+  const temCorrecao = !!painel?.correcao.length
+  const nCorrecao = painel?.correcao.reduce((s, f) => s + f.pendentes, 0) ?? 0
+  // Sem aba no endereço: a de produção; quem só tem amostras (avaliador) cai direto no CQ, e quem só tem a correção,
+  // na correção.
   const pedida = rota.partes[0]
-  const ativa = pedida === 'cq' && temCQ ? 'cq' : pedida === 'ciencia' && temCiencia ? 'ciencia' : !pedida && temCQ && cargas && painel && producao.length === 0 && painel.cq.length > 0 ? 'cq' : 'cargas'
+  const soCorrecao = !pedida && temCorrecao && cargas && painel && producao.length === 0 && painel.cq.length === 0
+  const ativa =
+    pedida === 'cq' && temCQ
+      ? 'cq'
+      : pedida === 'ciencia' && temCiencia
+        ? 'ciencia'
+        : (pedida === 'correcao' && temCorrecao) || soCorrecao
+          ? 'correcao'
+          : !pedida && temCQ && cargas && painel && producao.length === 0 && painel.cq.length > 0
+            ? 'cq'
+            : 'cargas'
   const abasModulo = [
     { id: 'cargas', rotulo: 'Minhas cargas', href: href('execucao/cargas') },
     ...(temCQ ? [{ id: 'cq', rotulo: 'Minhas amostras', href: href('execucao/cq') }] : []),
+    ...(temCorrecao ? [{ id: 'correcao', rotulo: 'Correção', href: href('execucao/correcao'), contagem: nCorrecao }] : []),
     ...(temCiencia ? [{ id: 'ciencia', rotulo: 'Para ciência', href: href('execucao/ciencia'), contagem: nCiencia }] : []),
   ]
   const preparando = cargas?.preparando || painel?.preparando
@@ -186,6 +203,7 @@ export default function Execucao() {
         <MeusConflitos />
         {ativa === 'cargas' && <MinhasCargas passagens={producao} temCQ={painel.cq.some((c) => c.aberta && c.pendentes > 0)} />}
         {ativa === 'cq' && <AmostrasCQ cq={painel.cq} />}
+        {ativa === 'correcao' && <Correcao folhas={painel.correcao} />}
         {ativa === 'ciencia' && (
           <>
             <p className="max-w-[880px] text-[15px] text-texto-2">
