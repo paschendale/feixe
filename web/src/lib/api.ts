@@ -221,6 +221,41 @@ export type PlanoCQ = {
   inspecao_completa: boolean
   pode_refazer: boolean
   motivo_refazer: string | null
+} & ResultadoPlano
+
+// Resultado de um plano (D4): a frase ("Comissão: 2 não conformes, aceita até 0"), o que falta avaliar e o nível de
+// conformidade (percentual de não conformes nas avaliadas contra a fração crítica gravada no plano, D-62).
+export type ResultadoPlano = {
+  id: number
+  atividade: string
+  elemento: string | null
+  n: number
+  ac: number | null
+  fracao_critica: number | null
+  resultado: string
+  amostras: number
+  avaliadas: number
+  nao_conformes: number
+  sem_avaliador: number
+  faltam: number
+  sem_ac: boolean
+  excede: boolean
+  frase: string
+  resumo: string
+  conformidade: { observado: number | null; fracao_critica: number | null; situacao: 'dentro' | 'acima' | null; leitura: string }
+}
+
+export type ResultadoCQ = 'pendente' | 'aprovado' | 'reprovado' | 'sem_ac' | 'sem_planos'
+
+// Resultado da passagem de CQ: reprovado se algum plano reprovou; aprovado quando todos aprovaram e tudo foi avaliado.
+export type ResultadoPassagemCQ = {
+  resultado: ResultadoCQ
+  amostras: number
+  avaliadas: number
+  faltam: number
+  sem_avaliador: number
+  frase: string
+  resumo: string
 }
 
 export type AtividadeSemPlano = { id_atividade: number; atividade: string; elemento: string | null; fracao_critica: number | null; por_feicao: boolean }
@@ -234,6 +269,7 @@ export type PlanosCQ = {
   padrao: { nivel: string | null; lqa: number | null; fracao_critica: number | null }
   planos: PlanoCQ[]
   sem_plano: AtividadeSemPlano[]
+  resultado: ResultadoPassagemCQ
 }
 
 // Prévia (ou plano gravado) devolvida por POST /api/lote_etapas/{id}/cq_plano.
@@ -422,6 +458,32 @@ export type ItemAvanco = {
   proxima: string | null
   erro: string | null
 }
+// Aprovar ou Nova revisão no CQ (D4): a prévia por folha e o que voltou ao confirmar.
+export type DecisaoCQ = 'aprovar' | 'nova_revisao'
+export type ItemDecisaoCQ = {
+  id_lote: number
+  folha_revisao: string
+  tema: string
+  id_lote_etapa: number | null
+  etapa: string | null
+  concluir: boolean
+  resultado: ResultadoCQ
+  frase: string
+  resumo: string
+  faltam: number
+  proxima: string | null
+  nova_folha: string | null
+  autores: string[]
+  aviso: string | null
+  erro: string | null
+}
+export type ResultadoDecisaoCQ = {
+  decididas: { id_lote: number; folha_revisao: string; resultado: ResultadoCQ }[]
+  abertas: { id_lote: number; id_lote_etapa: number; etapa: string }[]
+  erros: { id_lote: number; erro: string }[]
+  preparo?: Preparo
+}
+
 export type ResultadoAvanco = {
   abertas: { id_lote: number; id_lote_etapa: number; etapa: string }[]
   erros: { id_lote: number; erro: string }[]
@@ -563,9 +625,11 @@ export type GrupoEsperando = {
   fluxo: string
   id_proxima: number | null
   proxima: string | null
+  fase: string | null
+  resultado: ResultadoCQ | null
   desde: string | null
   ate: string | null
-  folhas: { id_lote: number; folha_revisao: string; situacao: string; desde: string | null }[]
+  folhas: { id_lote: number; folha_revisao: string; situacao: string; desde: string | null; cq: (ResultadoPassagemCQ & { planos: ResultadoPlano[] }) | null }[]
 }
 
 export type PessoaLote = { conta: string | null; nome: string | null; total: number; concluidas: number; ultima: string | null }

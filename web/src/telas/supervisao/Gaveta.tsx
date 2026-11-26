@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Barra, COR } from '@/components/painel'
-import type { EstadoLote, FluxoCompleto, Historico, LoteCompleto, PassagemLote, Preparo } from '@/lib/api'
+import type { DecisaoCQ, EstadoLote, FluxoCompleto, Historico, LoteCompleto, PassagemLote, PlanosCQ as Planos, Preparo } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { diaMes, diasAtras, num, pc, plural } from '@/lib/formato'
 import { useSessao } from '@/lib/sessao'
@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils'
 import { comCargas, resumoPreparo } from '../folhas/preparo'
 import { OcorrenciasFolha } from './OcorrenciasFolha'
 import { PlanosCQ } from './PlanosCQ'
+import { DecidirCQ } from './ResultadoCQ'
 
 const ABERTAS = ['pendente', 'em_andamento']
 
@@ -27,6 +28,9 @@ const ACAO: Record<string, string> = {
   reabrir: 'Reabriu',
   gcq_aprovada: 'Aprovada pela GCQ:',
   gcq_devolvida: 'Devolvida pela GCQ:',
+  cq_aprovada: 'Decidiu o CQ:',
+  cq_reprovada: 'Decidiu o CQ:',
+  importar: 'Convertida:',
 }
 
 function Titulo({ children }: { children: React.ReactNode }) {
@@ -80,9 +84,14 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
   const [etapa, setEtapa] = useState<number | null>(null)
   const [expor, setExpor] = useState(false)
   const [ocupado, setOcupado] = useState(false)
+  const [decidir, setDecidir] = useState<DecisaoCQ | null>(null)
   useEffect(() => setEtapa(estado?.sugestao?.id ?? fluxo?.etapas[0]?.id ?? null), [estado, fluxo])
 
   const aberta = lote.passagens.find((p) => ABERTAS.includes(p.situacao))
+  // CQ em andamento (D4): o resultado dos planos decide a sugestão; a decisão (Aprovar ou Nova revisão) é do supervisor.
+  const cqAberto = aberta?.situacao === 'em_andamento' && aberta.fase === 'cq'
+  const { dados: planos } = useApi<Planos>(cqAberto ? `/api/lote_etapas/${aberta!.id}/cq_planos` : null, ['lote', 'carga', 'cq'])
+  const resultado = cqAberto ? planos?.resultado : undefined
   const etapaDe = (p: PassagemLote) => fluxo?.etapas.find((e) => e.id === p.id_fluxo_etapa)
   const naoPuladas = lote.passagens.filter((p) => p.situacao !== 'pulada')
   const ultima = naoPuladas.length ? naoPuladas.reduce((a, b) => (a.id > b.id ? a : b)) : null
@@ -112,6 +121,8 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
     if (aberta.fase === 'envio_gcq') {
       botoes.push({ titulo: 'Aprovada pela GCQ', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/gcq`, corpo: { resultado: 'aprovada' } }] })
       botoes.push({ titulo: 'Devolvida pela GCQ', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/gcq`, corpo: { resultado: 'devolvida' } }] })
+    } else if (aberta.fase === 'cq') {
+      // As duas decisões abrem a confirmação (prévia, observação, aviso de reprovada), como no Esperando você.
     } else {
       if (seguinte)
         botoes.push({
@@ -130,7 +141,27 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
   }
 
   let sugestao: React.ReactNode = null
-  if (aberta?.situacao === 'em_andamento' && seguinte && aberta.fase !== 'envio_gcq')
+  if (cqAberto && resultado)
+    sugestao =
+      resultado.faltam > 0 ? (
+        <>
+          {resultado.faltam === 1 ? 'falta avaliar 1 amostra' : `faltam avaliar ${num(resultado.faltam)} amostras`}
+          {resultado.sem_avaliador > 0 ? ` (${num(resultado.sem_avaliador)} sem avaliador: distribua)` : ' (com os avaliadores)'}; com tudo avaliado, a folha vai para Esperando você com o resultado, e você decide: aprovar{seguinte ? <> e abrir <b>{seguinte.nome}</b></> : ''}, ou nova revisão.
+        </>
+      ) : resultado.resultado === 'reprovado' ? (
+        <>
+          <b>reprovada no CQ</b> ({resultado.frase}): abrir uma <b>nova revisão</b> por outra pessoa. Aprovar mesmo assim também é possível, com observação.
+        </>
+      ) : resultado.resultado === 'aprovado' ? (
+        <>
+          <b>aprovada no CQ</b> ({resultado.frase}): aprovar{seguinte ? <> e abrir <b>{seguinte.nome}</b></> : ''}.
+        </>
+      ) : (
+        <>
+          amostras avaliadas, mas o plano não tem Ac ({resultado.frase}): confira os não conformes e decida entre aprovar e nova revisão.
+        </>
+      )
+  else if (aberta?.situacao === 'em_andamento' && seguinte && aberta.fase !== 'envio_gcq')
     sugestao =
       faltam > 0 ? (
         aberta.fase === 'cq' ? (
@@ -208,8 +239,19 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
       )}
       {!outra && (
         <div className="flex flex-wrap gap-2">
+          {cqAberto && (
+            <>
+              {(['aprovar', 'nova_revisao'] as DecisaoCQ[])
+                .sort((a) => (resultado?.resultado === 'reprovado' ? (a === 'nova_revisao' ? -1 : 1) : a === 'aprovar' ? -1 : 1))
+                .map((d, i) => (
+                  <Button key={d} variant={i === 0 ? 'default' : 'outline'} className={i === 0 ? 'font-semibold' : ''} disabled={ocupado} onClick={() => setDecidir(d)}>
+                    {d === 'aprovar' ? (resultado?.resultado === 'reprovado' ? 'Aprovar mesmo assim…' : seguinte ? `Aprovar e abrir ${seguinte.nome}…` : 'Aprovar…') : 'Nova revisão…'}
+                  </Button>
+                ))}
+            </>
+          )}
           {botoes.map((b, i) => (
-            <Button key={b.titulo} variant={i === 0 ? 'default' : 'outline'} className={i === 0 ? 'font-semibold' : ''} disabled={ocupado || !obs.trim()} onClick={() => rodar(b)}>
+            <Button key={b.titulo} variant={i === 0 && !cqAberto ? 'default' : 'outline'} className={i === 0 && !cqAberto ? 'font-semibold' : ''} disabled={ocupado || !obs.trim()} onClick={() => rodar(b)}>
               {b.titulo}
             </Button>
           ))}
@@ -220,6 +262,16 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
           )}
         </div>
       )}
+      <DecidirCQ
+        lotes={decidir ? [lote.id] : []}
+        decisao={decidir}
+        observacao={obs}
+        fechar={(abertas) => {
+          setDecidir(null)
+          if (abertas) setObs('')
+          if (abertas?.length) distribuir(abertas)
+        }}
+      />
       <span className="text-xs text-muted-foreground">
         {eAberta?.obrigatoria ? `Pular não aparece: ${eAberta.nome} é obrigatória neste fluxo. ` : ''}
         {aberta ? 'Para repetir ou voltar a uma etapa, conclua ou pule a atual; depois "Outra etapa…" abre qualquer etapa do fluxo.' : '"Outra etapa…" abre qualquer etapa do fluxo (repetir uma revisão, voltar).'}

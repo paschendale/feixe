@@ -176,7 +176,8 @@ def planos(ex: Executor, uf: str, id_le: int) -> Dict:
         "p.lqa::float8 AS lqa, p.fracao_critica::float8 AS fracao_critica, p.semente, p.universo, p.resultado, "
         "p.criado_em, count(c.id) AS amostras, count(am.id) FILTER (WHERE am.status IS NOT NULL) AS avaliadas, "
         "count(c.id) FILTER (WHERE c.responsavel IS NOT NULL) AS distribuidas, "
-        "count(am.id) FILTER (WHERE am.status = 0) AS nao_conformes "
+        "count(am.id) FILTER (WHERE am.status = 0) AS nao_conformes, "
+        "count(c.id) FILTER (WHERE c.responsavel IS NULL AND am.status IS NULL) AS sem_avaliador "
         "FROM mapcartacomp.cq_plano p JOIN mapcartacomp.atividade a ON a.id = p.id_atividade "
         "LEFT JOIN mapcartctrl.t_qua_medidadequalidade m ON m.id = a.id_medidadequalidade "
         "LEFT JOIN mapcartacomp.cq_elemento e ON e.id_medidadequalidade = a.id_medidadequalidade "
@@ -186,6 +187,7 @@ def planos(ex: Executor, uf: str, id_le: int) -> Dict:
         (id_le,),
     )
     aberta = p["situacao"] in ABERTAS
+    feitos = [resultado_plano(f) for f in feitos]
     for f in feitos:
         f["inspecao_completa"] = f["n"] is not None and f["N"] is not None and f["n"] >= f["N"]
         f["motivo_refazer"] = _motivo_refazer(f) if aberta else "a etapa já foi encerrada"
@@ -201,7 +203,8 @@ def planos(ex: Executor, uf: str, id_le: int) -> Dict:
         "id_lote_etapa": p["id"], "folha_revisao": p["folha_revisao"], "etapa": p["etapa"],
         "situacao": p["situacao"], "tipo": p["tipo"],
         "padrao": {"nivel": p["nivel_inspecao"], "lqa": _num(p["lqa"]), "fracao_critica": _num(p["fracao_critica"])},
-        "planos": feitos, "sem_plano": sem_plano,
+        "planos": feitos, "sem_plano": sem_plano, "resultado": {k: v for k, v in resumo_passagem(feitos).items()
+                                                                if k != "planos"},
     }  # fmt: skip
 
 
@@ -412,6 +415,124 @@ def gerar_padrao(ex: Executor, passagens: List[Dict]) -> Tuple[List[Dict], List[
             "gravadas": sum(r["n"] for r in rs), "planos": len(rs),
         })  # fmt: skip
     return geradas, avisos
+
+
+# --- Resultado (D4) ------------------------------------------------------------------------------------------------
+# O resultado de cada plano é o do banco (`cq_plano.resultado`, derivado por `f_cq_plano_resultado`): pendente enquanto
+# falta avaliar alguma amostra ou o plano não tem Ac (planos convertidos do DF), reprovado se os não conformes passam do
+# Ac, aprovado senão. O da passagem de CQ: reprovado se algum plano reprovou; aprovado quando todos aprovaram e todas as
+# amostras foram avaliadas; "sem_ac" quando tudo foi avaliado, nada reprovou e algum plano não tem Ac (o supervisor
+# decide sem a régua). Nada disso muda a etapa: aprovar ou abrir nova revisão é decisão do supervisor
+# (`fluxos.decidir_cq`). Nível de conformidade (D-62): percentual de não conformes sobre as avaliadas contra a fração
+# crítica gravada no plano.
+
+_COLUNAS_RESULTADO = (
+    "SELECT p.id, p.id_lote_etapa, le.uf, p.id_atividade, a.nome AS atividade, m.nome::text AS elemento, "
+    "p.tamanho_amostra_n AS n, p.numero_aceitacao_ac AS ac, p.fracao_critica::float8 AS fracao_critica, p.resultado, "
+    "count(c.id) AS amostras, count(am.id) FILTER (WHERE am.status IS NOT NULL) AS avaliadas, "
+    "count(am.id) FILTER (WHERE am.status = 0) AS nao_conformes, "
+    "count(c.id) FILTER (WHERE c.responsavel IS NULL AND am.status IS NULL) AS sem_avaliador, "
+    "mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, fe.nome AS etapa, coalesce(e.ordem, 99) "
+    "AS ordem FROM mapcartacomp.cq_plano p JOIN mapcartacomp.atividade a ON a.id = p.id_atividade "
+    "JOIN mapcartacomp.lote_etapa le ON le.id = p.id_lote_etapa JOIN mapcartacomp.lote l ON l.id = le.id_lote "
+    "JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+    "LEFT JOIN mapcartctrl.t_qua_medidadequalidade m ON m.id = a.id_medidadequalidade "
+    "LEFT JOIN mapcartacomp.cq_elemento e ON e.id_medidadequalidade = a.id_medidadequalidade "
+    "LEFT JOIN mapcartacomp.carga_trabalho c ON c.id_cq_plano = p.id "
+    "LEFT JOIN mapcartacomp.cq_amostra am ON am.id_carga_trabalho = c.id "
+)
+_AGRUPAR_RESULTADO = (
+    " GROUP BY p.id, le.id, l.id, fe.nome, a.nome, m.nome, e.ordem ORDER BY coalesce(e.ordem, 99), a.nome"
+)
+
+
+def _pc(x: float) -> str:
+    """Percentual em português: 2.5 -> "2,5%", 10.0 -> "10%"."""
+    return f"{x:.1f}".rstrip("0").rstrip(".").replace(".", ",") + "%"
+
+
+def _nc(n: int) -> str:
+    return f"{n} {'não conforme' if n == 1 else 'não conformes'}"
+
+
+def resultado_plano(f: Dict) -> Dict:
+    """Acrescenta ao plano (com elemento ou atividade, amostras, avaliadas, nao_conformes, ac, fracao_critica e
+    resultado) a frase do resultado, o que falta avaliar e o nível de conformidade, para a tela e o histórico."""
+    nome = f.get("elemento") or f["atividade"]
+    nc, av, total, ac = f["nao_conformes"], f["avaliadas"], f["amostras"], f["ac"]
+    faltam = total - av
+    sem_ac = ac is None
+    frase = f"{nome}: {_nc(nc)}, " + ("sem Ac no plano" if sem_ac else f"aceita até {ac}")
+    if faltam:
+        frase += f" ({av} de {total} avaliadas)"
+    resumo = f"{nome} {nc} de {av}" + ("" if sem_ac else f" (aceita até {ac})")
+    if faltam:
+        resumo += f", faltam {faltam}"
+    observado = round(100.0 * nc / av, 1) if av else None
+    fc = f.get("fracao_critica")
+    if observado is None:
+        situacao, leitura = None, f"{nome}: nenhuma amostra avaliada ainda"
+    elif fc is None:
+        situacao = None
+        leitura = f"{nome}: {_pc(observado)} de não conformes nas {av} avaliadas; o plano não tem fração crítica"
+    else:
+        situacao = "dentro" if observado <= fc else "acima"
+        leitura = f"{nome}: {_pc(observado)} de não conformes nas {av} avaliadas, fração crítica {_pc(fc)}: " + (
+            "dentro" if situacao == "dentro" else "acima da fração crítica"
+        )
+    return {
+        **f, "faltam": faltam, "sem_ac": sem_ac, "excede": not sem_ac and nc > ac, "frase": frase, "resumo": resumo,
+        "conformidade": {"observado": observado, "fracao_critica": fc, "situacao": situacao, "leitura": leitura},
+    }  # fmt: skip
+
+
+def resumo_passagem(planos_: List[Dict]) -> Dict:
+    """Resultado da passagem de CQ a partir dos planos já com `resultado_plano`."""
+    faltam = sum(p["faltam"] for p in planos_)
+    if not planos_:
+        resultado = "sem_planos"
+    elif any(p["resultado"] == "reprovado" for p in planos_):
+        resultado = "reprovado"
+    elif faltam:
+        resultado = "pendente"
+    elif any(p["sem_ac"] for p in planos_):
+        resultado = "sem_ac"
+    else:
+        resultado = "aprovado"
+    return {
+        "resultado": resultado,
+        "amostras": sum(p["amostras"] for p in planos_),
+        "avaliadas": sum(p["avaliadas"] for p in planos_),
+        "faltam": faltam,
+        "sem_avaliador": sum(p.get("sem_avaliador", 0) for p in planos_),
+        "frase": "; ".join(p["frase"] for p in planos_),
+        "resumo": "; ".join(p["resumo"] for p in planos_),
+        "planos": planos_,
+    }
+
+
+def resultados(ex: Executor, ids_le: List[int]) -> Dict[int, Dict]:
+    """Resultado de várias passagens de CQ numa consulta (Esperando você, decisão em lote): {passagem: resumo}.
+    Passagem sem plano volta com resultado "sem_planos"."""
+    if not ids_le:
+        return {}
+    por_le: Dict[int, List[Dict]] = {i: [] for i in ids_le}
+    for r in ex.todos(_COLUNAS_RESULTADO + "WHERE p.id_lote_etapa = ANY(%s)" + _AGRUPAR_RESULTADO, (list(ids_le),)):
+        por_le.setdefault(r["id_lote_etapa"], []).append(resultado_plano(_enxuto(r)))
+    return {le: {"id_lote_etapa": le, **resumo_passagem(ps)} for le, ps in por_le.items()}
+
+
+def _enxuto(r: Dict) -> Dict:
+    return {k: v for k, v in r.items() if k not in ("uf", "ordem", "folha_revisao", "etapa")}
+
+
+def plano(ex: Executor, uf: str, id_plano: int) -> Dict:
+    """Um plano com o resultado (`GET /api/cq_planos/{id}`): n, avaliadas, não conformes, Ac, resultado, a frase e o
+    nível de conformidade, mais a folha e a etapa."""
+    r = ex.um(_COLUNAS_RESULTADO + "WHERE p.id = %s" + _AGRUPAR_RESULTADO, (id_plano,))
+    if not r or r["uf"] != uf:
+        raise ErroDados("plano de CQ não encontrado na sua unidade", 404)
+    return {**resultado_plano(_enxuto(r)), "folha_revisao": r["folha_revisao"], "etapa": r["etapa"]}
 
 
 # --- Ocorrências da folha (supervisão, D3a; base do D4 e do D5) ----------------------------------------------------

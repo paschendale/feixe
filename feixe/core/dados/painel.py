@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from . import Executor
+from . import cq as dcq
 from . import fluxos as df
 from .grupos import _agrupar
 
@@ -215,15 +216,16 @@ def nomes(ex: Executor, contas: List[str]) -> Dict[str, str]:
 
 def esperando(ex: Executor, uf: str) -> List[Dict]:
     """Folhas cuja última etapa terminou (concluída ou pulada, ou em andamento com todas as cargas concluídas) e que só
-    andam quando o supervisor abrir a próxima.
+    andam quando o supervisor abrir a próxima. No CQ, todas as amostras avaliadas: a folha vem com o resultado
+    (`cq.resultados`) e espera Aprovar ou Nova revisão (D4).
 
     Agrupadas pela decisão: tema, etapa que terminou e a próxima do fluxo (nula = fim do fluxo). Folha já CONCLUIDA
     para a CCAR fica de fora.
     """
     linhas = ex.todos(
         "SELECT l.id AS id_lote, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, "
-        "l.id_tema, t.nome AS tema, fe.id AS id_etapa, fe.nome AS etapa, le.situacao, "
-        "coalesce(le.concluida_em, le.atualizado_em) AS desde, l.id_fluxo, fl.nome AS fluxo, "
+        "l.id_tema, t.nome AS tema, fe.id AS id_etapa, fe.nome AS etapa, le.situacao, le.id AS id_lote_etapa, "
+        "fe.fase, le.resultado, coalesce(le.concluida_em, le.atualizado_em) AS desde, l.id_fluxo, fl.nome AS fluxo, "
         "n.id AS id_proxima, n.nome AS proxima "
         "FROM mapcartacomp.lote l "
         f"JOIN mapcartacomp.lote_etapa le ON le.id = {df._ULTIMA} "
@@ -242,7 +244,8 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
     # mesma decisão; abrir a próxima conclui a etapa (`fluxos.avancar`).
     linhas += ex.todos(
         "SELECT l.id AS id_lote, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, "
-        "l.id_tema, t.nome AS tema, fe.id AS id_etapa, fe.nome AS etapa, le.situacao, "
+        "l.id_tema, t.nome AS tema, fe.id AS id_etapa, fe.nome AS etapa, le.situacao, le.id AS id_lote_etapa, "
+        "fe.fase, le.resultado, "
         "(SELECT max(c.concluido_em) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id) AS desde, "
         "l.id_fluxo, fl.nome AS fluxo, n.id AS id_proxima, n.nome AS proxima "
         "FROM mapcartacomp.lote l "
@@ -258,12 +261,21 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
         "AND NOT c.concluido) ORDER BY t.nome, fe.ordem, folha_revisao",
         (uf,),
     )
+    # CQ (D4): a folha com o CQ avaliado espera a decisão sobre o resultado (Aprovar ou Nova revisão), e as folhas com
+    # o mesmo resultado ficam juntas, para decidir em lote. CQ já decidido (aprovado no fim do fluxo) é só fim do fluxo.
+    for r in linhas:
+        if r["fase"] == "cq" and r["resultado"]:
+            r["fase"] = None
+    res = dcq.resultados(ex, [r["id_lote_etapa"] for r in linhas if r["fase"] == "cq"])
     grupos: Dict[tuple, Dict] = {}
     for r in linhas:
+        cq = res.get(r["id_lote_etapa"]) if r["fase"] == "cq" else None
+        resultado = cq["resultado"] if cq else None
         g = grupos.setdefault(
-            (r["id_tema"], r["id_etapa"], r["id_proxima"]),
+            (r["id_tema"], r["id_etapa"], r["id_proxima"], resultado),
             {"tema": r["tema"], "etapa": r["etapa"], "fluxo": r["fluxo"], "id_proxima": r["id_proxima"],
-             "proxima": r["proxima"], "folhas": [], "desde": None, "ate": None},
+             "proxima": r["proxima"], "fase": r["fase"], "resultado": resultado, "folhas": [], "desde": None,
+             "ate": None},
         )  # fmt: skip
         g["folhas"].append(
             {
@@ -271,10 +283,11 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
                 "folha_revisao": r["folha_revisao"],
                 "situacao": r["situacao"],
                 "desde": r["desde"],
+                "cq": cq,
             }
         )
         if r["desde"] is not None:
             g["desde"] = r["desde"] if g["desde"] is None else min(g["desde"], r["desde"])
             g["ate"] = r["desde"] if g["ate"] is None else max(g["ate"], r["desde"])
-    # Fim do fluxo por último: é outra decisão (encerrar a folha), não abrir a próxima.
-    return sorted(grupos.values(), key=lambda g: (g["id_proxima"] is None, -len(g["folhas"])))
+    # Fim do fluxo por último: é outra decisão (encerrar a folha), não abrir a próxima. O CQ decide mesmo no fim.
+    return sorted(grupos.values(), key=lambda g: (g["id_proxima"] is None and g["fase"] != "cq", -len(g["folhas"])))

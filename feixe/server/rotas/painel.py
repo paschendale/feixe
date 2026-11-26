@@ -1,10 +1,12 @@
-"""Painel no navegador (D-103): Início por papel, "Esperando você" e a próxima etapa em várias folhas (D-109)."""
+"""Painel no navegador (D-103): Início por papel, "Esperando você", a próxima etapa em várias folhas (D-109) e a
+decisão sobre o resultado do CQ (D4)."""
 
 from __future__ import annotations
 
 import contextlib
 from typing import Dict, Iterable, List
 
+from ...core.dados import ErroDados
 from ...core.dados import fluxos as df
 from ...core.dados import painel as dp
 from ...core.dados.local import cargas as lc
@@ -60,6 +62,32 @@ def avancar(ctx, uf: str, ids: List[int], observacao: str, previa: bool) -> Dict
     return r if previa else _abertas(ctx, uf, r)
 
 
+def decidir_cq(ctx, uf: str, ids: List[int], decisao: str, observacao: str, previa: bool, forcar=False, expor=False):
+    """Aprovar ou Nova revisão no CQ de várias folhas (D4): na prévia, o que acontece em cada uma; sem prévia, cada
+    folha na sua transação (uma recusa não desfaz as outras), e as cargas da etapa aberta saem em seguida."""
+    if previa:
+        with ctx.tx() as ex:
+            return df.previa_cq(ex, uf, ids, decisao)
+    if decisao not in df.DECISOES_CQ:
+        raise ErroApi(400, "decisão do CQ: aprovar ou nova_revisao")
+    abertas, decididas, erros = [], [], []
+    for i in ids:
+        try:
+            with ctx.tx() as ex:
+                d = df.decidir_cq(ex, uf, i, decisao, observacao, forcar, expor)
+        except ErroDados as e:
+            if e.status == 400:
+                raise ErroApi(400, e.mensagem) from None
+            erros.append({"id_lote": i, "erro": e.mensagem})
+            continue
+        decididas.append({"id_lote": i, "folha_revisao": d["folha_revisao"], "resultado": d["resultado"]})
+        if d["id_lote_etapa_nova"]:
+            abertas.append({"id_lote": i, "id_lote_etapa": d["id_lote_etapa_nova"], "etapa": d["proxima"]})
+    if decididas:
+        ctx.publicar("lote", {"acao": "cq_" + decisao, "ids": [d["id_lote"] for d in decididas]})
+    return _abertas(ctx, uf, {"decididas": decididas, "abertas": abertas, "erros": erros})
+
+
 def registrar(r, ctx) -> None:
     @r.rota("GET", "/api/painel/supervisao", exige=("supervisor", "gerente"))
     def _supervisao(req):
@@ -82,6 +110,17 @@ def registrar(r, ctx) -> None:
             r = execucao(ctx, ex, tz)
         # Os nomes fora da leitura do workspace: a consulta à CCAR (quando falta um nome) não segura o GeoPackage.
         return 200, _com_nomes(ctx, r)
+
+    @r.rota("POST", "/api/lotes/cq_decisao", exige=("supervisor",))
+    def _cq_decisao(req):
+        ids = campo(req, "lotes", lambda v: [int(x) for x in v])
+        if not ids:
+            raise ErroApi(400, "escolha pelo menos uma folha")
+        return 200, decidir_cq(
+            ctx, uf_de(ctx.eu()), ids, campo(req, "decisao", str), campo(req, "observacao", str, padrao=""),
+            campo(req, "previa", bool, padrao=True), campo(req, "forcar", bool, padrao=False),
+            campo(req, "expor_ocorrencias", bool, padrao=False),
+        )  # fmt: skip
 
     @r.rota("POST", "/api/lotes/avancar", exige=("supervisor",))
     def _avancar(req):

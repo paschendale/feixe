@@ -2,7 +2,7 @@
 """Verificação headless da fase D contra o banco de dev, sem abrir o QGIS. Cada item acrescenta a sua seção.
 
 Uso (Mac, com o QGIS-LTR):
-    /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 scripts/dev/verificar_fase_d.py [d3a d3c ...]
+    /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 scripts/dev/verificar_fase_d.py [d3a d3c d4 ...]
 
 Sem argumentos roda todas as seções. Lê o banco de config/ambientes.json (dev) e o usuário e a senha de FEIXE_CCAR no
 .dev.env da raiz. Usa perfil do QGIS, banco de autenticação e workspaces temporários, apagados no fim. A CCAR
@@ -619,6 +619,116 @@ def d3c(amb, usuario, senha):
             ex.executar(f"DELETE FROM {S}.fluxo WHERE id = %s", (f.fluxo,))
             ex.executar(f"DELETE FROM {S}.atividade WHERE id = ANY(%s)", ([f.aq, f.cq, f.cq2],))
             ex.executar(f"DELETE FROM {S}.tema WHERE id = %s", (f.tema,))
+
+
+@secao("d4")
+def d4(amb, usuario, senha):
+    """Ciclo do resultado do CQ pelas rotas: CQ avaliado e reprovado em Esperando você, nova revisão (folha-2, cargas
+    pela grade), CQ de novo sorteando outras células, aprovado, e a próxima etapa aberta."""
+    from feixe.server.api import Contexto, criar_roteador
+
+    tag = uuid_mod.uuid4().hex[:8]
+    apm = f"t_d4_apm_{tag}"
+
+    def tx():
+        return db.transacao(amb, usuario, senha, timeout_conexao=5)
+
+    with tx() as ex:
+        f = Folha(ex, tag)
+        ex.executar(f"UPDATE {S}.atividade SET geracao = 'grade', grade_nivel = 5000 WHERE id = %s", (f.aq,))
+        etapa_ci = ex.um(
+            f"INSERT INTO {S}.fluxo_etapa (id_fluxo, ordem, fase, nome, conta_revisao, repetivel) "
+            "VALUES (%s, 3, 'correcao_inspecao', 'Correção de inspeção', false, true) RETURNING id",
+            (f.fluxo,),
+        )["id"]
+        le_aq = f.passagem(ex, f.etapa_aq, "concluida")
+        ex.executar(
+            f"INSERT INTO {S}.carga_trabalho (uuid, id_lote_etapa, id_atividade, responsavel, geom, concluido) "
+            f"SELECT %s, %s, %s, %s, ST_Multi(ST_Buffer(ST_Centroid(ar.geom), 0.01)), true FROM {S}.lote l "
+            "JOIN mapcartctrl.t_articulacao_scn ar ON ar.id_articulacao_scn = l.id_articulacao_scn WHERE l.id = %s",
+            (novo_uuid(), le_aq, f.aq, apm, f.lote),
+        )
+        le_cq = f.passagem(ex, f.etapa_cq, "pendente")
+    ctx = Contexto(transacao=tx, publicar=lambda e, d: None)
+    ctx._eu = {"conta": usuario, "uf": "DF", "papeis": ["supervisor"], "perfis": []}
+    api = criar_roteador(ctx)
+
+    def rota(metodo, caminho, corpo=None):
+        st, obj = api.despachar(metodo, caminho, {}, corpo)
+        assert st == 200, (caminho, st, obj)
+        return obj
+
+    def avaliar(le, nao_conformes):
+        """Abre o CQ (os planos saem sozinhos), inicia e avalia (as `nao_conformes` primeiras não conformes)."""
+        rota("POST", "/api/lotes/preparar", {"lote_etapas": [le]})
+        with tx() as ex:
+            ex.executar(
+                f"UPDATE {S}.lote_etapa SET situacao = 'em_andamento', iniciada_em = now() WHERE id = %s", (le,)
+            )
+            ids = [r["id"] for r in ex.todos(
+                f"SELECT a.id FROM {S}.cq_amostra a JOIN {S}.cq_plano p ON p.id = a.id_cq_plano "
+                "WHERE p.id_lote_etapa = %s ORDER BY a.id", (le,))]  # fmt: skip
+            for i, a in enumerate(ids):
+                ex.executar(f"UPDATE {S}.cq_amostra SET status = %s WHERE id = %s", (0 if i < nao_conformes else 1, a))
+            return {r["geocodigo"] for r in ex.todos(
+                f"SELECT geocodigo FROM {S}.carga_trabalho WHERE id_lote_etapa = %s", (le,))}  # fmt: skip
+
+    def esperando():
+        grupos = rota("GET", "/api/painel/esperando")["grupos"]
+        return [g for g in grupos if g["tema"] == f"verificar_d3a_{tag}"]
+
+    try:
+        primeiras = avaliar(le_cq, 3)
+        (g,) = esperando()
+        (folha,) = g["folhas"]
+        assert (g["fase"], g["resultado"]) == ("cq", "reprovado"), g
+        assert folha["cq"]["frase"] == "Omissão: 3 não conformes, aceita até 2", folha["cq"]["frase"]
+        (p,) = folha["cq"]["planos"]
+        um = rota("GET", f"/api/cq_planos/{p['id']}")
+        assert um["resultado"] == "reprovado" and um["conformidade"]["situacao"] == "acima", um
+        ok(f"CQ avaliado em Esperando você: reprovada, “{folha['cq']['frase']}”, {um['conformidade']['leitura']}")
+
+        corpo = {"lotes": [f.lote], "decisao": "nova_revisao"}
+        (item,) = rota("POST", "/api/lotes/cq_decisao", corpo)["itens"]
+        assert item["erro"] is None and item["nova_folha"] == "2534-2" and item["autores"], item
+        r = rota("POST", "/api/lotes/cq_decisao", {**corpo, "previa": False, "observacao": "omissão acima do aceito"})
+        (aberta,) = r["abertas"]
+        (gerada,) = r["preparo"]["geradas"]
+        assert not esperando()
+        with tx() as ex:
+            h = ex.um(f"SELECT observacao FROM {S}.lote_etapa_hist WHERE id_lote_etapa = %s AND acao = 'cq_reprovada'",
+                      (le_cq,))  # fmt: skip
+            rev = ex.um(f"SELECT revisao, expor_ocorrencias FROM {S}.lote_etapa WHERE id = %s",
+                        (aberta["id_lote_etapa"],))  # fmt: skip
+        assert rev == {"revisao": 2, "expor_ocorrencias": False}, rev
+        ok(f"nova revisão: 2534-2 aberta às cegas com {gerada['gravadas']} cargas; histórico “{h['observacao']}”")
+
+        # A revisão termina (as cargas concluídas) e a próxima etapa abre o CQ de novo, com outro sorteio.
+        with tx() as ex:
+            ex.executar(f"UPDATE {S}.carga_trabalho SET responsavel = %s, concluido = true WHERE id_lote_etapa = %s",
+                        (apm + "_2", aberta["id_lote_etapa"]))  # fmt: skip
+            ex.executar(f"UPDATE {S}.lote_etapa SET situacao = 'em_andamento', iniciada_em = now() WHERE id = %s",
+                        (aberta["id_lote_etapa"],))  # fmt: skip
+        r = rota("POST", "/api/lotes/avancar", {"lotes": [f.lote], "previa": False, "observacao": "revisão feita"})
+        (cq2,) = r["abertas"]
+        segundas = avaliar(cq2["id_lote_etapa"], 0)
+        assert segundas and not (primeiras & segundas), primeiras & segundas
+        (g,) = esperando()
+        assert g["resultado"] == "aprovado" and g["folhas"][0]["folha_revisao"] == "2534-2", g
+        ok(f"CQ de novo na 2534-2: {len(segundas)} células, nenhuma das {len(primeiras)} da primeira; aprovada")
+
+        r = rota("POST", "/api/lotes/cq_decisao", {"lotes": [f.lote], "decisao": "aprovar", "previa": False,
+                                                   "observacao": "dentro do aceito"})  # fmt: skip
+        (aberta,) = r["abertas"]
+        assert aberta["etapa"] == "Correção de inspeção" and not r["erros"], r
+        estado = rota("GET", f"/api/lotes/{f.lote}/estado")
+        assert estado["etapa"] == "Correção de inspeção", estado
+        ok("aprovada no CQ: Correção de inspeção aberta (sem atividade, já em andamento)")
+    finally:
+        with tx() as ex:
+            ex.executar(f"DELETE FROM {S}.lote WHERE id = %s", (f.lote,))
+            ex.executar(f"DELETE FROM {S}.fluxo_etapa WHERE id = %s", (etapa_ci,))
+            f.apagar(ex)
 
 
 def main():

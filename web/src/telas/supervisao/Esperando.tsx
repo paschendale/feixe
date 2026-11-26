@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Bloco, Carregando, Conteudo, COR, RotuloEstavel } from '@/components/painel'
-import type { GrupoEsperando, ResultadoAvanco } from '@/lib/api'
+import type { DecisaoCQ, GrupoEsperando, ResultadoAvanco } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { diaMes, num, plural } from '@/lib/formato'
 import { href } from '@/lib/rotas'
@@ -10,6 +10,7 @@ import { enviar } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 import { Distribuir } from '../folhas/Distribuir'
 import { comCargas, resumoPreparo } from '../folhas/preparo'
+import { DecidirCQ, ElementoCQ, RESULTADO, SeloResultado } from './ResultadoCQ'
 
 const VISIVEIS = 12
 
@@ -28,6 +29,107 @@ function resumirRecusas(erros: { id_lote: number; erro: string }[], nome: (id: n
   return [...porMotivo]
     .map(([motivo, folhas]) => `${plural(folhas.length, 'folha', 'folhas')} não ${folhas.length === 1 ? 'abriu' : 'abriram'}: ${motivo} (${folhas.slice(0, 4).join(', ')}${folhas.length > 4 ? ', …' : ''})`)
     .join(' · ')
+}
+
+// Folhas com o CQ avaliado (D4), agrupadas pelo resultado: por folha, a frase por elemento e, no detalhe, o nível de
+// conformidade com o velocímetro. Marque as que vão juntas e decida: Aprovar (abre a etapa seguinte) ou Nova revisão
+// (abre a revisão seguinte por outra pessoa). Cada folha numa transação; a confirmação mostra o que vai acontecer.
+function GrupoCQ({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: () => void; distribuir: (ids: number[]) => void }) {
+  const [marcadas, setMarcadas] = useState<Set<number>>(new Set())
+  const [detalhe, setDetalhe] = useState<number | null>(null)
+  const [decidir, setDecidir] = useState<DecisaoCQ | null>(null)
+  const tudo = marcadas.size === g.folhas.length
+  const r = g.resultado ?? 'pendente'
+  const reprovadas = r === 'reprovado'
+  const acoes: DecisaoCQ[] = reprovadas ? ['nova_revisao', 'aprovar'] : ['aprovar', 'nova_revisao']
+  // Rótulos fixos (a barra não muda de largura ao marcar); quantas folhas, a confirmação diz.
+  const rotulo = (d: DecisaoCQ) => (d === 'nova_revisao' ? 'Nova revisão…' : reprovadas ? 'Aprovar mesmo assim…' : `Aprovar${g.proxima ? ` e abrir ${g.proxima}` : ''}…`)
+  return (
+    <Bloco className="gap-4" style={{ borderColor: reprovadas ? '#E8C9A0' : undefined }}>
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <h2 className="text-base font-semibold">
+          {g.tema} · {g.etapa} avaliado
+        </h2>
+        <span className="text-[13px] text-muted-foreground">
+          {plural(g.folhas.length, 'folha', 'folhas')} com todas as amostras avaliadas {periodo(g)}
+        </span>
+        <span className="ml-auto self-center">
+          <SeloResultado resultado={r} />
+        </span>
+      </div>
+      <p className="text-[13px] text-texto-2">
+        {reprovadas
+          ? 'Os não conformes passaram do aceito em pelo menos um elemento. O caminho sugerido é uma nova revisão por outra pessoa; aprovar mesmo assim pede a sua confirmação.'
+          : r === 'aprovado'
+            ? `Todos os elementos ficaram dentro do aceito. O caminho sugerido é aprovar${g.proxima ? ` e abrir ${g.proxima}` : ''}.`
+            : 'Os planos não têm Ac (convertidos do DF): o Feixe não tem a régua. Confira os não conformes e decida.'}
+      </p>
+      <ul className="flex flex-col">
+        {g.folhas.map((f) => (
+          <li key={f.id_lote} className="border-t border-linha py-2 first:border-0">
+            <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+              <label className={cn('tab inline-flex w-[104px] cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm', marcadas.has(f.id_lote) ? 'border-ibge bg-[#EEF3FA]' : 'hover:bg-accent')}>
+                <input
+                  type="checkbox"
+                  checked={marcadas.has(f.id_lote)}
+                  onChange={() =>
+                    setMarcadas((m) => {
+                      const n = new Set(m)
+                      if (n.has(f.id_lote)) n.delete(f.id_lote)
+                      else n.add(f.id_lote)
+                      return n
+                    })
+                  }
+                />
+                {f.folha_revisao}
+              </label>
+              <span className="truncate text-[13px] text-texto-2" title={f.cq?.frase}>
+                {f.cq?.frase}
+              </span>
+              <button className="px-1 text-[13px] text-ibge hover:underline" aria-expanded={detalhe === f.id_lote} onClick={() => setDetalhe(detalhe === f.id_lote ? null : f.id_lote)}>
+                <RotuloEstavel ocupado={detalhe === f.id_lote} rotulo="Ver detalhe" rotuloOcupado="Fechar detalhe" />
+              </button>
+            </div>
+            {detalhe === f.id_lote && f.cq && (
+              <div className="mt-2.5 flex flex-col gap-3 rounded-lg bg-[#F7F9FB] p-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {f.cq.planos.map((p) => (
+                    <ElementoCQ key={p.id} p={p} compacto />
+                  ))}
+                </div>
+                <a className="self-start text-[13px] text-ibge hover:underline" href={href(`supervisao/folhas/${f.id_lote}`, { grupo: 'todas' })}>
+                  Abrir a folha (ocorrências e histórico)
+                </a>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+      <div className="flex flex-wrap items-center gap-2.5 border-t pt-4">
+        {acoes.map((d, i) => (
+          <Button key={d} variant={i === 0 ? 'default' : 'outline'} className={i === 0 ? 'font-semibold' : ''} disabled={!marcadas.size} onClick={() => setDecidir(d)}>
+            {rotulo(d)}
+          </Button>
+        ))}
+        <Button variant="outline" onClick={() => setMarcadas(tudo ? new Set() : new Set(g.folhas.map((f) => f.id_lote)))}>
+          <RotuloEstavel ocupado={tudo} rotulo={`Marcar as ${num(g.folhas.length)}`} rotuloOcupado="Desmarcar" />
+        </Button>
+        <span className="text-xs text-muted-foreground">{RESULTADO[r].rotulo === 'Reprovada' ? 'A observação e o resultado vão para o histórico de cada folha.' : 'A confirmação mostra o que acontece em cada folha.'}</span>
+      </div>
+      <DecidirCQ
+        lotes={decidir ? [...marcadas] : []}
+        decisao={decidir}
+        fechar={(abertas) => {
+          setDecidir(null)
+          if (abertas) {
+            setMarcadas(new Set())
+            if (abertas.length) distribuir(abertas)
+          }
+          recarregar()
+        }}
+      />
+    </Bloco>
+  )
 }
 
 function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: () => void; distribuir: (ids: number[]) => void }) {
@@ -152,12 +254,16 @@ export default function Esperando({ grupos, recarregar }: { grupos: GrupoEsperan
         <Bloco className="text-muted-foreground">Nenhuma folha esperando você: todas as folhas da unidade estão com uma etapa aberta ou encerradas.</Bloco>
       ) : (
         <p className="max-w-[820px] text-base">
-          <b>{plural(n, 'folha', 'folhas')}</b> {n === 1 ? 'terminou' : 'terminaram'} a etapa atual (as cargas estão concluídas) e só {n === 1 ? 'anda' : 'andam'} quando você abrir a próxima. Elas estão agrupadas pela decisão; marque as que vão juntas e decida de uma vez, com uma observação só. Abrir a próxima conclui a etapa, gera as cargas da seguinte e abre a distribuição.
+          <b>{plural(n, 'folha', 'folhas')}</b> {n === 1 ? 'terminou' : 'terminaram'} a etapa atual (as cargas estão concluídas) e só {n === 1 ? 'anda' : 'andam'} quando você abrir a próxima. Elas estão agrupadas pela decisão; marque as que vão juntas e decida de uma vez, com uma observação só. Abrir a próxima conclui a etapa, gera as cargas da seguinte e abre a distribuição. No CQ, a decisão é sobre o resultado: aprovar ou nova revisão.
         </p>
       )}
-      {grupos.map((g) => (
-        <Grupo key={`${g.tema}-${g.etapa}-${g.id_proxima}`} g={g} recarregar={recarregar} distribuir={setDistribuir} />
-      ))}
+      {grupos.map((g) =>
+        g.fase === 'cq' ? (
+          <GrupoCQ key={`${g.tema}-${g.etapa}-${g.id_proxima}-${g.resultado}`} g={g} recarregar={recarregar} distribuir={setDistribuir} />
+        ) : (
+          <Grupo key={`${g.tema}-${g.etapa}-${g.id_proxima}`} g={g} recarregar={recarregar} distribuir={setDistribuir} />
+        ),
+      )}
       <Distribuir lotes={distribuir} fechar={() => setDistribuir([])} />
     </Conteudo>
   )

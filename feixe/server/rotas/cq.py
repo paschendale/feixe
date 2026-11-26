@@ -227,7 +227,12 @@ def registrar(r, ctx) -> None:
         with ctx.tx() as ex:
             return 200, dq.ocorrencias_do_lote(ex, uf_de(ctx.eu()), inteiro(req.params["id"]))
 
-    # --- planos (D2), na CCAR ---
+    # --- planos (D2) e resultado (D4), na CCAR ---
+
+    @r.rota("GET", "/api/cq_planos/{id}", exige=("supervisor",))
+    def _um_plano(req):
+        with ctx.tx() as ex:
+            return 200, dq.plano(ex, uf_de(ctx.eu()), inteiro(req.params["id"]))
 
     @r.rota("GET", "/api/lote_etapas/{id}/cq_planos", exige=("supervisor",))
     def _planos(req):

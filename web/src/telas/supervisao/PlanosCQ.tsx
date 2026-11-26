@@ -8,6 +8,7 @@ import type { PlanoCQ, PlanosCQ as Planos, PreviaCQ } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { lista, num, plural } from '@/lib/formato'
 import { enviar, useApi } from '@/lib/useApi'
+import { ElementoCQ, SeloResultado } from './ResultadoCQ'
 
 // Parâmetros dos Quadros 5 e 6 do manual (core/cq/amostragem.py): níveis gerais de inspeção e colunas de LQA.
 export const NIVEIS = ['I', 'II', 'III']
@@ -202,8 +203,8 @@ export function PlanosCQ({ idLoteEtapa, folha, distribuir }: { idLoteEtapa: numb
   const aberta = ['pendente', 'em_andamento'].includes(dados.situacao)
   const porArea = dados.sem_plano.filter((a) => !a.por_feicao)
   const porFeicao = dados.sem_plano.filter((a) => a.por_feicao)
-  const amostras = dados.planos.reduce((s, p) => s + p.amostras, 0)
-  const semAvaliador = amostras - dados.planos.reduce((s, p) => s + p.distribuidas, 0)
+  // Sem avaliador = ainda sem avaliação e sem responsável (a amostra avaliada já não pede distribuição).
+  const semAvaliador = dados.resultado.sem_avaliador
   const temPadrao = !!dados.padrao.nivel && dados.padrao.lqa != null
 
   return (
@@ -252,6 +253,35 @@ export function PlanosCQ({ idLoteEtapa, folha, distribuir }: { idLoteEtapa: numb
             ))}
           </tbody>
         </table>
+      )}
+      {dados.planos.length > 0 && (
+        <div className="flex flex-col gap-3 rounded-lg border bg-card px-3.5 py-3" aria-label="Resultado do CQ">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px]">
+            <b>Resultado</b>
+            <SeloResultado resultado={dados.resultado.resultado} />
+            <span className="text-muted-foreground">
+              {dados.resultado.faltam > 0
+                ? `faltam ${plural(dados.resultado.faltam, 'amostra', 'amostras')} (${num(dados.resultado.avaliadas)} de ${num(dados.resultado.amostras)} avaliadas)`
+                : `todas as ${plural(dados.resultado.amostras, 'amostra avaliada', 'amostras avaliadas')}`}
+            </span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {dados.planos.map((p) => (
+              <ElementoCQ key={p.id} p={p} compacto />
+            ))}
+          </div>
+          {/* Com amostras sem avaliador, o próximo passo (Distribuir) vem logo abaixo, com o botão. */}
+          {aberta && dados.resultado.faltam > 0 && semAvaliador === 0 && (
+            <span className="text-[13px] text-[#1C2F4A]">
+              <b>Próximo passo: esperar os avaliadores.</b> A folha aparece em Esperando você, com o resultado, quando todas as amostras forem avaliadas.
+            </span>
+          )}
+          {aberta && dados.resultado.faltam === 0 && (
+            <span className="text-[13px] text-[#1C2F4A]">
+              <b>Próximo passo: decidir</b> em “Andar com a folha” (abaixo): Aprovar ou Nova revisão.
+            </span>
+          )}
+        </div>
       )}
       {aberta && porArea.length > 0 && (
         <div className="flex flex-col gap-2 rounded-lg bg-[#EEF3FA] px-3.5 py-3 text-[13px] text-[#1C2F4A]">
