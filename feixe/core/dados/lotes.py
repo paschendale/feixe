@@ -173,6 +173,58 @@ def criar_livres(
     return {"tema": fluxo["tema"], "criados": criados, "existentes": existentes, "erros": erros}
 
 
+def excluir(ex: Executor, uf: str, ids: List[int], previa: bool, projetos: Optional[Iterable[int]] = None) -> Dict:
+    """Exclui folhas e lotes criados por engano (D-155): o lote, as passagens, as cargas, os planos de CQ, a fila e o
+    histórico. Só sem trabalho feito: nenhuma carga concluída, nenhuma amostra avaliada e nenhuma ocorrência de
+    inspeção; com trabalho, recusa com o motivo (o caminho é tirar cargas na gaveta). Cargas pendentes com alguém saem
+    do workspace dessa pessoa no próximo pull. Na prévia, o que acontece com cada um; sem prévia, apaga os aceitos."""
+    if not ids:
+        raise ErroDados("escolha pelo menos uma folha", 400)
+    linhas = ex.todos(
+        "SELECT l.id AS id_lote, l.uf, l.cod_projeto, l.tipo, coalesce(c.folha_revisao, l.nome) AS folha_revisao, "
+        "(SELECT count(*) FROM mapcartacomp.carga_trabalho x JOIN mapcartacomp.lote_etapa le "
+        " ON le.id = x.id_lote_etapa WHERE le.id_lote = l.id) AS cargas, "
+        "(SELECT count(*) FROM mapcartacomp.carga_trabalho x JOIN mapcartacomp.lote_etapa le "
+        " ON le.id = x.id_lote_etapa WHERE le.id_lote = l.id AND x.concluido) AS concluidas, "
+        "(SELECT count(DISTINCT x.responsavel) FROM mapcartacomp.carga_trabalho x JOIN mapcartacomp.lote_etapa le "
+        " ON le.id = x.id_lote_etapa WHERE le.id_lote = l.id AND NOT x.concluido AND x.responsavel IS NOT NULL) "
+        "AS com_alguem, "
+        "(SELECT count(*) FROM mapcartacomp.cq_amostra a JOIN mapcartacomp.cq_plano p ON p.id = a.id_cq_plano "
+        " JOIN mapcartacomp.lote_etapa le ON le.id = p.id_lote_etapa WHERE le.id_lote = l.id "
+        " AND a.status IS NOT NULL) AS avaliadas, "
+        "(SELECT count(*) FROM mapcartacomp.cq_inspecao i WHERE i.id_lote = l.id) AS ocorrencias "
+        "FROM mapcartacomp.lote l LEFT JOIN mapcartacomp.ctrl_lote c ON c.id_lote = l.id "
+        "WHERE l.id = ANY(%s) ORDER BY folha_revisao" + ("" if previa else " FOR UPDATE OF l"),
+        (list(ids),),
+    )
+    permitidos = set(projetos) if projetos is not None else None
+    itens = []
+    for r in linhas:
+        erro = None
+        if r["uf"] != uf or (permitidos is not None and r["cod_projeto"] not in permitidos):
+            erro = "lote de outra unidade ou projeto"
+        elif r["concluidas"]:
+            erro = f"já tem {r['concluidas']} cargas concluídas: tire na gaveta só as cargas que sobraram"
+        elif r["avaliadas"]:
+            erro = f"já tem {r['avaliadas']} amostras de CQ avaliadas"
+        elif r["ocorrencias"]:
+            erro = f"já tem {r['ocorrencias']} ocorrências de inspeção"
+        itens.append({"id_lote": r["id_lote"], "folha_revisao": r["folha_revisao"], "tipo": r["tipo"],
+                      "cargas": r["cargas"], "com_alguem": r["com_alguem"], "erro": erro})  # fmt: skip
+    if previa:
+        return {"itens": itens}
+    apagar = [i["id_lote"] for i in itens if not i["erro"]]
+    if apagar:
+        # As passagens primeiro (levam cargas, planos, amostras, fila e histórico em cascata), com o lote ainda lá
+        # para a derivação do status; depois o lote.
+        ex.executar("DELETE FROM mapcartacomp.lote_etapa WHERE id_lote = ANY(%s)", (apagar,))
+        ex.executar("DELETE FROM mapcartacomp.lote WHERE id = ANY(%s)", (apagar,))
+    return {
+        "excluidos": [{"id_lote": i["id_lote"], "folha_revisao": i["folha_revisao"]} for i in itens if not i["erro"]],
+        "erros": [{"id_lote": i["id_lote"], "erro": i["erro"]} for i in itens if i["erro"]],
+    }
+
+
 # Etapa em que a folha está trabalhando (D-105): a aberta (pendente ou em andamento; no máximo uma), se houver; senão a
 # atual do lote, que é a que dá o status nacional e fica na concluída até a seguinte começar. Sem isso, uma folha com a
 # próxima etapa aberta e ainda não iniciada apareceria como "esperando" e gerar ou atribuir cargas iria para a etapa

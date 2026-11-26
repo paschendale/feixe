@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import psycopg2.extras
 import pytest
 from feixe.core.dados import ErroDados, ExecutorPg
@@ -87,6 +89,31 @@ def test_um_lote_livre_por_feicao(amb):
     assert set(erros) == {"Otto 2", "polígono 5", "Gravata", "Ruim"}, erros
     assert "repetido" in erros["Otto 2"] and "inválida" in erros["Gravata"] and "ilegível" in erros["Ruim"]
     assert _recusa(ex, dl.criar_livres, "DF", cen.fluxo, []).status == 400
+
+
+def test_excluir_lote_criado_por_engano(amb):
+    # D-155: só sem trabalho feito; leva passagens, cargas, fila e histórico junto.
+    cen, ex = amb
+    errado = dl.criar_livre(ex, "DF", cen.fluxo, "Bacia errada", QUADRADO)["criados"][0]
+    usado = dl.criar_livre(
+        ex, "DF", cen.fluxo, "Bacia usada", "POLYGON((-47.7 -15.9, -47.6 -15.9, -47.6 -15.8, -47.7 -15.8, -47.7 -15.9))"
+    )["criados"][0]  # noqa: E501
+    for c in (errado, usado):
+        ex.executar(
+            "INSERT INTO mapcartacomp.carga_trabalho (uuid, id_lote_etapa, id_atividade, responsavel, concluido, geom) "
+            "SELECT %s, le.id, x.id_atividade, 'u_qualquer', %s, ST_Multi(l.geom) FROM mapcartacomp.lote_etapa le "
+            "JOIN mapcartacomp.lote l ON l.id = le.id_lote JOIN mapcartacomp.fluxo_etapa_atividade x "
+            "ON x.id_fluxo_etapa = le.id_fluxo_etapa WHERE le.id = %s LIMIT 1",
+            (str(uuid.uuid4()), c is usado, c["id_lote_etapa"]),
+        )
+    p = {i["id_lote"]: i for i in dl.excluir(ex, "DF", [errado["id_lote"], usado["id_lote"]], previa=True)["itens"]}
+    assert p[errado["id_lote"]]["erro"] is None and p[errado["id_lote"]]["com_alguem"] == 1
+    assert "concluídas" in p[usado["id_lote"]]["erro"]
+    assert dl.excluir(ex, "GO", [errado["id_lote"]], previa=True)["itens"][0]["erro"].startswith("lote de outra")
+    r = dl.excluir(ex, "DF", [errado["id_lote"], usado["id_lote"]], previa=False)
+    assert [i["id_lote"] for i in r["excluidos"]] == [errado["id_lote"]] and len(r["erros"]) == 1
+    assert dl.um(ex, errado["id_lote"]) is None and dl.um(ex, usado["id_lote"]) is not None
+    assert not ex.todos("SELECT 1 FROM mapcartacomp.lote_etapa WHERE id_lote = %s", (errado["id_lote"],))
 
 
 def test_folha_no_ponto_e_fluxos(amb):

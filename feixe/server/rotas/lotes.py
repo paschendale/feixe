@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Dict, Optional
 
 from ...core.dados import lotes as dl
@@ -79,6 +80,22 @@ def registrar(r, ctx) -> None:
             ctx.publicar("lote", {"criados": [c["id_lote"] for c in resultado["criados"]]})
             resultado["preparo"] = preparar(ctx, uf, [c.get("id_lote_etapa") for c in resultado["criados"]])
         return 200, resultado
+
+    @r.rota("POST", "/api/lotes/excluir", exige=("supervisor",))
+    def _excluir(req):
+        # Folhas e lotes criados por engano (D-155), só sem trabalho feito; com prévia.
+        eu = ctx.eu()
+        ids = campo(req, "lotes", lambda v: [int(x) for x in v])
+        previa = campo(req, "previa", bool, padrao=True)
+        with ctx.tx() as ex:
+            r = dl.excluir(ex, uf_de(eu), ids, previa, projetos_supervisor(eu))
+        if not previa and r["excluidos"]:
+            ctx.publicar("lote", {"excluidos": [i["id_lote"] for i in r["excluidos"]]})
+            ctx.publicar("carga", {"excluidos": True})
+            ctx.publicar("fila", {"excluidos": True})
+            with contextlib.suppress(ErroApi):
+                ctx.qgis("cargas_mudaram", None)
+        return 200, r
 
     @r.rota("GET", "/api/fluxos", exige=("supervisor", "gerente"))
     def _fluxos(req):

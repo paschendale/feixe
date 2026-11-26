@@ -11,6 +11,7 @@ import { SITUACAO, Status } from '@/lib/status'
 import { useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 import { Distribuir } from '../folhas/Distribuir'
+import { ExcluirLotes } from '../folhas/ExcluirLotes'
 import { NovaFolha } from '../folhas/NovaFolha'
 import { NovoLoteLivre } from '../folhas/NovoLoteLivre'
 import { ProximaEtapa } from '../folhas/ProximaEtapa'
@@ -44,6 +45,7 @@ export default function Folhas() {
   const [quem, setQuem] = useState('')
   const [marcados, setMarcados] = useState<Set<number>>(new Set())
   const [distribuir, setDistribuir] = useState<number[]>([])
+  const [excluir, setExcluir] = useState<number[]>([])
   const [avancar, setAvancar] = useState<number[]>([])
   const [dialogo, setDialogo] = useState<'folha' | 'livre' | null>(null)
   const [fluxoNovas, setFluxoNovas] = useState<number | null>(null)
@@ -158,6 +160,9 @@ export default function Folhas() {
             <Button variant="outline" onClick={() => setAvancar(marcadosLotes.map((l) => l.id))}>
               Abrir a próxima etapa
             </Button>
+            <Button variant="destructive-tinted" onClick={() => setExcluir(marcadosLotes.map((l) => l.id))}>
+              Excluir…
+            </Button>
             <Button variant="ghost" onClick={() => setMarcados(new Set())}>
               Limpar
             </Button>
@@ -190,7 +195,7 @@ export default function Folhas() {
       </div>
 
       <Tabela fixa largura={900}>
-          <Colunas larguras={[...(supervisor ? [40] : []), 96, undefined, 300, '17%', 140, 130]} />
+          <Colunas larguras={[...(supervisor ? [40] : []), 150, undefined, 300, '17%', 140, 130]} />
           <thead>
             <tr>
               {supervisor && (
@@ -231,7 +236,7 @@ export default function Folhas() {
                       <input type="checkbox" aria-label={`Marcar ${l.folha_revisao}`} checked={marcados.has(l.id)} onChange={() => marcar(l.id)} />
                     </td>
                   )}
-                  <td className={cn(supervisor && 'pl-2')}>
+                  <td className={cn('truncate', supervisor && 'pl-2')} title={l.folha_revisao}>
                     <a href={href(`supervisao/folhas/${l.id}`, { grupo: grupoQ })} className="tab font-semibold text-primary hover:underline">
                       {l.folha_revisao}
                     </a>
@@ -278,9 +283,19 @@ export default function Folhas() {
           fluxos={fluxos?.itens ?? []}
           fechar={() => navegar(`supervisao/folhas${grupoQ ? `?grupo=${grupoQ}` : ''}`)}
           distribuir={(ids) => setDistribuir(ids)}
+          excluir={(ids) => setExcluir(ids)}
         />
       )}
 
+      <ExcluirLotes
+        lotes={excluir}
+        fechar={(excluidos) => {
+          setExcluir([])
+          if (!excluidos.length) return
+          setMarcados((m) => new Set([...m].filter((x) => !excluidos.includes(x))))
+          if (selecionado && excluidos.includes(selecionado)) navegar(`supervisao/folhas${grupoQ ? `?grupo=${grupoQ}` : ''}`)
+        }}
+      />
       <Distribuir
         lotes={distribuir}
         fechar={(feito) => {

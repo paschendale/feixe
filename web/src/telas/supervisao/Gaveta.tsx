@@ -308,7 +308,7 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
 }
 
 // Gaveta da folha (D-72, D-103): abre por cima da lista, sem trocar de página; é onde a folha anda pelo fluxo.
-export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos: FluxoCompleto[]; fechar: () => void; distribuir: (ids: number[]) => void }) {
+export function Gaveta({ id, fluxos, fechar, distribuir, excluir }: { id: number; fluxos: FluxoCompleto[]; fechar: () => void; distribuir: (ids: number[]) => void; excluir?: (ids: number[]) => void }) {
   const avisar = useAvisar()
   const { conectado, tem, eu } = useSessao()
   const { dados: lote, erro } = useApi<LoteCompleto>(`/api/lotes/${id}`, ['lote', 'carga'])
@@ -376,6 +376,11 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                   }}
                 >
                   Tirar cargas selecionadas no QGIS
+                </Button>
+              )}
+              {supervisor && excluir && (
+                <Button variant="destructive-tinted" title="Para a folha criada por engano, antes de qualquer trabalho: a prévia diz se dá" onClick={() => excluir([lote.id])}>
+                  Excluir…
                 </Button>
               )}
             </div>
