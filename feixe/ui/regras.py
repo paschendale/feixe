@@ -9,20 +9,24 @@ from typing import Dict, Optional
 ACOES_AVALIADOR = ("proxima_amostra", "conforme", "nao_conforme", "ocorrencia")
 ACAO_CIENTE = "ciente"
 ACOES_CORRECAO = ("proxima_ocorrencia", "tratada")  # correção de inspeção (D5)
+ACOES_EXECUCAO = ("proxima", "pular", "concluir")  # as cargas de produção (B2)
 
 
 def acoes_visiveis(estado: Optional[Dict], modo: Optional[str] = None) -> Dict[str, bool]:
     """As do avaliador só para quem tem amostras em passagens abertas (avaliadas ou não: trocar a avaliação e
     registrar ocorrência valem enquanto a passagem está aberta) e está no modo Avaliar, com o grupo Controle de
-    qualidade ligado (D-148); o Ciente só com ocorrência à espera da ciência."""
+    qualidade ligado (D-148); as da execução (cargas, Ciente e correção) só no modo Executar, com o grupo Execução
+    ligado (D-150); o Ciente só com ocorrência à espera da ciência. Sem o grupo Feixe (modo None), nenhuma."""
     estado = estado or {}
     avaliador = (estado.get("amostras") or 0) > 0 and modo == "cq"
+    execucao = modo == "execucao"
     vis = dict.fromkeys(ACOES_AVALIADOR, avaliador)
-    vis[ACAO_CIENTE] = (estado.get("ciencia") or 0) > 0
+    vis.update(dict.fromkeys(ACOES_EXECUCAO, execucao))
+    vis[ACAO_CIENTE] = (estado.get("ciencia") or 0) > 0 and execucao
     # Correção de inspeção: para quem está com uma folha na correção aberta (mesmo com tudo tratado: desmarcar vale
     # enquanto a etapa está aberta).
     for chave in ACOES_CORRECAO:
-        vis[chave] = (estado.get("correcao") or 0) > 0
+        vis[chave] = (estado.get("correcao") or 0) > 0 and execucao
     return vis
 
 

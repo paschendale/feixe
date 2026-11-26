@@ -7,7 +7,7 @@ from feixe.ui import regras
 def test_acoes_do_avaliador_so_com_amostras_e_ciente_so_com_ocorrencia():
     assert regras.acoes_visiveis({}) == {
         "proxima_amostra": False, "conforme": False, "nao_conforme": False, "ocorrencia": False, "ciente": False,
-        "proxima_ocorrencia": False, "tratada": False,
+        "proxima_ocorrencia": False, "tratada": False, "proxima": False, "pular": False, "concluir": False,
     }  # fmt: skip
     avaliador = regras.acoes_visiveis({"amostras": 20, "pendentes": 0, "ciencia": 0}, "cq")
     assert all(avaliador[a] for a in regras.ACOES_AVALIADOR) and not avaliador["ciente"]
@@ -15,9 +15,21 @@ def test_acoes_do_avaliador_so_com_amostras_e_ciente_so_com_ocorrencia():
     for modo in (None, "execucao", "supervisao"):
         fora = regras.acoes_visiveis({"amostras": 20}, modo)
         assert not any(fora[a] for a in regras.ACOES_AVALIADOR)
-    apm = regras.acoes_visiveis({"amostras": 0, "pendentes": 0, "ciencia": 2})
+    apm = regras.acoes_visiveis({"amostras": 0, "pendentes": 0, "ciencia": 2}, "execucao")
     assert apm["ciente"] and not any(apm[a] for a in regras.ACOES_AVALIADOR)
     assert regras.acoes_visiveis(None)["ciente"] is False
+
+
+def test_barra_da_execucao_so_no_modo_executar():
+    # D-150: próxima, pular e concluir, Ciente e as da correção só com o grupo Execução ligado; sem o grupo, nada.
+    cheio = {"amostras": 20, "ciencia": 2, "correcao": 3}
+    exe = regras.acoes_visiveis(cheio, "execucao")
+    assert all(exe[a] for a in (*regras.ACOES_EXECUCAO, "ciente", *regras.ACOES_CORRECAO))
+    assert not any(exe[a] for a in regras.ACOES_AVALIADOR)
+    for modo in (None, "cq", "supervisao"):
+        vis = regras.acoes_visiveis(cheio, modo)
+        assert not any(vis[a] for a in (*regras.ACOES_EXECUCAO, "ciente", *regras.ACOES_CORRECAO)), modo
+    assert not any(regras.acoes_visiveis(cheio, None).values())
 
 
 def test_texto_da_barra_de_status():
@@ -63,7 +75,7 @@ def test_mensagem_de_ciente_diz_quantas_faltam():
 
 
 def test_correcao_so_para_quem_esta_com_folha_na_correcao():
-    vis = regras.acoes_visiveis({"amostras": 0, "ciencia": 0, "correcao": 40, "correcao_pendentes": 0})
+    vis = regras.acoes_visiveis({"amostras": 0, "ciencia": 0, "correcao": 40, "correcao_pendentes": 0}, "execucao")
     # Com tudo tratado as ações continuam: desmarcar vale enquanto a etapa está aberta.
     assert all(vis[a] for a in regras.ACOES_CORRECAO) and not vis["ciente"] and not vis["conforme"]
     assert not any(regras.acoes_visiveis({"correcao": 0})[a] for a in regras.ACOES_CORRECAO)

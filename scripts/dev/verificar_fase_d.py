@@ -511,8 +511,12 @@ def d3c(amb, usuario, senha):
         ok("Amostras com o rótulo do elemento na amostra atual")
 
         # --- próxima, conforme, não conforme pela barra ------------------------------------------------------------
+        # Só a camada do primeiro elemento vem ligada: com todas desligadas, a próxima amostra liga a do elemento dela.
+        for c in camadas.camadas_amostras():
+            projeto.layerTreeRoot().findLayer(c.id()).setItemVisibilityChecked(False)
         r = plugin.proxima_amostra()
         primeira = camadas.amostra_atual()
+        assert projeto.layerTreeRoot().findLayer(camadas.camada_com_amostra(primeira).id()).isVisible()
         assert r["carga"]["id"] == primeira and plugin.iface.canvas.piscadas[-1][0].startswith("Amostras - "), r
         # Zoom na extensão da amostra, com 10% de folga (D-148).
         from qgis.core import QgsRectangle
@@ -606,9 +610,9 @@ def d3c(amb, usuario, senha):
         assert ciencia.readOnly() and fc["uuid"] == r_uuid and fc["anotacao"] == "drenagem omitida no trecho norte"
         assert fc["folha_txt"].startswith("2534-") and fc["responsavel"] == usuario, fc["folha_txt"]
         assert {a.name() for a in ciencia.actions().actions()} == {"Ciente"}
-        assert regras.acoes_visiveis(p2._cq) == {
+        assert regras.acoes_visiveis(p2._cq, "execucao") == {
             **dict.fromkeys(regras.ACOES_AVALIADOR, False), "ciente": True,
-            **dict.fromkeys(regras.ACOES_CORRECAO, False),
+            **dict.fromkeys(regras.ACOES_CORRECAO, False), **dict.fromkeys(regras.ACOES_EXECUCAO, True),
         }  # fmt: skip
         ok(f"Ocorrências para ciência com anotação, elemento, folha e avaliador ({fc['folha_txt']}) e a ação Ciente")
 
@@ -906,7 +910,7 @@ def d5(amb, usuario, senha):
         textos = {k: fp[k] for k in ("folha_revisao", "registrada_txt", "ciencia_txt", "tratada_txt")}
         assert textos["folha_revisao"] == "2534-1" and textos["tratada_txt"] == "por tratar", textos
         assert {a.name() for a in pend.actions().actions()} == {"Tratada", "Trabalhar nesta ocorrência"}
-        vis = regras.acoes_visiveis(p._cq)
+        vis = regras.acoes_visiveis(p._cq, "execucao")
         assert all(vis[a] for a in regras.ACOES_CORRECAO) and not vis["conforme"], p._cq
         ok(f"camadas da correção {nomes}, formulário {textos} e a barra com Próxima ocorrência e Tratada")
 

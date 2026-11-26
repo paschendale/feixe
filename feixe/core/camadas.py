@@ -814,6 +814,24 @@ def ligar(camada) -> None:
         no.setItemVisibilityChecked(True)
 
 
+def ligar_elemento(camada) -> None:
+    """Liga a camada de amostras de um elemento e as ocorrências do mesmo elemento (só a do primeiro vem ligada ao
+    montar): a próxima amostra pode ser de outro elemento, e numa camada desligada o mapa ia até ela sem mostrá-la."""
+    if camada is None:
+        return
+    raiz = QgsProject.instance().layerTreeRoot()
+    no = raiz.findLayer(camada.id())
+    if no is None:
+        return
+    elemento = camada.name().split(" - ", 1)[-1]
+    pai = no.parent()
+    for irmao in pai.findLayers() if pai is not None else [no]:
+        if irmao.layer() is not None and irmao.layer().name() in (camada.name(), f"Ocorrências - {elemento}"):
+            irmao.setItemVisibilityChecked(True)
+    if pai is not None:
+        pai.setItemVisibilityChecked(True)
+
+
 def _gpkg_do_grupo() -> Optional[str]:
     grupo = QgsProject.instance().layerTreeRoot().findGroup(GRUPO)
     for no in grupo.findLayers() if grupo is not None else []:

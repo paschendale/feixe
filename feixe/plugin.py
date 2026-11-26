@@ -721,7 +721,9 @@ class FeixePlugin:
     def focar_amostra(self, carga, progresso):
         """Faz dela a amostra atual (contorno magenta em Amostras, com o elemento no rótulo), zoom nela e pisca."""
         camadas.definir_amostra_atual(carga["id"])
-        self._enquadrar(carga, camadas.camada_com_amostra(carga["id"]))
+        camada = camadas.camada_com_amostra(carga["id"])
+        camadas.ligar_elemento(camada)
+        self._enquadrar(carga, camada)
         self.mostrar_progresso(progresso, True)
 
     def trabalhar_na_amostra(self, id_carga):

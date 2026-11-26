@@ -177,7 +177,7 @@ class BarraFeixe(QToolBar):
             "Abre o painel do Feixe no navegador padrão: folhas, fluxos, equipe e atribuição.", self.abrir_painel,
         )  # fmt: skip
         self.addAction(self.acao_painel)
-        self.addSeparator()
+        self.separador_execucao = self.addSeparator()
 
         # 4 e 5. Ações de alta frequência (B2). As de CQ entram na fase D, antes da âncora.
         self.acao_proxima = self._acao(
@@ -204,7 +204,8 @@ class BarraFeixe(QToolBar):
             "proxima_amostra": self._acao(
                 "proxima_amostra", "proxima_amostra", "Próxima amostra",
                 "Vai para a sua próxima amostra de CQ pendente: ela vira a amostra atual (contorno magenta em "
-                "Amostras) e o mapa a enquadra, sem mudar a escala.", self.proxima_amostra,
+                "Amostras, com o elemento no rótulo), a camada do elemento dela liga e o mapa dá zoom nela.",
+                self.proxima_amostra,
             ),
             "conforme": self._acao(
                 "conforme", "conforme", "Conforme",
@@ -292,7 +293,11 @@ class BarraFeixe(QToolBar):
         vis = regras.acoes_visiveis(estado, modo)
         for chave, a in self.acoes_cq.items():
             a.setVisible(vis[chave])
-        self.separador_cq.setVisible(any(vis.values()))
+        execucao = {"proxima": self.acao_proxima, "pular": self.acao_pular, "concluir": self.acao_concluir}
+        for chave, a in execucao.items():
+            a.setVisible(vis[chave])
+        self.separador_execucao.setVisible(any(vis.values()))
+        self.separador_cq.setVisible(any(vis[c] for c in self.acoes_cq) and any(vis[c] for c in execucao))
         return vis
 
     def mostrar_modo(self, chave: Optional[str]) -> None:
