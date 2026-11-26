@@ -148,12 +148,14 @@ CREATE TRIGGER t10_resultado BEFORE UPDATE ON mapcartacomp.cq_plano
 -- avaliação for desfeita), e o plano é recalculado.
 
 -- Roda com os direitos do dono do schema, para que a derivação não dependa dos privilégios de quem avaliou.
+-- A conclusão leva a hora da avaliação (avaliado_em, que vem explícito da avaliação feita offline), não a do push:
+-- é ela que conta na produtividade, como o concluido_em das cargas de produção.
 CREATE OR REPLACE FUNCTION mapcartacomp.f_amostra_derivar_um(p_carga integer, p_plano integer) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = mapcartacomp, public, pg_temp AS $$
 BEGIN
     UPDATE mapcartacomp.carga_trabalho c
-       SET concluido = d.todas
-      FROM (SELECT count(*) > 0 AND bool_and(status IS NOT NULL) AS todas
+       SET concluido = d.todas, concluido_em = CASE WHEN d.todas THEN d.quando END
+      FROM (SELECT count(*) > 0 AND bool_and(status IS NOT NULL) AS todas, max(avaliado_em) AS quando
               FROM mapcartacomp.cq_amostra WHERE id_carga_trabalho = p_carga) d
      WHERE c.id = p_carga AND c.concluido IS DISTINCT FROM d.todas;
 
@@ -198,6 +200,13 @@ LANGUAGE sql STABLE AS $$
      LIMIT 1
 $$;
 
+-- Nome do elemento de qualidade (a medida no SGBC). Com os direitos do dono do schema: quem executa (APM, avaliador)
+-- pode não ter leitura em mapcartctrl.t_qua_medidadequalidade, e o pull do workspace e a ocorrência precisam do nome.
+CREATE OR REPLACE FUNCTION mapcartacomp.f_elemento_nome(p_medida integer) RETURNS text
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = mapcartacomp, public, pg_temp AS $$
+    SELECT m.nome::text FROM mapcartctrl.t_qua_medidadequalidade m WHERE m.id = p_medida
+$$;
+
 CREATE OR REPLACE FUNCTION mapcartacomp.f_inspecao_passagem() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -208,6 +217,12 @@ BEGIN
         SELECT c.id_lote_etapa INTO NEW.id_lote_etapa
           FROM mapcartacomp.carga_trabalho c
          WHERE c.id = NEW.id_carga_trabalho AND c.id_cq_plano IS NOT NULL;
+    END IF;
+    -- Elemento: o da atividade da carga de CQ, quando não veio.
+    IF NEW.elemento IS NULL AND NEW.id_carga_trabalho IS NOT NULL THEN
+        SELECT mapcartacomp.f_elemento_nome(a.id_medidadequalidade) INTO NEW.elemento
+          FROM mapcartacomp.carga_trabalho c JOIN mapcartacomp.atividade a ON a.id = c.id_atividade
+         WHERE c.id = NEW.id_carga_trabalho;
     END IF;
     IF NEW.id_lote_etapa IS NOT NULL THEN
         SELECT id_lote INTO v_lote FROM mapcartacomp.lote_etapa WHERE id = NEW.id_lote_etapa;

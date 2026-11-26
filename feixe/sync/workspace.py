@@ -242,13 +242,14 @@ class ExecutorLocal(Executor):
         """Muda campos de domínio de uma linha do espelho e grava o item da outbox, na mesma transação."""
         t = _espelho(tabela)
         tipos = dict(t.dominio)
-        desconhecidos = set(campos) - set(tipos)
+        desconhecidos = set(campos) - set(tipos) - ({"geom"} if t.geom else set())
         if desconhecidos:
             raise ValueError(f"{tabela}: campos fora do espelho: {sorted(desconhecidos)}")
         linha = self.um(f"SELECT versao_base FROM {tabela} WHERE uuid = ?", (uuid,))
         if linha is None:
             raise LookupError(f"{tabela} {uuid} não está no workspace")
-        vals = {c: _para_sqlite(v, tipos[c]) for c, v in campos.items()}
+        # A geometria (WKB) vira o blob do GeoPackage com envelope e centroide; na outbox vai o WKB (em hex).
+        vals = _valores(t, campos)
         vals.update(atualizado_em=self.agora_iso, atualizado_por=self.usuario, sujo=1)
         sets = ", ".join(f"{c} = ?" for c in vals)
         self.executar(f"UPDATE {tabela} SET {sets} WHERE uuid = ?", (*vals.values(), uuid))
@@ -272,6 +273,17 @@ class ExecutorLocal(Executor):
         )
         self._outbox(tabela, linha["uuid"], "insert", linha, None)
         return linha["uuid"]
+
+    def apagar(self, tabela: str, uuid: str, campos: Optional[Dict[str, Any]] = None) -> None:
+        """Apaga uma linha do espelho e grava o item da outbox (`delete`), na mesma transação. `campos`: o que vale
+        registrar da linha apagada (vai no sync_log). Linha criada offline e ainda não enviada também vai pela outbox:
+        o push manda a criação e a exclusão em ordem, e um push em andamento com a criação não a traz de volta."""
+        _espelho(tabela)
+        linha = self.um(f"SELECT versao_base FROM {tabela} WHERE uuid = ?", (uuid,))
+        if linha is None:
+            raise LookupError(f"{tabela} {uuid} não está no workspace")
+        self.executar(f"DELETE FROM {tabela} WHERE uuid = ?", (uuid,))
+        self._outbox(tabela, uuid, "delete", campos or {}, linha["versao_base"])
 
     def _outbox(self, tabela, uuid, operacao, campos, versao_base) -> None:
         self.executar(

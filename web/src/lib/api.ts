@@ -255,6 +255,107 @@ export type PreviaCQ = {
   refeito: boolean
 }
 
+// CQ da execução (D3a): amostras e ocorrências do workspace; as ocorrências da folha para o supervisor, da CCAR.
+export type PlanoDaAmostra = { id: number; nivel: string | null; letra: string | null; N: number | null; n: number | null; ac: number | null; lqa: number | null; resultado: string }
+
+export type Amostra = {
+  id: number
+  uuid: string
+  id_cq_plano: number
+  id_carga_trabalho: number
+  status: 0 | 1 | null
+  observacao: string | null
+  avaliado_em: string | null
+  avaliado_por: string | null
+  avaliada: boolean
+  id_lote_etapa: number
+  id_lote: number
+  folha_revisao: string
+  tema: string | null
+  etapa: string | null
+  atividade: string | null
+  elemento: string | null
+  geocodigo: string | null
+  concluido: boolean
+  situacao_etapa: string
+  xmin: number
+  ymin: number
+  xmax: number
+  ymax: number
+  ocorrencias: number
+  plano: PlanoDaAmostra
+}
+
+export type ProximaAmostra = { carga: Carga; amostra: Amostra | null } | null
+
+export type ResultadoAvaliacao = {
+  amostra: Amostra
+  carga: Carga
+  progresso: Progresso
+  fila: { id: number; id_lote: number; id_lote_etapa: number; folha_revisao: string; tema: string | null; atribuidas: number } | null
+  proxima: ProximaAmostra
+}
+
+export type MotivoOcorrencia = 'registrada' | 'minha_carga' | 'correcao'
+
+export type Ocorrencia = {
+  id: number | null
+  uuid: string
+  id_lote: number
+  id_lote_etapa: number | null
+  id_carga_trabalho: number | null
+  id_carga_avaliada: number | null
+  elemento: string | null
+  anotacao: string | null
+  responsavel: string
+  tratado: boolean
+  tratado_em: string | null
+  tratado_por: string | null
+  ciente_em: string | null
+  ciente_por: string | null
+  criado_em: string
+  x: number
+  y: number
+  folha_revisao: string
+  etapa: string | null
+  situacao_etapa: string | null
+  minha: boolean
+  sou_autor: boolean
+  enviada: boolean
+  pode_editar: boolean
+  pode_ciente: boolean
+  motivo: MotivoOcorrencia
+}
+
+export type OcorrenciaDaFolha = {
+  id: number
+  uuid: string
+  id_lote_etapa: number | null
+  id_carga_trabalho: number | null
+  id_carga_avaliada: number | null
+  elemento: string | null
+  anotacao: string | null
+  responsavel: string
+  responsavel_nome: string
+  autor: string | null
+  autor_nome: string | null
+  ciente_em: string | null
+  ciente_por: string | null
+  tratado: boolean
+  tratado_em: string | null
+  tratado_por: string | null
+  criado_em: string
+  x: number
+  y: number
+  revisao: number | null
+  instancia: number | null
+  situacao_etapa: string | null
+  etapa: string | null
+  folha_revisao: string
+}
+
+export type OcorrenciasDaFolha = { id_lote: number; itens: OcorrenciaDaFolha[]; total: number; pendentes: number; sem_ciente: number }
+
 export type FolhaDistribuir = {
   id_lote: number
   id_lote_etapa: number

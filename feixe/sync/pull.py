@@ -4,10 +4,13 @@ Escopo (D-111). Referências pequenas, inteiras: `tema`, `fase`, `atividade` e a
 UF. Da UF da pessoa: `lote` e `lote_etapa` (centenas). Da pessoa: os itens da `fila_folha` que ainda esperam
 (`atribuida_em` nulo), as cargas dela e as cargas sem responsável das passagens que estão na fila dela (a fila anda no
 workspace, `core/dados/local/filas.py`). CQ, coerente com a fase D (a amostra é da carga de CQ atribuída ao
-avaliador): os planos e as amostras das cargas do escopo, e as ocorrências que a pessoa registrou ou que caem numa
-carga de CQ do escopo. Ocorrências da folha para o APM autor dar ciência ficam para a D3, que desenha a visibilidade
-(D-66: a revisão seguinte é às cegas, e o que vai para o workspace fica no disco). `lote_etapa_hist` não é puxada:
-no workspace ela só guarda o que a execução grava para o push.
+avaliador): os planos e as amostras das cargas do escopo. Ocorrências, com a visibilidade do D-66 (o que vai para o
+workspace fica no disco, então a regra vale já aqui, e de novo nas rotas, `core/dados/local/cq.py`): as que a pessoa
+registrou ou que caem numa carga de CQ do escopo (o avaliador); as que apontam uma carga dela (`id_carga_avaliada`:
+o APM autor, que dá ciência); e, só quando a pessoa tem carga numa passagem aberta com `expor_ocorrencias` ("incluir
+correções a serem feitas"), as ainda não tratadas da folha, como lista de correção. Quem faz a revisão seguinte sem
+isso não recebe as das passagens anteriores: a revisão é às cegas. `lote_etapa_hist` não é puxada: no workspace ela
+só guarda o que a execução grava para o push.
 
 Como se acha o que mudou: comparação de versões, não marca d'água. Cada linha do espelho guarda em `versao_base` o
 `atualizado_em` que veio do servidor. Um `atualizado_em > :ultimo_pull` não serviria sozinho: (1) o gatilho
@@ -82,7 +85,14 @@ def escopos(cargas: Callable[[str], str] = escopo_cargas_pessoa) -> Dict[str, st
         ),
         "cq_inspecao": (
             f"t.uf = %(uf)s AND (t.responsavel = %(usuario)s OR t.id_carga_trabalho IN (SELECT c.id FROM "
-            f"{S}.carga_trabalho c WHERE c.id_cq_plano IS NOT NULL AND {cargas('c')}))"
+            f"{S}.carga_trabalho c WHERE c.id_cq_plano IS NOT NULL AND {cargas('c')}) "
+            # O APM autor da carga apontada (dá ciência).
+            f"OR t.id_carga_avaliada IN (SELECT c.id FROM {S}.carga_trabalho c WHERE c.uf = %(uf)s "
+            "AND c.responsavel = %(usuario)s) "
+            # Lista de correção (D-66): só com "incluir correções a serem feitas" na passagem aberta da pessoa.
+            f"OR (NOT t.tratado AND t.id_lote IN (SELECT le.id_lote FROM {S}.lote_etapa le WHERE le.uf = %(uf)s "
+            "AND le.expor_ocorrencias AND le.situacao IN ('pendente', 'em_andamento') AND EXISTS (SELECT 1 FROM "
+            f"{S}.carga_trabalho c WHERE c.id_lote_etapa = le.id AND c.responsavel = %(usuario)s))))"
         ),
     }
 
@@ -98,6 +108,20 @@ REFERENCIAS: Dict[str, Tuple[str, str]] = {
         "t.id",
     ),
 }
+
+# De onde vem cada referência, quando não é a tabela da CCAR pura: a atividade leva o nome do elemento de qualidade
+# (a medida no SGBC), que a ocorrência grava (D3a) e o workspace não teria como saber offline.
+FONTES: Dict[str, str] = {
+    "atividade": (
+        # Pela função do banco (SECURITY DEFINER, 006): quem executa pode não ler o mapcartctrl direto.
+        f"(SELECT a.*, {S}.f_elemento_nome(a.id_medidadequalidade) AS elemento FROM {S}.atividade a) t"
+    ),
+}
+
+
+def _fonte(nome: str) -> str:
+    return FONTES.get(nome, f"{S}.{nome} t")
+
 
 # Ordem de gravação: as referências primeiro, depois pais antes dos filhos (o SQLite não tem FK, é só por clareza).
 ORDEM_ESPELHO = ["lote", "lote_etapa", "fila_folha", "cq_plano", "carga_trabalho", "cq_amostra", "cq_inspecao"]
@@ -127,7 +151,7 @@ def _resumo_remoto(rx, onde: Dict[str, str], params: Dict) -> Dict[str, Tuple[in
     for nome, (where, ordem) in REFERENCIAS.items():
         partes.append(
             f"(SELECT count(*) || ':' || coalesce(md5(string_agg(t::text, ',' ORDER BY {ordem})), '') "
-            f"FROM {S}.{nome} t WHERE {where}) AS {nome}"
+            f"FROM {_fonte(nome)} WHERE {where}) AS {nome}"
         )
     linha = rx.um("SELECT " + ", ".join(partes), params)
     saida = {}
@@ -149,6 +173,16 @@ def _pendentes(ex, tabela: str) -> set:
     """uuids da tabela com item na outbox ou marcados sujos: o pull não mexe neles."""
     r = {x["uuid"] for x in ex.todos("SELECT DISTINCT uuid FROM outbox WHERE tabela = ?", (tabela,))}
     r |= {x["uuid"] for x in ex.todos(f"SELECT uuid FROM {tabela} WHERE sujo = 1")}
+    if tabela == "carga_trabalho":
+        # A carga de CQ concluída no workspace pela avaliação da amostra (`local.cq.avaliar`, como o gatilho do banco)
+        # não tem item próprio na outbox: espera a amostra ir, para o pull não a desfazer antes do push.
+        r |= {
+            x["uuid"]
+            for x in ex.todos(
+                "SELECT c.uuid FROM carga_trabalho c JOIN cq_amostra a ON a.id_carga_trabalho = c.id "
+                "WHERE a.uuid IN (SELECT uuid FROM outbox WHERE tabela = 'cq_amostra')"
+            )
+        }
     return r
 
 
@@ -202,7 +236,7 @@ def puxar(
             continue
         where, ordem = REFERENCIAS[nome]
         cols = ", ".join(f"t.{c}" for c, _ in esquema.TABELAS[nome].dominio)
-        recebido[nome] = rx.todos(f"SELECT {cols} FROM {S}.{nome} t WHERE {where} ORDER BY {ordem}", params)
+        recebido[nome] = rx.todos(f"SELECT {cols} FROM {_fonte(nome)} WHERE {where} ORDER BY {ordem}", params)
 
     for nome in ORDEM_ESPELHO:
         if nome not in quais:

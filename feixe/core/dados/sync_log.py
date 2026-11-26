@@ -42,6 +42,10 @@ ROTULOS = {
     "em": "Em",
     "por": "Por",
     "observacao": "Observação",
+    "status": "Avaliação",
+    "avaliado_em": "Avaliada em",
+    "anotacao": "Anotação",
+    "ciente_em": "Ciente em",
 }
 _ORDEM = list(ROTULOS)
 _FORA = {"id", "uuid", "geom", "criado_em", "criado_por", "atualizado_em", "atualizado_por", "versao_base", "sujo"}
@@ -51,7 +55,10 @@ SITUACOES = {
     "concluida": "concluída",
     "pulada": "pulada",
 }
-TABELAS = {"carga_trabalho": "carga", "fila_folha": "fila", "lote_etapa": "etapa", "lote_etapa_hist": "histórico"}
+TABELAS = {
+    "carga_trabalho": "carga", "fila_folha": "fila", "lote_etapa": "etapa", "lote_etapa_hist": "histórico",
+    "cq_amostra": "amostra", "cq_inspecao": "ocorrência",
+}  # fmt: skip
 
 
 def resultados_de(texto: Optional[str]) -> List[str]:
@@ -165,6 +172,18 @@ def _acao_campos(tabela: str, operacao: str, campos: Dict) -> Tuple[str, str]:
         return "iniciou a etapa", "o início da etapa"
     if tabela == "lote_etapa_hist":
         return "registrou o início da etapa", "o registro no histórico"
+    if tabela == "cq_amostra":
+        if "status" in campos:
+            return "avaliou a amostra", "a avaliação"
+        return "mudou a observação da amostra", "a observação"
+    if tabela == "cq_inspecao":
+        if operacao == "insert":
+            return "registrou a ocorrência", "o registro"
+        if operacao == "delete":
+            return "apagou a ocorrência", "a exclusão"
+        if "ciente_em" in campos:
+            return "deu ciência da ocorrência", "a ciência"
+        return "alterou a ocorrência", "a alteração"
     return f"alterou {tabela}", "a alteração"
 
 
@@ -198,6 +217,10 @@ def acao_servidor(tabela: str, detalhe: Dict) -> Tuple[str, str]:
         return "tinha mudado a fila", "a mudança na fila"
     if tabela == "lote_etapa":
         return "tinha mudado a etapa", "a mudança na etapa"
+    if tabela == "cq_amostra":
+        return "tinha mudado a amostra", "a mudança na amostra"
+    if tabela == "cq_inspecao":
+        return "tinha mudado a ocorrência", "a mudança na ocorrência"
     return "tinha alterado a linha", "a alteração"
 
 

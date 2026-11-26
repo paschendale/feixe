@@ -341,6 +341,7 @@ class FeixePlugin:
         if est.get("mudou"):
             self.broker.publicar("carga", {"sincronizacao": True})
             self.broker.publicar("lote", {"sincronizacao": True})
+            self.broker.publicar("cq", {"sincronizacao": True})
         self.sinais.sincronizacao_mudou.emit(est)
 
     def _aplicar_sincronizacao(self, est):

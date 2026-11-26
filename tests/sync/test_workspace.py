@@ -339,11 +339,13 @@ def test_esquema_3_ganha_as_colunas_do_cq_e_rele_as_linhas_limpas(ws):
                                           "responsavel": USUARIO})  # fmt: skip
     conn = ws.conn
     conn.execute("BEGIN IMMEDIATE")
-    for indice in ("cq_inspecao_carga_idx", "cq_inspecao_carga_avaliada_idx"):
+    for indice in ("cq_inspecao_carga_idx", "cq_inspecao_carga_avaliada_idx", "cq_inspecao_lote_etapa_idx"):
         conn.execute(f"DROP INDEX {indice}")
     for tabela, colunas in esquema._COLUNAS_V4.items():
         for nome, _ in colunas:
             conn.execute(f"ALTER TABLE {tabela} DROP COLUMN {nome}")
+    conn.execute("ALTER TABLE atividade DROP COLUMN elemento")  # do esquema 5 (D3a)
+    conn.execute("INSERT INTO meta (chave, valor) VALUES ('resumo.atividade', 'md5 velho')")
     conn.execute("UPDATE meta SET valor = '3' WHERE chave = 'versao_esquema'")
     conn.execute("COMMIT")
     ws.fechar()
@@ -353,6 +355,9 @@ def test_esquema_3_ganha_as_colunas_do_cq_e_rele_as_linhas_limpas(ws):
         cols = {r["name"] for r in ex.todos("PRAGMA table_info(cq_inspecao)")}
         assert {"id_lote_etapa", "id_carga_avaliada"} <= cols
         assert "fracao_critica" in {r["name"] for r in ex.todos("PRAGMA table_info(cq_plano)")}
+        # Esquema 5: o elemento na atividade, e o md5 esquecido para o próximo pull trazer as atividades de novo.
+        assert "elemento" in {r["name"] for r in ex.todos("PRAGMA table_info(atividade)")}
+        assert ex.meta("resumo.atividade") is None
         versoes = {r["uuid"]: r["versao_base"] for r in ex.todos("SELECT uuid, versao_base FROM cq_inspecao")}
         assert versoes[limpa] is None and suja in versoes
         assert ex.um("SELECT plugin FROM controle_escrita")["plugin"] == 0

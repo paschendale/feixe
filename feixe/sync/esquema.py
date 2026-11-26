@@ -28,8 +28,9 @@ from .geometria import SRID
 # Versão do esquema do workspace. Subiu sem migração em MIGRACOES: o workspace é recriado (é cache), levando junto
 # a outbox e o sync_log, que são o que não se pode perder. 2: `chave` e `acao` na outbox (C3). 3: o interruptor de
 # escrita e os gatilhos que só deixam o plugin mudar as tabelas, e as views das camadas da execução (C4). 4: as colunas
-# do CQ da fase D (D0, em 002/004 da CCAR): fração crítica do plano, passagem de CQ e carga avaliada da ocorrência.
-VERSAO = 4
+# do CQ da fase D (D0, em 002/004 da CCAR): fração crítica do plano, passagem de CQ e carga avaliada da ocorrência. 5: o
+# elemento de qualidade da atividade de CQ (o nome da medida no SGBC), que a ocorrência registrada offline grava (D3a).
+VERSAO = 5
 
 _AUDITORIA = [
     ("criado_em", "DATETIME"),
@@ -103,7 +104,7 @@ TABELAS: Dict[str, Tabela] = {
              ("nome", "TEXT NOT NULL"), ("geracao", "TEXT"), ("celula_largura", "DOUBLE"),
              ("celula_altura", "DOUBLE"), ("celula_unidade", "TEXT"), ("id_medidadequalidade", "INTEGER"),
              ("camada_alvo", "TEXT"), ("grade_nivel", "INTEGER"), ("ativo", "BOOLEAN"),
-             ("atualizado_em", "DATETIME")],
+             ("atualizado_em", "DATETIME"), ("elemento", "TEXT")],
             chave="id", sincroniza=False, descricao="Atividades (referência da CCAR)",
         ),
         Tabela(
@@ -187,6 +188,7 @@ INDICES = [
 INDICES_CQ = [
     "CREATE INDEX IF NOT EXISTS cq_inspecao_carga_idx ON cq_inspecao (id_carga_trabalho)",
     "CREATE INDEX IF NOT EXISTS cq_inspecao_carga_avaliada_idx ON cq_inspecao (id_carga_avaliada)",
+    "CREATE INDEX IF NOT EXISTS cq_inspecao_lote_etapa_idx ON cq_inspecao (id_lote_etapa)",
 ]
 
 # Controle, fora do gpkg_contents (o QGIS não as lista como camadas).
@@ -322,6 +324,17 @@ _COLUNAS_V4 = {
 }
 
 
+def _v4_para_v5(conn) -> None:
+    """O elemento de qualidade na referência `atividade` (D3a). O pull das referências compara o md5 com o do pull
+    anterior: sem o md5 guardado, o próximo pull traz a tabela inteira de novo, já com o elemento."""
+    existentes = {r[1] for r in conn.execute("PRAGMA table_info(atividade)")}
+    if "elemento" not in existentes:
+        conn.execute("ALTER TABLE atividade ADD COLUMN elemento TEXT")
+    for cmd in INDICES_CQ:
+        conn.execute(cmd)
+    conn.execute("DELETE FROM meta WHERE chave = 'resumo.atividade'")
+
+
 def _v3_para_v4(conn) -> None:
     """Colunas novas do CQ (fase D) num workspace que já existe. As linhas limpas dessas tabelas perdem a
     `versao_base`, para o próximo pull trazê-las de novo com as colunas novas preenchidas (sem isso, a versão bate e o
@@ -360,7 +373,7 @@ def _v1_para_v2(conn) -> None:
 
 
 # Migrações do esquema do workspace: versão de origem -> função(conexão) que leva à seguinte.
-MIGRACOES: Dict[int, object] = {1: _v1_para_v2, 2: _v2_para_v3, 3: _v3_para_v4}
+MIGRACOES: Dict[int, object] = {1: _v1_para_v2, 2: _v2_para_v3, 3: _v3_para_v4, 4: _v4_para_v5}
 
 
 # --- núcleo do GeoPackage 1.2 (requisitos 10 a 13 e 21 a 23) ----------------------------------------------------------

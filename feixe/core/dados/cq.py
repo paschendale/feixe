@@ -411,3 +411,41 @@ def gerar_padrao(ex: Executor, passagens: List[Dict]) -> Tuple[List[Dict], List[
             "gravadas": sum(r["n"] for r in rs), "planos": len(rs),
         })  # fmt: skip
     return geradas, avisos
+
+
+# --- Ocorrências da folha (supervisão, D3a; base do D4 e do D5) ----------------------------------------------------
+
+
+def ocorrencias_do_lote(ex: Executor, uf: str, id_lote: int) -> Dict:
+    """Todas as ocorrências da folha, de todas as revisões, com a passagem de CQ em que foram registradas, quem
+    registrou, a carga apontada e o autor dela, a ciência e o tratamento. Supervisão: lê a CCAR, sem a regra do D-66
+    (quem planeja vê tudo)."""
+    lote = ex.um(
+        "SELECT l.id, l.uf, l.tipo, l.nome FROM mapcartacomp.lote l WHERE l.id = %s",
+        (id_lote,),
+    )
+    if not lote or lote["uf"] != uf:
+        raise ErroDados("folha não encontrada na sua unidade", 404)
+    itens = ex.todos(
+        "SELECT i.id, i.uuid::text AS uuid, i.id_lote_etapa, i.id_carga_trabalho, i.id_carga_avaliada, i.elemento, "
+        "i.anotacao, i.responsavel, coalesce(ua.nom_usuario::text, i.responsavel) AS responsavel_nome, "
+        "ca.responsavel AS autor, coalesce(ub.nom_usuario::text, ca.responsavel) AS autor_nome, "
+        "i.ciente_em, i.ciente_por, i.tratado, i.tratado_em, i.tratado_por, i.criado_em, "
+        "ST_X(i.geom) AS x, ST_Y(i.geom) AS y, le.revisao, le.instancia, le.situacao AS situacao_etapa, "
+        "fe.nome AS etapa, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao "
+        "FROM mapcartacomp.cq_inspecao i JOIN mapcartacomp.lote l ON l.id = i.id_lote "
+        "LEFT JOIN mapcartacomp.lote_etapa le ON le.id = i.id_lote_etapa "
+        "LEFT JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
+        "LEFT JOIN mapcartacomp.carga_trabalho ca ON ca.id = i.id_carga_avaliada "
+        "LEFT JOIN mapcartctrl.t_usuario ua ON ua.nom_contausuario = i.responsavel "
+        "LEFT JOIN mapcartctrl.t_usuario ub ON ub.nom_contausuario = ca.responsavel "
+        "WHERE i.id_lote = %s ORDER BY le.revisao NULLS FIRST, le.instancia, i.elemento, i.criado_em, i.id",
+        (id_lote,),
+    )
+    return {
+        "id_lote": lote["id"],
+        "itens": itens,
+        "total": len(itens),
+        "pendentes": sum(1 for i in itens if not i["tratado"]),
+        "sem_ciente": sum(1 for i in itens if i["ciente_em"] is None and i["autor"] is not None),
+    }
