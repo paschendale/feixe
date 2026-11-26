@@ -42,6 +42,14 @@ function aoAbrir(e: EtapaFluxo) {
   return { texto: 'sem cargas: começa assim que abre, sem nada a distribuir', alerta: true }
 }
 
+// "62 folhas e 3 lotes": a UI diz folha quando é folha e lote quando é lote livre (D-156).
+function quantas(ls: { tipo: string }[], depois = '') {
+  const folhas = ls.filter((l) => l.tipo !== 'livre').length
+  const livres = ls.length - folhas
+  const partes = [folhas && plural(folhas, 'folha', 'folhas'), livres && plural(livres, 'lote', 'lotes')].filter(Boolean)
+  return `${partes.join(' e ') || '0 folhas'}${depois}`
+}
+
 // Supervisão › Fluxos: cada fluxo é a sequência de etapas de um tema na unidade; as folhas andam por ele quando o
 // supervisor decide. À direita, quantas folhas estão em cada etapa agora.
 export default function Fluxos() {
@@ -65,7 +73,9 @@ export default function Fluxos() {
   const f = dados.itens.find((x) => x.id === escolhido)
   const doFluxo = (lotes?.itens ?? []).filter((l) => l.id_fluxo === f?.id)
   const ultimaOrdem = Math.max(0, ...(f?.etapas ?? []).map((e) => e.ordem ?? 0))
-  const noFim = doFluxo.filter((l) => !ABERTAS.includes(l.situacao ?? '') && f?.etapas.find((e) => e.nome === l.etapa)?.ordem === ultimaOrdem).length
+  // As encerradas (D-153) já estão concluídas para a CCAR: não contam como paradas no fim.
+  const fimDoFluxo = doFluxo.filter((l) => l.status_nacional !== 'CONCLUIDA' && !ABERTAS.includes(l.situacao ?? '') && f?.etapas.find((e) => e.nome === l.etapa)?.ordem === ultimaOrdem)
+  const noFim = fimDoFluxo.length
 
   async function alternar(x: FluxoCompleto) {
     try {
@@ -91,7 +101,7 @@ export default function Fluxos() {
             >
               <b className={cn(x.id === f?.id && 'text-primary')}>{x.nome}</b>
               <span className="text-nota text-muted-foreground">
-                {plural(x.etapas.length, 'etapa', 'etapas')} · {plural(x.lotes, 'folha', 'folhas')}
+                {plural(x.etapas.length, 'etapa', 'etapas')} · {lotes ? quantas(lotes.itens.filter((l) => l.id_fluxo === x.id)) : plural(x.lotes, 'folha', 'folhas')}
                 {!x.ativo ? ' · inativo' : ''}
               </span>
             </a>
@@ -129,14 +139,15 @@ export default function Fluxos() {
           )}
           {noFim > 0 && (
             <Nota tom="alerta">
-              {plural(noFim, 'folha terminou', 'folhas terminaram')} a última etapa e não {noFim === 1 ? 'tem' : 'têm'} próxima. Para a CCAR, {noFim === 1 ? 'segue' : 'seguem'} no status dessa etapa até se decidir como encerrar a folha.
+              {quantas(fimDoFluxo)} {noFim === 1 ? 'terminou' : 'terminaram'} a última etapa e não {noFim === 1 ? 'tem' : 'têm'} próxima. Para a CCAR, {noFim === 1 ? 'segue' : 'seguem'} no status dessa etapa até você encerrar em Esperando você (grupo "fim do fluxo").
             </Nota>
           )}
           <ol className="flex flex-col">
             {f.etapas.map((e) => {
               const aqui = doFluxo.filter((l) => l.etapa === e.nome)
-              const agora = aqui.filter((l) => ABERTAS.includes(l.situacao ?? '')).length
-              const paradas = aqui.length - agora
+              const abertas = aqui.filter((l) => ABERTAS.includes(l.situacao ?? ''))
+              const agora = abertas.length
+              const paradas = aqui.filter((l) => !ABERTAS.includes(l.situacao ?? '') && l.status_nacional !== 'CONCLUIDA').length
               return (
                 <li key={e.id} className="grid grid-cols-[32px_1fr_auto] items-center gap-x-3 gap-y-1 border-b border-linha py-3 last:border-0 md:grid-cols-[32px_1fr_110px_220px_120px]">
                   <span className="grid size-7 place-items-center rounded-full bg-primary-suave text-rodape font-semibold text-primary">{e.ordem}</span>
@@ -156,7 +167,7 @@ export default function Fluxos() {
                     {[e.obrigatoria ? 'obrigatória' : 'opcional', e.repetivel && 'repetível', e.conta_revisao && 'conta revisão', e.fracao_critica != null && `fração crítica ${pct(e.fracao_critica)}`].filter(Boolean).join(' · ')}
                   </span>
                   <span className="text-right text-nota">
-                    {agora > 0 && <b className="text-primary">{plural(agora, 'folha agora', 'folhas agora')}</b>}
+                    {agora > 0 && <b className="text-primary">{quantas(abertas, ' agora')}</b>}
                     {agora > 0 && paradas > 0 && <br />}
                     {paradas > 0 && (
                       <span className="text-alerta">
