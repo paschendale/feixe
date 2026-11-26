@@ -78,13 +78,6 @@ def main(repo: str, saida: str) -> None:
         with open(os.path.join(saida, nome), "w", encoding="utf-8") as f:
             f.write('<?xml version="1.0"?>\n<plugins>\n' + "".join(itens) + "</plugins>\n")
         print(f"{nome}: {len(itens)} versão(ões)")
-    with open(os.path.join(saida, "index.html"), "w", encoding="utf-8") as f:
-        f.write(
-            "<!doctype html><meta charset='utf-8'><title>Feixe: repositório de plugins</title>"
-            "<h1>Feixe</h1><p>Adicione no QGIS (Complementos &gt; Gerenciar &gt; Repositórios):</p>"
-            "<ul><li>Produção: <code>plugins.xml</code></li>"
-            "<li>Homologação (experimental): <code>plugins-hml.xml</code></li></ul>"
-        )
 
 
 if __name__ == "__main__":

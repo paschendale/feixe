@@ -1,0 +1,55 @@
+name: Manual
+
+# Publica no GitHub Pages o manual (manual/*.md) junto com os repositórios de plugins (plugins.xml e plugins-hml.xml,
+# refeitos a partir dos releases), a cada mudança no manual ou na barra do plugin. O release.yml publica o mesmo site
+# ao sair uma versão.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "manual/**"
+      - "scripts/ci/gerar_manual.py"
+      - "scripts/ci/gerar_plugins_xml.py"
+      - "feixe/ui/barra.py"
+      - "feixe/icones/**"
+      - "feixe/metadata.txt"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - name: Manual e repositórios de plugins
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pip install markdown==3.7
+          python scripts/ci/gerar_manual.py site
+          python scripts/ci/gerar_plugins_xml.py "${{ github.repository }}" site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  pages:
+    needs: site
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
