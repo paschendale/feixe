@@ -10,7 +10,8 @@ escolhe os avaliadores e o peso de cada um, e o Feixe reparte as amostras de tod
 - redistribuir é o mesmo gesto: só as amostras ainda não avaliadas mudam de mão, quem já tem as suas fica com elas até a
   cota nova, e as avaliadas ficam com quem avaliou (contam na cota dele);
 - avaliadores: quem tem perfil V no projeto; sem ninguém com V, toda a equipe (como na sugestão de sempre);
-- regra fixa: ninguém avalia folha que executou (quem teve carga numa passagem de produção da folha não entra);
+- regra fixa: ninguém avalia folha que adquiriu (carga numa passagem de aquisição da folha, em qualquer revisão); fica
+  fora só das amostras dessa folha;
 - a equipe é lembrada: sem amostras distribuídas nas folhas escolhidas, o diálogo abre com a divisão da última passagem
   de CQ distribuída da mesma etapa do fluxo; sem nenhuma, o supervisor escolhe as pessoas.
 """
@@ -69,12 +70,13 @@ def _amostras(ex: Executor, ids_le: List[int]) -> List[Dict]:
 
 
 def _executores(ex: Executor, id_lotes: List[int]) -> Dict[str, Dict[int, List[str]]]:
-    """Quem teve carga numa passagem de produção (fase que não é CQ) de cada folha: conta -> lote -> passagens."""
+    """Quem adquiriu a folha (carga numa passagem de aquisição, em qualquer revisão): conta -> lote -> passagens.
+    Revisão pontual e correções não contam (D-149): no DF, quem avalia costuma corrigir a folha depois."""
     por: Dict[str, Dict[int, List[str]]] = {}
     for r in ex.todos(
         "SELECT DISTINCT c.responsavel, le.id_lote, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha "
         "FROM mapcartacomp.carga_trabalho c JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa "
-        "JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa AND fe.fase <> 'cq' "
+        "JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa AND fe.fase = 'aquisicao' "
         "JOIN mapcartacomp.lote l ON l.id = le.id_lote "
         "WHERE le.id_lote = ANY(%s) AND c.responsavel IS NOT NULL ORDER BY folha",
         (list(id_lotes),),
