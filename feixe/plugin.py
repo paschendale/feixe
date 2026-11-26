@@ -782,11 +782,7 @@ class FeixePlugin:
 
     @staticmethod
     def _ciente(ctx, uuid):
-        ctx.exigir_pronto()
-        with ctx.local() as ex:
-            r = lq.ciente(ex, uuid)
-        rotas_cq._mudou_cq(ctx, {"ocorrencia": uuid, "ciente": True})
-        return r
+        return rotas_cq.ciente(ctx, uuid)
 
     def ciente(self, uuid=None):
         """Ciente (barra e ação da camada) na ocorrência selecionada em Ocorrências para ciência. Sem seleção, não dá

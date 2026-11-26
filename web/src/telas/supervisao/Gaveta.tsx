@@ -13,6 +13,7 @@ import { STATUS } from '@/lib/status'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 import { comCargas, resumoPreparo } from '../folhas/preparo'
+import { OcorrenciasFolha } from './OcorrenciasFolha'
 import { PlanosCQ } from './PlanosCQ'
 
 const ABERTAS = ['pendente', 'em_andamento']
@@ -132,8 +133,18 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
   if (aberta?.situacao === 'em_andamento' && seguinte && aberta.fase !== 'envio_gcq')
     sugestao =
       faltam > 0 ? (
+        aberta.fase === 'cq' ? (
+          <>
+            quando {faltam === 1 ? 'a' : 'as'} <b>{plural(faltam, 'amostra restante', 'amostras restantes')}</b> {faltam === 1 ? 'for avaliada' : 'forem avaliadas'}, conferir os planos (não conformes x aceita até) e decidir: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>, ou outra revisão.
+          </>
+        ) : (
+          <>
+            quando {faltam === 1 ? 'a' : 'as'} <b>{plural(faltam, 'carga restante', 'cargas restantes')}</b> {faltam === 1 ? 'for concluída' : 'forem concluídas'}, concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
+          </>
+        )
+      ) : aberta.fase === 'cq' ? (
         <>
-          quando {faltam === 1 ? 'a' : 'as'} <b>{plural(faltam, 'carga restante', 'cargas restantes')}</b> {faltam === 1 ? 'for concluída' : 'forem concluídas'}, concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
+          as amostras estão avaliadas: conferir os planos (não conformes x aceita até) e decidir: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>, ou outra revisão.
         </>
       ) : (
         <>
@@ -266,9 +277,9 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                 Ver no QGIS
               </Button>
               {supervisor && aberta && lote.pessoas.some((p) => !p.conta && p.total > p.concluidas) && (
-                <Button onClick={() => distribuir([lote.id])}>Distribuir</Button>
+                <Button onClick={() => distribuir([lote.id])}>{atual?.fase === 'cq' ? 'Distribuir as amostras' : 'Distribuir'}</Button>
               )}
-              {supervisor && aberta && (atual?.cargas_total ?? 0) > atual!.cargas_concluidas && (
+              {supervisor && aberta && atual?.fase !== 'cq' && (atual?.cargas_total ?? 0) > atual!.cargas_concluidas && (
                 <Button
                   variant="outline"
                   disabled={!conectado}
@@ -316,10 +327,10 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                     <div className="flex flex-col gap-1.5">
                       <div className="flex justify-between text-[13px]">
                         <span>
-                          <b>{num(atual.cargas_concluidas)}</b> de {num(atual.cargas_total)} cargas concluídas
+                          <b>{num(atual.cargas_concluidas)}</b> de {num(atual.cargas_total)} {atual.fase === 'cq' ? 'amostras avaliadas' : 'cargas concluídas'}
                         </span>
                         <span style={{ color: lote.pessoas.some((p) => !p.conta) ? COR.alerta : undefined }}>
-                          {num(lote.pessoas.filter((p) => !p.conta).reduce((s, p) => s + p.total - p.concluidas, 0))} a atribuir
+                          {num(lote.pessoas.filter((p) => !p.conta).reduce((s, p) => s + p.total - p.concluidas, 0))} {atual.fase === 'cq' ? 'sem avaliador' : 'a atribuir'}
                         </span>
                       </div>
                       <Barra total={atual.cargas_total} partes={[{ valor: atual.cargas_concluidas, cor: COR.concluida }]} />
@@ -368,6 +379,8 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                 {supervisor && atual.fase === 'cq' && <PlanosCQ idLoteEtapa={atual.id} folha={lote.tipo === 'folha'} distribuir={() => distribuir([lote.id])} />}
               </section>
             )}
+
+            {supervisor && <OcorrenciasFolha idLote={lote.id} />}
 
             {supervisor && <Andar lote={lote} fluxo={fluxo} estado={estado} distribuir={distribuir} />}
 

@@ -266,3 +266,37 @@ def test_copiar_fluxo_com_padrao_fora_do_manual(amb):
     f = df.copiar(ex, "DF", cen.fluxo, "cópia sem nível")
     (cq,) = [e for e in f["etapas"] if e["fase"] == "cq"]
     assert (cq["nivel_inspecao"], cq["lqa"]) == (None, 4.0)
+
+
+def test_andamento_do_plano_e_amostras_sem_avaliador_no_painel(amb):
+    """D3d: a gaveta mostra não conformes x Ac por plano; o Início, as amostras sem avaliador por atividade, fora das
+    cargas de produção a atribuir (D-101); a Equipe, as pendentes do avaliador no grupo do CQ."""
+    from feixe.core.dados import painel as dp
+
+    cen, ex = amb
+    le = cen.passagem("cq")
+    omissao = cen.ativ_cq["Omissão"]
+    antes = dp.supervisao(ex, "DF")
+    producao_antes = {g["chave"]: g["a_atribuir"] for g in antes["grupos"] if g["fase"] != "cq"}
+    sem_antes = {s["id_atividade"]: s["amostras"] for s in antes["amostras_sem_avaliador"]}
+    dq.criar_plano(ex, "DF", le, omissao, "II", 4, semente=7)
+
+    s = dp.supervisao(ex, "DF")
+    item = next(x for x in s["amostras_sem_avaliador"] if x["id_atividade"] == omissao)
+    assert item["amostras"] == sem_antes.get(omissao, 0) + 20 and item["elemento"] == "Omissão"
+    assert item["chave"].startswith("cq-") and cen.lote in item["lotes"]
+    assert {g["chave"]: g["a_atribuir"] for g in s["grupos"] if g["fase"] != "cq"} == producao_antes
+
+    p = _plano(ex, le, omissao)
+    cargas = _cargas(ex, p["id"])
+    dc.atribuir(ex, "DF", "t_aval", ids=[c["id"] for c in cargas])
+    for c, status in zip(cargas[:3], (0, 0, 1)):
+        ex.executar("UPDATE mapcartacomp.cq_amostra SET status = %s WHERE id = %s", (status, c["amostra"]))
+    (feito,) = dq.planos(ex, "DF", le)["planos"]
+    assert (feito["avaliadas"], feito["nao_conformes"], feito["ac"]) == (3, 2, 2)
+
+    s = dp.supervisao(ex, "DF")
+    assert all(x["id_atividade"] != omissao or x["amostras"] == sem_antes.get(omissao, 0)
+               for x in s["amostras_sem_avaliador"])  # fmt: skip
+    aval = next(x for x in s["pessoas"] if x["conta"] == "t_aval")
+    assert aval["por_grupo"] == {item["chave"]: 17} and aval["grupos"] == [item["chave"]]

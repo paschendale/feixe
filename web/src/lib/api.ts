@@ -198,16 +198,17 @@ export type Preparo = {
 
 // --- Planos de amostragem do CQ (D2) ---
 
+// Planos convertidos do DF podem vir sem N, nível ou Ac (só o Feixe grava todos).
 export type PlanoCQ = {
   id: number
   id_atividade: number
   atividade: string
   elemento: string | null
-  N: number
-  nivel: string
+  N: number | null
+  nivel: string | null
   letra: string | null
   n: number
-  ac: number
+  ac: number | null
   lqa: number
   fracao_critica: number | null
   semente: number
@@ -215,6 +216,7 @@ export type PlanoCQ = {
   resultado: string
   amostras: number
   avaliadas: number
+  nao_conformes: number
   distribuidas: number
   inspecao_completa: boolean
   pode_refazer: boolean
@@ -355,6 +357,42 @@ export type OcorrenciaDaFolha = {
 }
 
 export type OcorrenciasDaFolha = { id_lote: number; itens: OcorrenciaDaFolha[]; total: number; pendentes: number; sem_ciente: number }
+
+// Execução › CQ (D3d): minhas amostras por passagem de CQ e atividade (elemento). `total` = tamanho do plano;
+// `outras` = as do plano com outro avaliador (o workspace só tem as minhas).
+export type ResumoCQ = {
+  id_lote_etapa: number
+  id_lote: number
+  folha_revisao: string
+  tema: string | null
+  etapa: string | null
+  situacao: string
+  aberta: boolean
+  id_atividade: number
+  atividade: string | null
+  elemento: string | null
+  id_cq_plano: number
+  plano: { id: number; nivel: string | null; letra: string | null; N: number | null; n: number | null; ac: number | null; lqa: number | null }
+  minhas: number
+  total: number
+  outras: number
+  avaliadas: number
+  nao_conformes: number
+  pendentes: number
+  ocorrencias: number
+  ultima: string | null
+}
+
+// Para ciência (D-66): ocorrências que apontam uma carga minha. `avaliador` = nome do SGBC quando a CCAR respondeu.
+export type OcorrenciaCiencia = Ocorrencia & { geocodigo_avaliada: string | null; avaliador: string }
+export type ParaCiencia = { pendentes: OcorrenciaCiencia[]; cientes: OcorrenciaCiencia[]; dias: number }
+
+export type PainelExecucao = {
+  por_dia: { dia: string; n: number }[]
+  cq: ResumoCQ[]
+  ciencia: ParaCiencia
+  preparando?: boolean
+}
 
 export type FolhaDistribuir = {
   id_lote: number
@@ -504,13 +542,19 @@ export type PessoaPainel = {
   ultima: string | null
   grupos: string[]
   lotes: number[]
+  // Pendentes por atividade em produção (chave do grupo): no CQ são amostras.
+  por_grupo: Record<string, number>
 }
+
+// Amostras de CQ sem avaliador, por atividade (elemento), separadas das cargas a atribuir da produção (D-101).
+export type AmostrasSemAvaliador = { id_atividade: number; atividade: string | null; elemento: string | null; tema: string | null; chave: string; amostras: number; lotes: number[] }
 
 export type PainelSupervisao = {
   grupos: GrupoAtividade[]
   lotes: LotePainel[]
   pessoas: PessoaPainel[]
   status: Partial<Record<StatusNacional, number>>
+  amostras_sem_avaliador: AmostrasSemAvaliador[]
 }
 
 export type GrupoEsperando = {

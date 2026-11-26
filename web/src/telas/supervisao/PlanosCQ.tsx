@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { Colunas, COR, RotuloEstavel } from '@/components/painel'
+import { Barra, Colunas, COR, RotuloEstavel } from '@/components/painel'
 import type { PlanoCQ, PlanosCQ as Planos, PreviaCQ } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { lista, num, plural } from '@/lib/formato'
@@ -17,11 +17,15 @@ export const pct = (x: number | null | undefined) => (x == null ? '—' : `${x.t
 type Linha = Pick<PlanoCQ, 'atividade' | 'elemento' | 'N' | 'nivel' | 'lqa' | 'letra' | 'n' | 'ac' | 'inspecao_completa'>
 
 // "Comissão: N=113 células, nível II, LQA 4% → letra F, 20 amostras, aceita até 2"
+// Planos convertidos do DF (antes do Feixe) podem vir sem N, letra ou Ac: a frase diz "—" em vez de quebrar a gaveta.
+const qt = (n: number | null | undefined, um: string, varios: string) => (n == null ? `— ${varios}` : plural(n, um, varios))
+const ou = (n: number | null | undefined) => (n == null ? '—' : num(n))
+
 export function frasePlano(p: Linha) {
   const quanto = p.inspecao_completa
-    ? `${p.letra ? `letra ${p.letra}, ` : ''}todas as ${plural(p.N, 'célula', 'células')} (n ≥ N)`
-    : `letra ${p.letra}, ${plural(p.n, 'amostra', 'amostras')}`
-  return `${p.elemento ?? p.atividade}: N=${plural(p.N, 'célula', 'células')}, nível ${p.nivel}, LQA ${pct(p.lqa)} → ${quanto}, aceita até ${num(p.ac)}`
+    ? `${p.letra ? `letra ${p.letra}, ` : ''}todas as ${qt(p.N, 'célula', 'células')} (n ≥ N)`
+    : `letra ${p.letra ?? '—'}, ${qt(p.n, 'amostra', 'amostras')}`
+  return `${p.elemento ?? p.atividade}: N=${qt(p.N, 'célula', 'células')}, nível ${p.nivel ?? '—'}, LQA ${pct(p.lqa)} → ${quanto}, aceita até ${ou(p.ac)}`
 }
 
 type Alvo = { id_atividade: number; nome: string }
@@ -207,15 +211,31 @@ export function PlanosCQ({ idLoteEtapa, folha, distribuir }: { idLoteEtapa: numb
       <span className="text-[13px] font-semibold">Planos de amostragem</span>
       {dados.planos.length > 0 && (
         <table className="w-full table-fixed border-collapse text-[13px]">
-          <Colunas larguras={[undefined, 96, 150]} />
+          <Colunas larguras={[undefined, 196, 156]} />
           <tbody>
             {dados.planos.map((p) => (
               <tr key={p.id}>
-                <td className="truncate border-t py-1.5" title={`${frasePlano(p)}\n${p.atividade}${p.universo ? `\n${p.universo}` : ''}\nfração crítica ${pct(p.fracao_critica)} · semente ${p.semente}`}>
-                  {frasePlano(p)}
+                <td className="border-t py-1.5 pr-2" title={`${frasePlano(p)}\n${p.atividade}${p.universo ? `\n${p.universo}` : ''}\nfração crítica ${pct(p.fracao_critica)} · semente ${p.semente}`}>
+                  <span className="block truncate font-medium">{p.elemento ?? p.atividade}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{frasePlano(p).replace(/^[^:]*: /, '')}</span>
                 </td>
-                <td className="tab border-t py-1.5 text-right text-muted-foreground">
-                  {num(p.avaliadas)}/{num(p.amostras)} avaliadas
+                {/* Andamento do plano (D3d): avaliadas/n e não conformes x Ac. A decisão (aprovar, nova revisão) é do supervisor, no D4. */}
+                <td className="tab border-t py-1.5 pr-2">
+                  <span className="block truncate">
+                    {num(p.avaliadas)} de {num(p.amostras)} avaliadas
+                  </span>
+                  <span className="block truncate text-xs" style={{ color: p.ac != null && p.nao_conformes > p.ac ? COR.alerta : undefined }}>
+                    <b>{num(p.nao_conformes)}</b> {p.nao_conformes === 1 ? 'não conforme' : 'não conformes'} · aceita até {ou(p.ac)}
+                  </span>
+                  <Barra
+                    className="mt-1"
+                    altura={4}
+                    total={p.amostras}
+                    partes={[
+                      { valor: p.avaliadas - p.nao_conformes, cor: COR.concluida, rotulo: 'conformes' },
+                      { valor: p.nao_conformes, cor: COR.naoConforme, rotulo: 'não conformes' },
+                    ]}
+                  />
                 </td>
                 <td className="border-t py-1.5 text-right">
                   {aberta && p.pode_refazer ? (

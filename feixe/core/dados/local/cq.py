@@ -23,6 +23,7 @@ Regras, as mesmas que o push confere de novo na CCAR (D-122):
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 import struct
 from typing import Any, Dict, List, Optional
@@ -314,3 +315,104 @@ def ciente(ex, uuid: str) -> Dict:
     if linha["ciente_em"] is None:
         ex.atualizar("cq_inspecao", uuid, {"ciente_em": ex.agora, "ciente_por": ex.usuario})
     return {"ocorrencia": ocorrencia(ex, uuid)}
+
+
+# --- leituras do painel (D3d) ---------------------------------------------------------------------------------------
+
+
+def resumo(ex) -> List[Dict]:
+    """Minhas amostras por passagem de CQ e atividade (elemento): as fichas e o andamento da Execução › CQ. `total` é o
+    tamanho do plano (n, ou N na inspeção completa); `outras` = as do plano com outro avaliador (o workspace só tem as
+    minhas). Abertas com pendentes primeiro, depois as abertas terminadas e, no fim, as encerradas."""
+    linhas = ex.todos(
+        f"SELECT c.id_lote_etapa, le.id_lote, {rotulo()} AS folha_revisao, t.nome AS tema, fe.nome AS etapa, "
+        "le.situacao, c.id_atividade, at.nome AS atividade, at.elemento, p.id AS id_cq_plano, "
+        "p.nivel_inspecao AS p_nivel, p.letra_codigo AS p_letra, p.tamanho_lote_n AS p_lote, "
+        "p.tamanho_amostra_n AS p_amostra, p.numero_aceitacao_ac AS p_ac, p.lqa AS p_lqa, "
+        "count(*) AS minhas, sum(CASE WHEN a.status IS NOT NULL THEN 1 ELSE 0 END) AS avaliadas, "
+        "sum(CASE WHEN a.status = 0 THEN 1 ELSE 0 END) AS nao_conformes, max(a.avaliado_em) AS ultima "
+        "FROM cq_amostra a JOIN carga_trabalho c ON c.id = a.id_carga_trabalho "
+        "JOIN lote_etapa le ON le.id = c.id_lote_etapa JOIN lote l ON l.id = le.id_lote "
+        "LEFT JOIN cq_plano p ON p.id = a.id_cq_plano LEFT JOIN tema t ON t.id = l.id_tema "
+        "LEFT JOIN fluxo_etapa fe ON fe.id = le.id_fluxo_etapa LEFT JOIN atividade at ON at.id = c.id_atividade "
+        "WHERE c.responsavel = ? GROUP BY c.id_lote_etapa, c.id_atividade, p.id",
+        (ex.usuario,),
+    )
+    registradas = {
+        (r["id_lote_etapa"], r["elemento"]): r["n"]
+        for r in ex.todos(
+            "SELECT id_lote_etapa, elemento, count(*) AS n FROM cq_inspecao WHERE responsavel = ? GROUP BY 1, 2",
+            (ex.usuario,),
+        )
+    }
+    saida = []
+    for r in linhas:
+        converter(r, datas=("ultima",))
+        n, N = r.pop("p_amostra"), r.pop("p_lote")
+        r["plano"] = {
+            "id": r["id_cq_plano"], "nivel": r.pop("p_nivel"), "letra": r.pop("p_letra"), "N": N, "n": n,
+            "ac": r.pop("p_ac"), "lqa": r.pop("p_lqa"),
+        }  # fmt: skip
+        total = min(n, N) if n is not None and N is not None else r["minhas"]
+        r["total"] = max(total, r["minhas"])
+        r["outras"] = r["total"] - r["minhas"]
+        r["pendentes"] = r["minhas"] - r["avaliadas"]
+        r["aberta"] = r["situacao"] in ABERTAS
+        r["ocorrencias"] = registradas.get((r["id_lote_etapa"], r["elemento"]), 0)
+        saida.append(r)
+    saida.sort(
+        key=lambda r: (not r["aberta"], r["aberta"] and r["pendentes"] == 0, r["folha_revisao"] or "",
+                       r["elemento"] or r["atividade"] or "")
+    )  # fmt: skip
+    return saida
+
+
+def para_ciencia(ex, dias: int = 30) -> Dict:
+    """As ocorrências que apontam uma carga minha (D-66): as ainda sem ciência e as que já dei nos últimos `dias`,
+    com o geocódigo da minha carga apontada. A lista de correção (revisão com `expor_ocorrencias`) não entra: ali não
+    sou o autor, e o que vejo vem pela regra de visibilidade de sempre."""
+    itens = [o for o in ocorrencias(ex) if o["sou_autor"] and not o["minha"]]
+    ids = sorted({o["id_carga_avaliada"] for o in itens if o["id_carga_avaliada"] is not None})
+    geo: Dict[int, Optional[str]] = {}
+    if ids:
+        marcas = ", ".join("?" * len(ids))
+        geo = {
+            r["id"]: r["geocodigo"]
+            for r in ex.todos(f"SELECT id, geocodigo FROM carga_trabalho WHERE id IN ({marcas})", tuple(ids))
+        }
+    for o in itens:
+        o["geocodigo_avaliada"] = geo.get(o["id_carga_avaliada"])
+    limite = ex.agora - dt.timedelta(days=dias)
+    pendentes = sorted((o for o in itens if o["ciente_em"] is None), key=lambda o: (o["folha_revisao"] or "",
+                       o["criado_em"] or limite))  # fmt: skip
+    cientes = sorted(
+        (o for o in itens if o["ciente_em"] is not None and o["ciente_em"] >= limite),
+        key=lambda o: o["ciente_em"],
+        reverse=True,
+    )
+    return {"pendentes": pendentes, "cientes": cientes[:50], "dias": dias}
+
+
+def proxima_amostra(ex, id_lote: Optional[int] = None, referencia: Optional[int] = None) -> Optional[Dict]:
+    """A próxima amostra pendente minha, só entre as cargas de CQ (nesta folha, se `id_lote`): o "Continuar no QGIS"
+    da Execução › CQ. Nenhuma: None."""
+    producao = [
+        r["id"]
+        for r in ex.todos(
+            "SELECT id FROM carga_trabalho WHERE responsavel = ? AND NOT concluido AND id_cq_plano IS NULL",
+            (ex.usuario,),
+        )
+    ]
+    carga = lc.proxima(ex, referencia, producao, id_lote)
+    if carga is None:
+        return None
+    return {"carga": carga, "amostra": amostra_da_carga(ex, carga["id"])}
+
+
+def ciente_da_folha(ex, id_lote: int) -> Dict:
+    """Ciente em todas desta folha: dá ciência, numa transação, de todas as ocorrências da folha que apontam carga
+    minha e ainda não têm ciência. Volta quantas."""
+    feitas = [o["uuid"] for o in ocorrencias(ex, id_lote) if o["pode_ciente"]]
+    for u in feitas:
+        ciente(ex, u)
+    return {"cientes": len(feitas), "uuids": feitas}

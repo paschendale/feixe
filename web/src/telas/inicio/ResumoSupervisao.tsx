@@ -88,17 +88,27 @@ function PrecisaDeVoce({ p, esperando, lotes }: { p: PainelSupervisao; esperando
       </Bloco>,
     )
   }
-  for (const g of cq)
+  // Amostras de CQ sem avaliador (D3d): um cartão por tema, com as atividades (elementos) e as folhas. O Distribuir
+  // entrega a folha inteira (todas as atividades de CQ dela) a um avaliador.
+  for (const g of cq) {
+    const porAtividade = (p.amostras_sem_avaliador ?? []).filter((a) => a.chave === g.chave)
+    const folhas = [...new Set(porAtividade.flatMap((a) => a.lotes))]
+    const total = porAtividade.reduce((s, a) => s + a.amostras, 0) || g.a_atribuir
     cartoes.push(
       <Bloco key={g.chave} className="flex-[1_1_300px] gap-1.5">
-        <Numero valor={g.a_atribuir} alerta />
+        <Numero valor={total} alerta />
         <span>amostras de {g.rotulo} sem avaliador</span>
-        <span className="text-[13px] text-muted-foreground">em {plural(g.lotes.length, 'folha', 'folhas')}</span>
-        <LinkSeta href={href('supervisao/folhas', { grupo: g.chave })} className="mt-2">
-          Distribuir
+        <span className="text-[13px] text-muted-foreground">
+          {porAtividade.length ? lista(porAtividade.map((a) => `${a.elemento ?? a.atividade} (${num(a.amostras)})`)) : null}
+          {porAtividade.length ? ' · ' : ''}
+          {folhas.length && folhas.length <= 3 ? lista(folhas.map(nome)) : plural(folhas.length || g.lotes.length, 'folha', 'folhas')}
+        </span>
+        <LinkSeta href={href('supervisao/folhas', { grupo: g.chave, distribuir: 1 })} className="mt-2">
+          Distribuir as amostras
         </LinkSeta>
       </Bloco>,
     )
+  }
   if (conflitos?.total)
     cartoes.push(
       <Bloco key="conflitos" className="flex-[1_1_300px] gap-1.5">
@@ -115,7 +125,7 @@ function PrecisaDeVoce({ p, esperando, lotes }: { p: PainelSupervisao; esperando
   return (
     <div className="flex flex-col gap-2.5">
       <Rotulo>Precisa de você</Rotulo>
-      {cartoes.length ? <div className="flex flex-wrap gap-4">{cartoes}</div> : <Bloco className="text-muted-foreground">Nada esperando você: nenhuma folha parada e nenhuma carga sem responsável.</Bloco>}
+      {cartoes.length ? <div className="flex flex-wrap gap-4">{cartoes}</div> : <Bloco className="text-muted-foreground">Nada esperando você: nenhuma folha parada, nenhuma carga sem responsável e nenhuma amostra sem avaliador.</Bloco>}
     </div>
   )
 }
@@ -166,7 +176,7 @@ function CartaoAtividade({ g }: { g: GrupoAtividade }) {
           </span>
         )}
         {cq && !g.concluidas ? (
-          <span className="text-muted-foreground">avaliação no QGIS na fase D</span>
+          <span className="text-muted-foreground">nenhuma avaliada ainda</span>
         ) : (
           <span>
             <b>{num(g.concluidas_7d)}</b> {cq ? 'avaliadas' : 'concluídas'} em 7 dias

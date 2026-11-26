@@ -83,6 +83,9 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
         g["na_fila"] = 0
     lotes: Dict[int, Dict] = {}
     pessoas: Dict[str, Dict] = {}
+    # Amostras de CQ sem avaliador, por atividade (elemento): o "Precisa de você" do Início (D3d). Separadas das cargas
+    # de produção a atribuir (D-101), que nunca contam amostra.
+    sem_avaliador: Dict[int, Dict] = {}
     for c in _cargas(ex, uf):
         fase, id_tema = fase_da_atividade.get(c["id_atividade"], (None, None))
         g = por_chave.get(_chave(fase, id_tema, c["id_atividade"])) if fase else None
@@ -98,6 +101,13 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
                 g["na_fila"] += pendentes
             else:
                 g["a_atribuir"] += pendentes
+                if fase == "cq" and pendentes:
+                    s = sem_avaliador.setdefault(
+                        c["id_atividade"], {"id_atividade": c["id_atividade"], "chave": g["chave"], "amostras": 0,
+                                            "lotes": set()},
+                    )  # fmt: skip
+                    s["amostras"] += pendentes
+                    s["lotes"].add(c["id_lote"])
         lote = lotes.setdefault(c["id_lote"], {"responsaveis": {}, "a_atribuir": 0, "na_fila": 0, "ultima": None})
         lote["ultima"] = _mais_recente(lote["ultima"], c["ultima"])
         if c["responsavel"]:
@@ -105,7 +115,7 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
             p = pessoas.setdefault(
                 c["responsavel"],
                 {"conta": c["responsavel"], "nome": c["nome"], "pendentes": 0, "concluidas_7d": 0, "ultima": None,
-                 "grupos": set(), "lotes": set()},
+                 "grupos": set(), "lotes": set(), "por_grupo": {}},
             )  # fmt: skip
             p["pendentes"] += pendentes
             p["concluidas_7d"] += c["concluidas_7d"]
@@ -113,6 +123,8 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
             if g and pendentes:
                 p["grupos"].add(g["chave"])
                 p["lotes"].add(c["id_lote"])
+                # Pendentes por atividade em produção: a Equipe diz "12 amostras" no CQ e "30 cargas" na produção.
+                p["por_grupo"][g["chave"]] = p["por_grupo"].get(g["chave"], 0) + pendentes
         elif c["id_lote"] in fila:
             lote["na_fila"] += pendentes
         else:
@@ -160,6 +172,44 @@ def supervisao(ex: Executor, uf: Optional[str]) -> Dict:
         "lotes": detalhe_lotes,
         "pessoas": sorted(pessoas.values(), key=lambda p: p["nome"]),
         "status": {r["status_nacional"]: r["n"] for r in status},
+        "amostras_sem_avaliador": _sem_avaliador(ex, sem_avaliador, membros),
+    }
+
+
+def _sem_avaliador(ex: Executor, por_atividade: Dict[int, Dict], membros: List[Dict]) -> List[Dict]:
+    """As amostras sem avaliador por atividade de CQ, com o nome do elemento (`f_elemento_nome`, como no pull)."""
+    if not por_atividade:
+        return []
+    nomes = {m["id_atividade"]: (m["atividade"], m["tema"]) for m in membros}
+    elementos = {
+        r["id"]: r["elemento"]
+        for r in ex.todos(
+            "SELECT a.id, mapcartacomp.f_elemento_nome(a.id_medidadequalidade) AS elemento "
+            "FROM mapcartacomp.atividade a WHERE a.id = ANY(%s)",
+            (sorted(por_atividade),),
+        )
+    }
+    saida = []
+    for ativ, s in por_atividade.items():
+        nome, tema = nomes.get(ativ, (None, None))
+        saida.append(
+            {**s, "atividade": nome, "tema": tema, "elemento": elementos.get(ativ), "lotes": sorted(s["lotes"])}
+        )
+    return sorted(saida, key=lambda s: (s["chave"], -s["amostras"], s["elemento"] or s["atividade"] or ""))
+
+
+def nomes(ex: Executor, contas: List[str]) -> Dict[str, str]:
+    """Nome de cada conta no SGBC (`mapcartctrl.t_usuario`); conta sem cadastro fica de fora."""
+    if not contas:
+        return {}
+    return {
+        r["conta"]: r["nome"]
+        for r in ex.todos(
+            "SELECT nom_contausuario AS conta, nom_usuario::text AS nome FROM mapcartctrl.t_usuario "
+            "WHERE nom_contausuario = ANY(%s)",
+            (sorted(set(contas)),),
+        )
+        if r["nome"]
     }
 
 

@@ -8,8 +8,10 @@ import { href, navegar, useRota } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
-import { ABERTAS, Continuar, Preparando, Producao, pendentesDe, usePorDia } from './comum'
+import { AmostrasCQ } from './AmostrasCQ'
+import { ABERTAS, Continuar, Preparando, Producao, pendentesDe, usePainelExecucao, usePorDia } from './comum'
 import { MeusConflitos } from './MeusConflitos'
+import { ParaCiencia } from './ParaCiencia'
 
 const JANELA_DESFAZER_MS = 24 * 3600 * 1000
 const chaveDe = (p: Passagem) => `${p.tema} · ${p.etapa}`
@@ -148,24 +150,60 @@ function Cargas({ p }: { p: Passagem }) {
   )
 }
 
-// Execução › Minhas cargas (D-103): o trabalho é no QGIS (barra do Feixe: próxima, pular, concluir). Aqui é o
-// acompanhamento e o atalho para levar o QGIS até uma carga.
+// Execução (D-103, D3d): Minhas cargas (produção), Minhas amostras (CQ do avaliador) e Para ciência (ocorrências nas
+// cargas da pessoa, D-66). O trabalho é no QGIS (barra do Feixe); aqui é o acompanhamento e o atalho para levar o QGIS
+// até uma carga, uma amostra ou uma ocorrência.
 export default function Execucao() {
   const rota = useRota()
-  const { dados, erro } = useApi<ResumoCargas>('/api/cargas/resumo', ['carga', 'lote'])
-  const { dias, hoje } = usePorDia()
+  const { tem } = useSessao()
+  const { dados: cargas, erro } = useApi<ResumoCargas>('/api/cargas/resumo', ['carga', 'lote'])
+  const { dados: painel, erro: erroPainel } = usePainelExecucao()
+  const nCiencia = painel?.ciencia.pendentes.length ?? 0
+  const temCQ = tem('avaliador') || !!painel?.cq.length
+  const temCiencia = tem('apm') || nCiencia > 0 || !!painel?.ciencia.cientes.length
+  const cqSet = painel ? new Set(painel.cq.map((c) => c.id_lote_etapa)) : null
+  const producao = cargas && cqSet ? cargas.passagens.filter((p) => !cqSet.has(p.id_lote_etapa)) : []
+  // Sem aba no endereço: a de produção; quem só tem amostras (avaliador) cai direto no CQ.
+  const pedida = rota.partes[0]
+  const ativa = pedida === 'cq' && temCQ ? 'cq' : pedida === 'ciencia' && temCiencia ? 'ciencia' : !pedida && temCQ && cargas && painel && producao.length === 0 && painel.cq.length > 0 ? 'cq' : 'cargas'
   const abasModulo = [
-    { id: 'cargas', rotulo: 'Minhas cargas', href: href('execucao') },
-    { id: 'amostras', rotulo: 'Minhas amostras · fase D', desabilitada: true },
+    { id: 'cargas', rotulo: 'Minhas cargas', href: href('execucao/cargas') },
+    ...(temCQ ? [{ id: 'cq', rotulo: 'Minhas amostras', href: href('execucao/cq') }] : []),
+    ...(temCiencia ? [{ id: 'ciencia', rotulo: 'Para ciência', href: href('execucao/ciencia'), contagem: nCiencia }] : []),
   ]
-  if (!dados || dados.preparando)
+  const preparando = cargas?.preparando || painel?.preparando
+  if (!cargas || !painel || preparando)
     return (
       <>
-        <CabecalhoModulo titulo="Execução" abas={abasModulo} ativa="cargas" />
-        <Conteudo largura={1240}>{dados?.preparando ? <Preparando /> : <Carregando erro={erro} />}</Conteudo>
+        <CabecalhoModulo titulo="Execução" abas={abasModulo} ativa={ativa} />
+        <Conteudo largura={1240}>{preparando ? <Preparando /> : <Carregando erro={erro ?? erroPainel} />}</Conteudo>
       </>
     )
+  return (
+    <>
+      <CabecalhoModulo titulo="Execução" abas={abasModulo} ativa={ativa} />
+      <Conteudo largura={1240}>
+        <MeusConflitos />
+        {ativa === 'cargas' && <MinhasCargas passagens={producao} temCQ={painel.cq.some((c) => c.aberta && c.pendentes > 0)} />}
+        {ativa === 'cq' && <AmostrasCQ cq={painel.cq} />}
+        {ativa === 'ciencia' && (
+          <>
+            <p className="max-w-[880px] text-[15px] text-texto-2">
+              O avaliador apontou estas ocorrências nas suas cargas. Veja cada uma no QGIS e marque <b>Ciente</b>: é o retorno do controle de qualidade, não um pedido de correção. A correção, quando houver, vem numa etapa própria.
+            </p>
+            <ParaCiencia dados={painel.ciencia} comCientes />
+          </>
+        )}
+      </Conteudo>
+    </>
+  )
+}
 
+// Execução › Minhas cargas: as cargas de produção (as amostras de CQ ficam na aba delas).
+function MinhasCargas({ passagens: todas, temCQ }: { passagens: Passagem[]; temCQ: boolean }) {
+  const rota = useRota()
+  const { dias, hoje } = usePorDia()
+  const dados = { passagens: todas }
   const chaves = [...new Set(dados.passagens.map(chaveDe))]
   const pendentesDaChave = (k: string) => dados.passagens.filter((p) => chaveDe(p) === k && ABERTAS.includes(p.situacao)).reduce((s, p) => s + pendentesDe(p), 0)
   const folhaQ = Number(rota.query.get('folha')) || null
@@ -178,78 +216,82 @@ export default function Execucao() {
 
   return (
     <>
-      <CabecalhoModulo titulo="Execução" abas={abasModulo} ativa="cargas" />
-      <Conteudo largura={1240}>
-        <MeusConflitos />
-        {chaves.length === 0 ? (
-          <Bloco className="text-muted-foreground">Nenhuma carga atribuída a você em folhas abertas. O supervisor atribui as cargas.</Bloco>
-        ) : (
-          <>
-            <Fichas
-              rotulo="Atividade"
-              ativa={chave}
-              escolher={(k) => navegar(`execucao?atividade=${encodeURIComponent(k)}`)}
-              fichas={chaves.map((k) => ({ id: k, rotulo: k, contagem: pendentesDaChave(k) ? `${num(pendentesDaChave(k))} pendentes` : 'tudo concluído' }))}
-            />
-            {atual && (
-              <Bloco className="flex-row flex-wrap items-center gap-x-5 gap-y-3 px-5 py-4">
-                <div className="flex min-w-[300px] flex-1 flex-col gap-1.5">
-                  <div className="flex flex-wrap items-baseline gap-x-3">
-                    <span className="tab text-lg font-bold">{atual.folha_revisao}</span>
-                    <span className="text-muted-foreground">
-                      {atual.tema} · {atual.etapa} · {ABERTAS.includes(atual.situacao) ? (atual.situacao === 'pendente' ? 'a iniciar' : 'em andamento') : 'encerrada pelo supervisor'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-[13px]">
-                    <span>
-                      <b>{num(atual.concluidas)}</b> de {num(atual.total)} das suas cargas concluídas{hoje ? ` · ${num(hoje)} hoje` : ''}
-                    </span>
-                    <span className="tab">{pc(atual.concluidas, atual.total)}%</span>
-                  </div>
-                  <Barra partes={[{ valor: atual.concluidas, cor: COR.concluida }]} total={atual.total} />
-                </div>
-                {pendentesDe(atual) > 0 && ABERTAS.includes(atual.situacao) && <Continuar idLote={atual.id_lote} grande />}
-              </Bloco>
-            )}
-            {outras.length > 0 && (
-              <div className="flex flex-wrap gap-2 text-sm">
-                <span className="text-muted-foreground">Outras folhas nesta atividade:</span>
-                {outras.map((p) => (
-                  <a key={p.id_lote_etapa} href={href('execucao', { atividade: chave, folha: p.id_lote_etapa })} className="tab text-ibge hover:underline">
-                    {p.folha_revisao} ({num(pendentesDe(p))})
-                  </a>
-                ))}
-              </div>
-            )}
-            {atual && <Cargas key={atual.id_lote_etapa} p={atual} />}
-            <div className="flex flex-wrap items-stretch gap-4">
-              {terminadas.map((p) => (
-                <Bloco key={p.id_lote_etapa} className="flex-[1_1_280px] gap-1.5">
-                  <h2 className="font-semibold">
-                    {p.folha_revisao} · {p.tema}
-                  </h2>
-                  <span className="text-[13px] text-muted-foreground">
-                    {plural(p.total, 'carga concluída', 'cargas concluídas')}. Sua parte terminou; a folha segue quando o supervisor abrir a próxima etapa.
+      {chaves.length === 0 ? (
+        <Bloco className="text-muted-foreground">
+          {temCQ ? (
+            <>
+              Nenhuma carga de produção com você agora. As suas amostras de CQ estão em <a className="font-semibold text-ibge hover:underline" href={href('execucao/cq')}>Minhas amostras</a>.
+            </>
+          ) : (
+            'Nenhuma carga atribuída a você em folhas abertas. O supervisor atribui as cargas.'
+          )}
+        </Bloco>
+      ) : (
+        <>
+          <Fichas
+            rotulo="Atividade"
+            ativa={chave}
+            escolher={(k) => navegar(`execucao/cargas?atividade=${encodeURIComponent(k)}`)}
+            fichas={chaves.map((k) => ({ id: k, rotulo: k, contagem: pendentesDaChave(k) ? `${num(pendentesDaChave(k))} pendentes` : 'tudo concluído' }))}
+          />
+          {atual && (
+            <Bloco className="flex-row flex-wrap items-center gap-x-5 gap-y-3 px-5 py-4">
+              <div className="flex min-w-[300px] flex-1 flex-col gap-1.5">
+                <div className="flex flex-wrap items-baseline gap-x-3">
+                  <span className="tab text-lg font-bold">{atual.folha_revisao}</span>
+                  <span className="text-muted-foreground">
+                    {atual.tema} · {atual.etapa} · {ABERTAS.includes(atual.situacao) ? (atual.situacao === 'pendente' ? 'a iniciar' : 'em andamento') : 'encerrada pelo supervisor'}
                   </span>
-                  <a href={href('execucao', { atividade: chave, folha: p.id_lote_etapa })} className="text-[13px] text-ibge hover:underline">
-                    Ver as cargas
-                  </a>
-                </Bloco>
-              ))}
-              <Bloco className="flex-[1_1_300px]">
-                <div className="flex items-baseline gap-2.5">
-                  <h2 className="font-semibold">Suas conclusões</h2>
-                  <span className="text-[13px] text-muted-foreground">últimos 10 dias, todas as atividades</span>
                 </div>
-                <Producao dias={dias} altura={80} />
-              </Bloco>
+                <div className="flex justify-between text-[13px]">
+                  <span>
+                    <b>{num(atual.concluidas)}</b> de {num(atual.total)} das suas cargas concluídas{hoje ? ` · ${num(hoje)} hoje` : ''}
+                  </span>
+                  <span className="tab">{pc(atual.concluidas, atual.total)}%</span>
+                </div>
+                <Barra partes={[{ valor: atual.concluidas, cor: COR.concluida }]} total={atual.total} />
+              </div>
+              {pendentesDe(atual) > 0 && ABERTAS.includes(atual.situacao) && <Continuar idLote={atual.id_lote} grande />}
+            </Bloco>
+          )}
+          {outras.length > 0 && (
+            <div className="flex flex-wrap gap-2 text-sm">
+              <span className="text-muted-foreground">Outras folhas nesta atividade:</span>
+              {outras.map((p) => (
+                <a key={p.id_lote_etapa} href={href('execucao/cargas', { atividade: chave, folha: p.id_lote_etapa })} className="tab text-ibge hover:underline">
+                  {p.folha_revisao} ({num(pendentesDe(p))})
+                </a>
+              ))}
             </div>
-          </>
-        )}
-        <p className="text-[13px] text-muted-foreground">
-          O trabalho é no QGIS (barra do Feixe: próxima, pular, concluir). Aqui é o acompanhamento e o atalho para levar o QGIS até uma carga. As cargas puladas no QGIS continuam aqui: o pulo só vale naquela sessão do QGIS.
-        </p>
-      </Conteudo>
+          )}
+          {atual && <Cargas key={atual.id_lote_etapa} p={atual} />}
+          <div className="flex flex-wrap items-stretch gap-4">
+            {terminadas.map((p) => (
+              <Bloco key={p.id_lote_etapa} className="flex-[1_1_280px] gap-1.5">
+                <h2 className="font-semibold">
+                  {p.folha_revisao} · {p.tema}
+                </h2>
+                <span className="text-[13px] text-muted-foreground">
+                  {plural(p.total, 'carga concluída', 'cargas concluídas')}. Sua parte terminou; a folha segue quando o supervisor abrir a próxima etapa.
+                </span>
+                <a href={href('execucao/cargas', { atividade: chave, folha: p.id_lote_etapa })} className="text-[13px] text-ibge hover:underline">
+                  Ver as cargas
+                </a>
+              </Bloco>
+            ))}
+            <Bloco className="flex-[1_1_300px]">
+              <div className="flex items-baseline gap-2.5">
+                <h2 className="font-semibold">Suas conclusões</h2>
+                <span className="text-[13px] text-muted-foreground">últimos 10 dias, todas as atividades</span>
+              </div>
+              <Producao dias={dias} altura={80} />
+            </Bloco>
+          </div>
+        </>
+      )}
+      <p className="text-[13px] text-muted-foreground">
+        O trabalho é no QGIS (barra do Feixe: próxima, pular, concluir). Aqui é o acompanhamento e o atalho para levar o QGIS até uma carga. As cargas puladas no QGIS continuam aqui: o pulo só vale naquela sessão do QGIS.
+      </p>
     </>
   )
 }

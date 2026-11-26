@@ -51,6 +51,10 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
   const distribuiveis = (dados?.folhas ?? []).filter((f) => f.a_atribuir > 0 || f.com.length > 0)
   const nada = (dados?.folhas ?? []).filter((f) => !f.a_atribuir && !f.com.length)
   const comAlguem = distribuiveis.filter((f) => f.com.length > 0).length
+  // CQ (D3d): o que se distribui são as amostras (uma carga por célula sorteada), e quem recebe é um avaliador.
+  const ehCq = (f: Folha) => f.fase === 'cq'
+  const soCq = !!dados && (distribuiveis.length ? distribuiveis : dados.folhas).every(ehCq)
+  const algumCq = !!dados && dados.folhas.some(ehCq)
 
   // O que vai acontecer, na ordem da lista: a primeira folha de quem está livre é dele agora, as outras vão para a fila.
   // Quem perde uma folha na redistribuição fica com menos pendentes (e pode ficar livre para receber outra).
@@ -107,9 +111,14 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
     <Dialog open={lotes.length > 0} onOpenChange={(v) => !v && fechar(false)}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Distribuir {distribuiveis.length > 1 ? `${num(distribuiveis.length)} folhas` : 'a folha'}</DialogTitle>
+          <DialogTitle>
+            Distribuir {soCq ? 'as amostras de ' : ''}
+            {distribuiveis.length > 1 ? `${num(distribuiveis.length)} folhas` : soCq ? 'uma folha' : 'a folha'}
+          </DialogTitle>
           <DialogDescription>
-            Uma folha por pessoa. Quem está sem carga recebe agora e a etapa começa; quem já tem, recebe na fila e pega a folha quando terminar o que tem. A sugestão evita quem fez a etapa anterior da folha.
+            {soCq
+              ? 'Uma folha por avaliador: quem recebe fica com todas as amostras de CQ da folha. Quem está sem carga recebe agora e a etapa de CQ começa; quem já tem, recebe na fila. A sugestão evita quem trabalhou na folha antes (avaliação às cegas).'
+              : 'Uma folha por pessoa. Quem está sem carga recebe agora e a etapa começa; quem já tem, recebe na fila e pega a folha quando terminar o que tem. A sugestão evita quem fez a etapa anterior da folha.'}
             {comAlguem > 0 && ' Folha que já está com alguém fica com a pessoa; escolha outra para redistribuir: as cargas pendentes saem de quem estava (as concluídas continuam dela).'}
           </DialogDescription>
         </DialogHeader>
@@ -119,7 +128,11 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
             Montando a sugestão…
           </div>
         )}
-        {dados && distribuiveis.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma destas folhas tem cargas a distribuir: abra a próxima etapa delas, que já sai com as cargas.</p>}
+        {dados && distribuiveis.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            {soCq ? 'Nenhuma destas folhas tem amostras a distribuir: os planos de CQ ainda não foram criados ou as amostras já estão com avaliadores.' : 'Nenhuma destas folhas tem cargas a distribuir: abra a próxima etapa delas, que já sai com as cargas.'}
+          </p>
+        )}
         {dados && distribuiveis.length > 0 && (
           <div className="max-h-[52vh] overflow-auto rounded-md border">
             <table className="w-full table-fixed border-collapse text-sm">
@@ -140,7 +153,7 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
                       <td className="py-2 pr-2 pl-3">
                         <b className="tab">{f.folha_revisao}</b>
                         <span className="block text-xs text-muted-foreground">
-                          {f.etapa} · {plural(f.a_atribuir + f.com.reduce((n, p) => n + p.pendentes, 0), 'carga', 'cargas')}
+                          {f.etapa} · {plural(f.a_atribuir + f.com.reduce((n, p) => n + p.pendentes, 0), ehCq(f) ? 'amostra' : 'carga', ehCq(f) ? 'amostras' : 'cargas')}
                         </span>
                       </td>
                       <td className="px-2 py-2">
@@ -176,7 +189,8 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
         )}
         {nada.length > 0 && (
           <p className="text-xs text-muted-foreground">
-            Sem cargas a distribuir: {nada.map((f) => f.folha_revisao).join(', ')} ({nada.some((f) => f.cargas) ? 'todas concluídas' : 'a etapa não tem cargas'}).
+            {algumCq ? 'Nada a distribuir' : 'Sem cargas a distribuir'}: {nada.map((f) => f.folha_revisao).join(', ')} (
+            {nada.some((f) => f.cargas) ? (nada.every(ehCq) ? 'todas avaliadas' : 'todas concluídas') : nada.every(ehCq) ? 'sem amostras ainda' : 'a etapa não tem cargas'}).
           </p>
         )}
         <DialogFooter className="items-center gap-3 sm:justify-between">

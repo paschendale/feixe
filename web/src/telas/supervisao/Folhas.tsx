@@ -123,13 +123,13 @@ export default function Folhas() {
           <div className="flex min-w-[260px] flex-[1_1_280px] flex-col gap-1.5">
             <span className="text-[13px]">
               <b>{num(grupo.concluidas)}</b> de {num(grupo.total)} {grupo.fase === 'cq' ? 'amostras avaliadas' : 'cargas concluídas'} · {pc(grupo.concluidas, grupo.total)}% ·{' '}
-              <span style={{ color: grupo.a_atribuir ? COR.alerta : undefined }}>{num(grupo.a_atribuir)} {grupo.fase === 'cq' ? 'sem avaliador' : 'a atribuir'}</span> · {plural(grupo.pessoas, 'pessoa', 'pessoas')}
+              <span style={{ color: grupo.a_atribuir ? COR.alerta : undefined }}>{num(grupo.a_atribuir)} {grupo.fase === 'cq' ? 'sem avaliador' : 'a atribuir'}</span> · {grupo.fase === 'cq' ? plural(grupo.pessoas, 'avaliador', 'avaliadores') : plural(grupo.pessoas, 'pessoa', 'pessoas')}
             </span>
             <Barra
               total={grupo.total}
               partes={[
-                { valor: grupo.concluidas, cor: COR.concluida, rotulo: 'concluídas' },
-                { valor: grupo.com_alguem, cor: COR.comAlguem, rotulo: 'com alguém' },
+                { valor: grupo.concluidas, cor: COR.concluida, rotulo: grupo.fase === 'cq' ? 'avaliadas' : 'concluídas' },
+                { valor: grupo.com_alguem, cor: COR.comAlguem, rotulo: grupo.fase === 'cq' ? 'com avaliador' : 'com alguém' },
               ]}
             />
           </div>

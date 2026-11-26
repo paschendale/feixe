@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Tuple
 from ...core.dados import ErroDados
 from ...core.dados import cargas as dc
 from ...core.dados.local import cargas as lc
+from ...core.dados.local import grupos as lgrupos
 from ..api import ErroApi, campo, inteiro
 from .lotes import uf_de
 
@@ -211,8 +212,12 @@ def registrar(r, ctx) -> None:
 
     @r.rota("POST", "/api/cargas/proxima", exige=EXECUTORES)
     def _proxima(req):
+        # "Próxima carga" (Continuar no QGIS) é da produção: as amostras de CQ andam por /api/amostras/proxima.
+        ctx.exigir_pronto()
+        with ctx.leitura() as ex:
+            amostras = lgrupos.cargas_cq_pendentes(ex)
         return 200, proxima(
-            ctx, campo(req, "referencia", int, padrao=None), id_lote=campo(req, "id_lote", int, padrao=None)
+            ctx, campo(req, "referencia", int, padrao=None), amostras, campo(req, "id_lote", int, padrao=None)
         )
 
     @r.rota("POST", "/api/cargas/{id}/desfazer", exige=EXECUTORES)

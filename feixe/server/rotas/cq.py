@@ -11,6 +11,7 @@ import re
 from typing import Dict
 
 from ...core.dados import cq as dq
+from ...core.dados.local import cargas as lc
 from ...core.dados.local import cq as lq
 from ..api import ErroApi, campo, inteiro
 from .cargas import EXECUTORES, _no_qgis, _publicar
@@ -67,7 +68,92 @@ def registrar_ocorrencia(ctx, x, y, id_carga: int, anotacao=None) -> Dict:
     return r
 
 
+# Meia largura da janela do "Ver no QGIS" de uma ocorrência, em graus (~450 m): o ponto e o entorno da célula.
+_RAIO_ZOOM = 0.004
+
+
+def _zoom_ponto(ctx, x, y) -> Dict:
+    if ctx.zoom_para is None:
+        raise ErroApi(503, "QGIS indisponível")
+    ctx.zoom_para(x - _RAIO_ZOOM, y - _RAIO_ZOOM, x + _RAIO_ZOOM, y + _RAIO_ZOOM, 4674)
+    return {"ok": True}
+
+
+def proxima_amostra(ctx, id_lote=None) -> Dict:
+    """Continuar no QGIS, da Execução › CQ: a próxima amostra pendente (na folha, se dada) vira a carga atual."""
+    ctx.exigir_pronto()
+    with ctx.leitura() as ex:
+        r = lq.proxima_amostra(ex, id_lote)
+        progresso = lc.progresso(ex, r["carga"]["id_lote_etapa"]) if r else None
+    if r:
+        _no_qgis(ctx, "focar_amostra", r["carga"], progresso)
+    return {"carga": r["carga"] if r else None, "amostra": r["amostra"] if r else None, "progresso": progresso}
+
+
+def focar_amostra(ctx, id_amostra: int) -> Dict:
+    """Trabalhar nesta (ou Ver no QGIS) numa amostra minha: a carga de CQ dela vira a amostra atual no QGIS."""
+    ctx.exigir_pronto()
+    with ctx.leitura() as ex:
+        a = lq.amostra(ex, id_amostra)
+        if a is None or a["responsavel"] != ex.usuario:
+            raise ErroApi(404, "amostra não encontrada")
+        carga = lc.uma(ex, a["id_carga_trabalho"])
+        progresso = lc.progresso(ex, carga["id_lote_etapa"])
+    carga.pop("responsavel", None)
+    ctx.qgis("focar_amostra", carga, progresso)
+    return {"carga": carga, "amostra": a, "progresso": progresso}
+
+
+def ciente(ctx, uuid: str) -> Dict:
+    """Ciência do APM numa ocorrência (rota e barra do Feixe): grava no workspace e avisa o painel e as camadas."""
+    ctx.exigir_pronto()
+    with ctx.local() as ex:
+        res = lq.ciente(ex, uuid)
+    _mudou_cq(ctx, {"ocorrencia": uuid, "ciente": True})
+    return res
+
+
 def registrar(r, ctx) -> None:
+    # --- D3d: antes das rotas com {id}/{uuid} no mesmo lugar, que casariam com "proxima" e "ciente" ---
+
+    @r.rota("POST", "/api/amostras/proxima", exige=EXECUTORES)
+    def _proxima(req):
+        return 200, proxima_amostra(ctx, campo(req, "id_lote", int, padrao=None))
+
+    @r.rota("POST", "/api/amostras/{id}/zoom", exige=EXECUTORES)
+    def _zoom_amostra(req):
+        return 200, focar_amostra(ctx, inteiro(req.params["id"]))
+
+    @r.rota("POST", "/api/inspecoes/ciente", exige=EXECUTORES)
+    def _ciente_folha(req):
+        id_lote = campo(req, "id_lote", int)
+        ctx.exigir_pronto()
+        with ctx.local() as ex:
+            res = lq.ciente_da_folha(ex, id_lote)
+        if res["cientes"]:
+            _mudou_cq(ctx, {"id_lote": id_lote, "ciente": True, "uuids": res["uuids"]})
+        return 200, res
+
+    @r.rota("POST", "/api/inspecoes/{uuid}/zoom", exige=EXECUTORES)
+    def _zoom_ocorrencia(req):
+        u = _uuid(req.params["uuid"])
+        ctx.exigir_pronto()
+        with ctx.leitura() as ex:
+            o = lq.ocorrencia(ex, u)
+        if o is None:
+            raise ErroApi(404, "ocorrência não encontrada")
+        return 200, _zoom_ponto(ctx, o["x"], o["y"])
+
+    @r.rota("POST", "/api/lotes/{id}/ocorrencias/{uuid}/zoom", exige=("supervisor",))
+    def _zoom_da_folha(req):
+        u = _uuid(req.params["uuid"])
+        with ctx.tx() as ex:
+            itens = dq.ocorrencias_do_lote(ex, uf_de(ctx.eu()), inteiro(req.params["id"]))["itens"]
+        o = next((i for i in itens if i["uuid"] == u), None)
+        if o is None:
+            raise ErroApi(404, "ocorrência não encontrada nesta folha")
+        return 200, _zoom_ponto(ctx, o["x"], o["y"])
+
     # --- execução sobre o workspace (D3a) ---
 
     @r.rota("GET", "/api/amostras", exige=EXECUTORES)
@@ -132,12 +218,7 @@ def registrar(r, ctx) -> None:
 
     @r.rota("POST", "/api/inspecoes/{uuid}/ciente", exige=EXECUTORES)
     def _ciente(req):
-        u = _uuid(req.params["uuid"])
-        ctx.exigir_pronto()
-        with ctx.local() as ex:
-            res = lq.ciente(ex, u)
-        _mudou_cq(ctx, {"ocorrencia": u, "ciente": True})
-        return 200, res
+        return 200, ciente(ctx, _uuid(req.params["uuid"]))
 
     # --- supervisão, na CCAR ---
 

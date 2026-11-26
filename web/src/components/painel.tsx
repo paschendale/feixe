@@ -10,6 +10,8 @@ export const COR = {
   vazio: '#E3E8EF',
   alerta: '#8A5A00',
   alertaFundo: '#FCEBD2',
+  // Amostra não conforme (CQ): laranja da paleta de alerta, legível sobre o branco e distinto do azul das conformes.
+  naoConforme: '#D98A1C',
 }
 
 export function Bloco({ className, children, ...props }: React.ComponentProps<'div'>) {

@@ -72,7 +72,20 @@ export default function Equipe() {
     .sort((a, b) => Number(a.pendentes > 0) - Number(b.pendentes > 0) || Number(!a.ultima) - Number(!b.ultima) || (a.ultima ?? '').localeCompare(b.ultima ?? '') || a.nome.localeCompare(b.nome))
   const semCarga = linhas.filter((x) => !x.pendentes)
   const paradas = linhas.filter((x) => x.pendentes && parado(x.ultima))
-  const destinoDarCargas = p.grupos.find((g) => g.fase !== 'cq' && g.a_atribuir > 0) ?? p.grupos.find((g) => g.a_atribuir > 0)
+  // "Dar cargas" leva à produção com cargas a atribuir; para quem só avalia (perfil V), às amostras sem avaliador.
+  const producaoAAtribuir = p.grupos.find((g) => g.fase !== 'cq' && g.a_atribuir > 0)
+  const cqSemAvaliador = p.grupos.find((g) => g.fase === 'cq' && g.a_atribuir > 0)
+  const soAvalia = (s: string) => {
+    const ps = s.split(',').map((x) => x.trim().split(':').pop())
+    return ps.includes('V') && !ps.includes('O')
+  }
+  const destinoDe = (x: Pessoa) => (soAvalia(x.perfis) ? cqSemAvaliador : (producaoAAtribuir ?? cqSemAvaliador))
+  // "CQ · Hidrografia (12 amostras)": no CQ, as pendentes são amostras; na produção, só a atividade, como antes.
+  const ondeDe = (c: string, por: Record<string, number> | undefined) => {
+    const g = grupo(c)
+    if (!g) return c
+    return g.fase === 'cq' && por?.[c] ? `${rotuloCurto(g)} (${plural(por[c], 'amostra', 'amostras')})` : rotuloCurto(g)
+  }
 
   return (
     <Conteudo>
@@ -127,7 +140,8 @@ export default function Equipe() {
           <tbody>
             {linhas.map((x) => {
               const alerta = x.pendentes > 0 && parado(x.ultima)
-              const onde = x.painel?.grupos.map((c) => (grupo(c) ? rotuloCurto(grupo(c)!) : c)) ?? []
+              const onde = x.painel?.grupos.map((c) => ondeDe(c, x.painel?.por_grupo)) ?? []
+              const destino = destinoDe(x)
               const folhas = x.painel?.lotes ?? []
               const textoOnde = `${lista(onde)}${folhas.length > 0 ? ` · ${folhas.length <= 2 ? lista(folhas.map(nomeLote)) : plural(folhas.length, 'folha', 'folhas')}` : ''}`
               const nome = `${x.nome}${x.conta === eu?.conta ? ' (você)' : ''}`
@@ -190,9 +204,9 @@ export default function Equipe() {
                           </div>
                         </PopoverContent>
                       </Popover>
-                    ) : destinoDarCargas ? (
+                    ) : destino ? (
                       <Button size="sm" variant="outline" className="w-full" asChild>
-                        <a href={href('supervisao/folhas', { grupo: destinoDarCargas.chave, atribuir: 1 })}>Dar cargas</a>
+                        <a href={href('supervisao/folhas', { grupo: destino.chave, atribuir: 1 })}>{destino.fase === 'cq' ? 'Dar amostras' : 'Dar cargas'}</a>
                       </Button>
                     ) : null}
                   </td>
@@ -203,7 +217,7 @@ export default function Equipe() {
         </table>
       </div>
       <p className="text-[13px] text-muted-foreground">
-        Ordem: quem está sem carga, depois quem está há mais tempo sem concluir e, por último, quem ainda não concluiu nenhuma. Quem pode receber cargas: conta ativa, lotação da UF e perfil de execução (O, V ou S) no SGBC; acertos de perfil se fazem lá. "Passar pendentes" muda só as pendentes; as concluídas ficam com quem fez.
+        Ordem: quem está sem carga, depois quem está há mais tempo sem concluir e, por último, quem ainda não concluiu nenhuma. Quem pode receber cargas: conta ativa, lotação da UF e perfil de execução (O, V ou S) no SGBC; acertos de perfil se fazem lá. No CQ, as pendentes do avaliador são amostras. "Passar pendentes" muda só as pendentes; as concluídas ficam com quem fez.
       </p>
     </Conteudo>
   )
