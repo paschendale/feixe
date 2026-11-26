@@ -34,8 +34,9 @@ Um lote criado por engano pode ser excluído enquanto não tem trabalho feito (p
 - **Abrir a próxima etapa**: o lote anda no fluxo, com as cargas geradas, e já pode ser distribuído.
 - No controle de qualidade, o resultado por elemento ("Comissão: 3 não conformes, aceita até 2") e o nível de conformidade. **Aprovar** abre a etapa seguinte; **Nova revisão** abre a próxima revisão com outra pessoa e, se quiser, com as correções a fazer à vista.
 - **Encerrar**, quando o lote chegou ao fim do fluxo.
+- **Encerrar sem as próximas**, quando as etapas que faltam não fazem falta naqueles lotes (por exemplo, uma revisão pontual de algo que eles não têm). A confirmação mostra as etapas que ficam puladas e pede o motivo, que vai para o histórico. Abrir outra etapa depois, pela gaveta, reabre o lote.
 
-A observação é sempre opcional, e toda decisão fica no histórico do lote. A **gaveta** de cada lote (clique no lote) mostra as etapas, as cargas, as amostras, as ocorrências e o histórico, e permite iniciar, concluir, pular ou reabrir uma etapa.
+A observação é opcional (menos ao encerrar antes do fim do fluxo), e toda decisão fica no histórico do lote. A **gaveta** de cada lote (clique no lote) mostra as etapas, as cargas, as amostras, as ocorrências e o histórico, e permite iniciar, concluir, pular ou reabrir uma etapa.
 
 ## Controle de qualidade
 

@@ -146,17 +146,25 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
   const tudo = marcadas.size === g.folhas.length
 
   // Fim do fluxo (D-153): a folha passa a concluída para a CCAR; abrir outra etapa depois a reabre. Primeiro a prévia
-  // (o que encerra e o que fica de fora, com o motivo); a confirmação grava.
-  const [previa, setPrevia] = useState<{ id_lote: number; folha_revisao: string; erro: string | null }[] | null>(null)
+  // (o que encerra e o que fica de fora, com o motivo); a confirmação grava. Antes do fim do fluxo (D-161, `antecipar`)
+  // é o modo de segurança: a prévia mostra as etapas que ficam puladas, e gravar pede o motivo e a confirmação.
+  const [previa, setPrevia] = useState<{ id_lote: number; folha_revisao: string; pula: string[]; erro: string | null }[] | null>(null)
+  const [antecipar, setAntecipar] = useState(false)
+  const [motivo, setMotivo] = useState('')
+  const [ciente, setCiente] = useState(false)
+  const puladas = [...new Set((previa ?? []).filter((i) => !i.erro).flatMap((i) => i.pula))]
   const nEncerra = previa?.filter((i) => !i.erro).length ?? 0
   const tipoDe = (id: number) => g.folhas.find((f) => f.id_lote === id)?.tipo
   const marcadosLotes = [...marcadas].map((id) => ({ tipo: tipoDe(id) }))
   const encerraLotes = (previa ?? []).filter((i) => !i.erro).map((i) => ({ tipo: tipoDe(i.id_lote) }))
   const fem = soFolhas(encerraLotes)
-  async function prever() {
+  async function prever(antes: boolean) {
     setOcupado(true)
     try {
-      const r = await enviar<{ itens: { id_lote: number; folha_revisao: string; erro: string | null }[] }>('/api/lotes/encerrar', { lotes: [...marcadas], previa: true })
+      const r = await enviar<{ itens: { id_lote: number; folha_revisao: string; pula: string[]; erro: string | null }[] }>('/api/lotes/encerrar', { lotes: [...marcadas], previa: true, antecipar: antes })
+      setAntecipar(antes)
+      setMotivo(obs)
+      setCiente(false)
       setPrevia(r.itens)
     } catch (e) {
       avisar((e as Error).message, 'erro')
@@ -167,7 +175,7 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
   async function encerrar() {
     setOcupado(true)
     try {
-      const r = await enviar<{ encerradas: { id_lote: number }[]; erros: { id_lote: number; erro: string }[] }>('/api/lotes/encerrar', { lotes: [...marcadas], observacao: obs, previa: false })
+      const r = await enviar<{ encerradas: { id_lote: number }[]; erros: { id_lote: number; erro: string }[] }>('/api/lotes/encerrar', { lotes: [...marcadas], observacao: antecipar ? motivo : obs, previa: false, antecipar })
       const nome = (id: number) => g.folhas.find((f) => f.id_lote === id)?.folha_revisao ?? `#${id}`
       if (r.encerradas.length) {
         const ls = r.encerradas.map((e) => ({ tipo: tipoDe(e.id_lote) }))
@@ -264,7 +272,7 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
           <Campo rotulo="Observação (opcional, vai para o histórico de cada lote)" className="min-w-[280px] flex-1">
             <Input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: revisão pontual feita, lote concluído" className="text-corpo font-normal text-foreground" />
           </Campo>
-          <Button variant="destructive-tinted" disabled={ocupado || !marcadas.size} onClick={prever}>
+          <Button variant="destructive-tinted" disabled={ocupado || !marcadas.size} onClick={() => prever(false)}>
             {marcadas.size ? `Encerrar ${contarLotes(marcadosLotes)}…` : 'Encerrar…'}
           </Button>
           <Button variant="outline" onClick={() => setMarcadas(tudo ? new Set() : new Set(g.folhas.map((f) => f.id_lote)))}>
@@ -281,6 +289,24 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
               A CCAR passa a ver {fem ? (nEncerra === 1 ? 'a folha como concluída' : 'as folhas como concluídas') : nEncerra === 1 ? 'o lote como concluído' : 'os lotes como concluídos'}. O encerramento fica no histórico; abrir outra etapa pela gaveta {fem ? 'reabre a folha' : 'reabre o lote'}.
             </DialogDescription>
           </DialogHeader>
+          {antecipar && puladas.length > 0 && (
+            <Nota tom="alerta">
+              {fem ? (nEncerra === 1 ? 'A folha não passa' : 'As folhas não passam') : nEncerra === 1 ? 'O lote não passa' : 'Os lotes não passam'} por: <b>{puladas.join(', ')}</b>. Use só quando essas etapas não fazem falta {nEncerra === 1 ? (fem ? 'nela' : 'nele') : fem ? 'nelas' : 'neles'}. O motivo e as etapas puladas ficam no histórico.
+            </Nota>
+          )}
+          {antecipar && (
+            <div className="flex flex-col gap-3">
+              <Campo rotulo="Motivo (obrigatório)">
+                <Input autoFocus value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ex.: sem massa d'água cortada nestas folhas" className="text-corpo font-normal text-foreground" />
+              </Campo>
+              <label className="flex cursor-pointer items-start gap-2 text-nota">
+                <input type="checkbox" className="mt-0.5" checked={ciente} onChange={(e) => setCiente(e.target.checked)} />
+                <span>
+                  Confirmo que {contarLotes(encerraLotes)} {nEncerra === 1 ? 'terminou' : 'terminaram'} sem {puladas.length === 1 ? 'essa etapa' : 'essas etapas'}.
+                </span>
+              </label>
+            </div>
+          )}
           {previa && previa.some((i) => i.erro) && (
             <Nota tom="alerta">
               Ficam de fora: {resumirRecusas(previa.filter((i) => i.erro).map((i) => ({ id_lote: i.id_lote, erro: i.erro ?? '' })), (id) => previa.find((i) => i.id_lote === id)?.folha_revisao ?? `#${id}`, tipoDe)}
@@ -290,7 +316,7 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
             <Button variant="outline" onClick={() => setPrevia(null)}>
               Cancelar
             </Button>
-            <Button variant="destructive" disabled={ocupado || !nEncerra} onClick={encerrar}>
+            <Button variant="destructive" disabled={ocupado || !nEncerra || (antecipar && (!motivo.trim() || !ciente))} onClick={encerrar}>
               <RotuloEstavel ocupado={ocupado} rotulo={`Encerrar ${contarLotes(encerraLotes)}`} rotuloOcupado="Encerrando…" />
             </Button>
           </DialogFooter>
@@ -304,6 +330,9 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
           </Campo>
           <Button disabled={ocupado || !marcadas.size} onClick={abrir}>
             {marcadas.size ? `Abrir ${g.proxima} em ${contarLotes(marcadosLotes)}` : `Abrir ${g.proxima}`}
+          </Button>
+          <Button variant="destructive-tinted" disabled={ocupado || !marcadas.size} onClick={() => prever(true)} title="Encerra sem passar pelas etapas que faltam no fluxo. Pede o motivo.">
+            Encerrar sem as próximas…
           </Button>
           <Button variant="outline" onClick={() => setMarcadas(tudo ? new Set() : new Set(g.folhas.map((f) => f.id_lote)))}>
             <RotuloEstavel ocupado={tudo} rotulo={`Marcar ${soFolhas(g.folhas) ? 'as' : 'os'} ${num(g.folhas.length)}`} rotuloOcupado="Desmarcar" />

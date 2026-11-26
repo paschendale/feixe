@@ -530,20 +530,28 @@ def avancar(ex: Executor, uf: str, ids: List[int], observacao: Optional[str], pr
     return {"abertas": r["abertas"], "erros": erros + r["erros"]}
 
 
-def encerrar(ex: Executor, uf: str, ids: List[int], observacao: Optional[str], previa: bool) -> Dict:
+def encerrar(
+    ex: Executor, uf: str, ids: List[int], observacao: Optional[str], previa: bool, antecipar: bool = False
+) -> Dict:
     """Encerra folhas no fim do fluxo (D-153, P-26): a última etapa terminou e não há seguinte, e a folha passa a
     CONCLUIDA para a CCAR. Decisão do supervisor, em lote, com prévia; grava `encerrar` no histórico da última passagem
     (a derivação do status lê dali, `f_lote_derivar`). Abrir outra etapa depois muda a etapa atual e a folha deixa de
-    estar concluída. Recusa: etapa aberta, etapa seguinte no fluxo, folha já concluída, outra unidade."""
+    estar concluída. Recusa: etapa aberta, etapa seguinte no fluxo, folha já concluída, outra unidade.
+
+    `antecipar` (D-161) encerra antes do fim do fluxo, quando as etapas que faltam não fazem falta naquelas folhas
+    (ex.: a revisão pontual de um corte que elas não têm). É o modo de segurança: a prévia lista as etapas puladas em
+    cada folha (`pula`) e gravar exige o motivo, que vai para o histórico com as etapas puladas."""
     linhas = ex.todos(
         "SELECT l.id AS id_lote, l.uf, l.status_nacional, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) "
-        "AS folha_revisao, t.nome AS tema, le.id AS id_lote_etapa, le.situacao, fe.nome AS etapa, n.nome AS proxima "
-        "FROM mapcartacomp.lote l JOIN mapcartacomp.tema t ON t.id = l.id_tema "
+        "AS folha_revisao, t.nome AS tema, le.id AS id_lote_etapa, le.situacao, fe.nome AS etapa, n.nome AS proxima, "
+        "p.pula FROM mapcartacomp.lote l JOIN mapcartacomp.tema t ON t.id = l.id_tema "
         "LEFT JOIN mapcartacomp.lote_etapa le ON le.id = coalesce((SELECT x.id FROM mapcartacomp.lote_etapa x "
         f"WHERE x.id_lote = l.id AND x.situacao IN ('pendente', 'em_andamento') LIMIT 1), {_ULTIMA}) "
         "LEFT JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
         "LEFT JOIN LATERAL (SELECT x.nome FROM mapcartacomp.fluxo_etapa x "
         " WHERE x.id_fluxo = l.id_fluxo AND x.ordem > coalesce(fe.ordem, 0) ORDER BY x.ordem LIMIT 1) n ON true "
+        "LEFT JOIN LATERAL (SELECT array_agg(x.nome ORDER BY x.ordem) AS pula FROM mapcartacomp.fluxo_etapa x "
+        " WHERE x.id_fluxo = l.id_fluxo AND x.ordem > coalesce(fe.ordem, 0)) p ON true "
         "WHERE l.id = ANY(%s) ORDER BY t.nome, folha_revisao" + ("" if previa else " FOR UPDATE OF l"),
         (list(ids),),
     )
@@ -558,19 +566,27 @@ def encerrar(ex: Executor, uf: str, ids: List[int], observacao: Optional[str], p
             erro = "o lote ainda não entrou no fluxo"
         elif r["situacao"] != "concluida":
             erro = f"{r['etapa']} ainda está aberta: termine a etapa antes de encerrar o lote"
-        elif r["proxima"] is not None:
+        elif r["proxima"] is not None and not antecipar:
             erro = f"o fluxo ainda tem {r['proxima']}: abra a próxima etapa em vez de encerrar"
         itens.append({"id_lote": r["id_lote"], "folha_revisao": r["folha_revisao"], "tema": r["tema"],
-                      "etapa": r["etapa"], "erro": erro})  # fmt: skip
+                      "etapa": r["etapa"], "pula": list(r["pula"] or []), "erro": erro})  # fmt: skip
     if previa:
         return {"itens": itens}
     obs = _obs(observacao)
     validos = [(r, i) for r, i in zip(linhas, itens) if not i["erro"]]
+    if antecipar and not obs and any(i["pula"] for _, i in validos):
+        raise ErroDados("escreva o motivo: encerrar antes do fim do fluxo pula etapas e fica no histórico", 400)
     if validos:
+
+        def texto(i: Dict) -> Optional[str]:
+            pulou = f"etapas puladas: {', '.join(i['pula'])}" if antecipar and i["pula"] else None
+            return "; ".join(filter(None, [obs, pulou])) or None
+
+        textos = [texto(i) for _, i in validos]
         ex.executar(
             "INSERT INTO mapcartacomp.lote_etapa_hist (uuid, id_lote_etapa, acao, observacao) "
-            "SELECT u::uuid, le, 'encerrar', %s FROM unnest(%s::text[], %s::int[]) AS t(u, le)",
-            (obs, [novo_uuid() for _ in validos], [r["id_lote_etapa"] for r, _ in validos]),
+            "SELECT u::uuid, le, 'encerrar', o FROM unnest(%s::text[], %s::int[], %s::text[]) AS t(u, le, o)",
+            ([novo_uuid() for _ in validos], [r["id_lote_etapa"] for r, _ in validos], textos),
         )
     return {
         "encerradas": [{"id_lote": i["id_lote"], "folha_revisao": i["folha_revisao"]} for _, i in validos],

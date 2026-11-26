@@ -4,6 +4,7 @@ serem só os do cenário. Transações desfeitas, nos dois bancos (9.6 e 17)."""
 from __future__ import annotations
 
 import pytest
+from feixe.core.dados import ErroDados
 from feixe.core.dados import fluxos as df
 from feixe.core.dados import lotes as dl
 from feixe.core.dados import painel as dp
@@ -142,3 +143,15 @@ def test_encerrar_a_folha_no_fim_do_fluxo(amb):  # noqa: F811
     df.nova_passagem(ex, "GO", a, e["revisao"], OBS)
     df.acao(ex, "GO", _aberta(ex, a), "iniciar", OBS)
     assert status(a) == "EM_PRODUCAO"
+
+    # Antes do fim do fluxo (D-161): b ainda tem a revisão; com antecipar, a prévia lista a etapa pulada, gravar sem
+    # motivo é recusado e, com o motivo, b fica CONCLUIDA com as etapas puladas no histórico.
+    p = df.encerrar(ex, "GO", [b], None, previa=True, antecipar=True)["itens"][0]
+    assert p["erro"] is None and p["pula"] == ["E revisao"]
+    with pytest.raises(ErroDados):
+        df.encerrar(ex, "GO", [b], "  ", previa=False, antecipar=True)
+    assert status(b) == "EM_PRODUCAO"
+    r = df.encerrar(ex, "GO", [b], "sem corte nesta folha", previa=False, antecipar=True)
+    assert [x["id_lote"] for x in r["encerradas"]] == [b] and status(b) == "CONCLUIDA"
+    h = df.historico(ex, b)[0]
+    assert h["acao"] == "encerrar" and h["observacao"] == "sem corte nesta folha; etapas puladas: E revisao"
