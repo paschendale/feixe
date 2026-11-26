@@ -28,7 +28,7 @@ def _conta(**kw):
         ({"ind_contaativa": False}, False),
         ({"ind_contaativa": None}, False),
         ({"ind_contasistema": True}, False),
-        ({"ind_contasuper": True}, False),
+        ({"ind_contasuper": True}, True),  # conta super só tem mais permissões no SGBC
         ({"ind_contasistema": None, "ind_contasuper": None}, True),
     ],
 )
@@ -66,10 +66,33 @@ def test_montar_com_perfis_e_gerente():
     ]
     eu = papeis.montar("u_1234567", _conta(), perfis, {"equipe": "GGC-DF", "gerente": True, "ativo": True})
     assert eu["nome"] == "Fulana de Tal" and eu["uf"] == "DF" and eu["elegivel"]
-    assert eu["papeis"] == ["gerente", "supervisor", "apm"]
+    assert eu["papeis"] == ["gerente", "supervisor", "avaliador", "apm"]
     assert eu["papel"] == "gerente" and eu["papel_rotulo"] == "Gerente"
     assert eu["equipe"] == "GGC-DF"
     assert [p["papel"] for p in eu["perfis"]] == ["supervisor", "apm", None]
+
+
+@pytest.mark.parametrize(
+    "perfil,papeis_esperados",
+    [
+        ("S", ["supervisor", "avaliador", "apm"]),
+        ("V", ["avaliador", "apm"]),
+        ("O", ["apm"]),
+        ("C", ["consulta"]),
+        ("I", []),
+    ],
+)
+def test_hierarquia_dos_perfis(perfil, papeis_esperados):
+    eu = papeis.montar("u_1", _conta(), [{"cod_projeto": 5, "projeto": "BC100", "perfil": perfil}], None)
+    assert eu["papeis"] == papeis_esperados
+    assert eu["perfis"][0]["papel"] == papeis.papel_do_perfil(perfil)
+
+
+def test_perfis_que_cobrem():
+    assert papeis.perfis_que_cobrem("O") == ("O", "V", "S")
+    assert papeis.perfis_que_cobrem("V") == ("V", "S")
+    assert papeis.perfis_que_cobrem("S") == ("S",)
+    assert papeis.perfis_que_cobrem("C") == ("C",)
 
 
 def test_gbc_e_lotacao_rj_como_qualquer_outra():

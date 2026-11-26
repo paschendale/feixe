@@ -37,7 +37,7 @@ flowchart LR
 ```
 
 - O trabalho de cada pessoa fica numa cópia local (GeoPackage). As ações gravam nela primeiro e vão ao banco central em segundo plano, por isso a barra responde na hora, com ou sem rede.
-- Usuários, perfis e projetos vêm do cadastro que já existe no sistema de gerenciamento de bases cartográficas. O Feixe não tem cadastro paralelo: o papel de cada pessoa (quem executa, quem avalia, supervisor, gerente) vem do perfil dela.
+- Usuários, perfis e projetos vêm do cadastro que já existe no sistema de gerenciamento de bases cartográficas. O Feixe não tem cadastro paralelo: o papel de cada pessoa (quem executa, quem avalia, supervisor, gerente) vem do perfil dela. Os perfis são cumulativos: quem avalia também executa, e o supervisor também avalia e executa.
 - O banco do Feixe roda em PostgreSQL com PostGIS e é compatível também com as versões mais antigas usadas nas gerências estaduais.
 
 ## Instalação

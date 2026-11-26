@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
+from .. import papeis
 from . import ErroDados, Executor, cq, novo_uuid
 
 # Passagens abertas dos lotes (pendentes ou em andamento, no máximo uma por lote): é o que o supervisor está
@@ -206,7 +207,7 @@ def descartar(ex: Executor, uf: str, ids: List[int]) -> Dict:
 # a primeira carga com dono passa a em andamento (D-109), com a linha no histórico. Só cargas pendentes de passagens
 # abertas mudam de mão; carga concluída fica com quem a fez.
 
-PERFIS_EXECUTORES = ("O", "V", "S")  # APM, avaliador, supervisor (que também executa)
+PERFIS_EXECUTORES = papeis.perfis_que_cobrem("O")  # O, V e S: pela hierarquia, todos executam
 
 
 def equipe(ex: Executor, uf: str, cod_projeto: Optional[int] = None) -> List[Dict]:
@@ -224,7 +225,7 @@ def equipe(ex: Executor, uf: str, cod_projeto: Optional[int] = None) -> List[Dic
         "WHERE le.situacao IN ('pendente', 'em_andamento') AND c.uf = %s GROUP BY c.responsavel) c "
         "ON c.responsavel = u.nom_contausuario "
         "WHERE upper(trim(u.dsc_lotacao)) = %s AND u.ind_contaativa AND NOT coalesce(u.ind_contasistema, false) "
-        "AND NOT coalesce(u.ind_contasuper, false) AND p.cd_perfil = ANY(%s)"
+        "AND p.cd_perfil = ANY(%s)"
     )
     params: list = [uf, uf, list(PERFIS_EXECUTORES)]
     if cod_projeto is not None:

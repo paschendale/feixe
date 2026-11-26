@@ -27,7 +27,7 @@ Um clique em "Continuar no QGIS" no painel leva o mapa até a carga, e o painel 
 | Supervisor | Cria os lotes, gera as cargas, distribui o trabalho, acompanha o fluxo e decide cada passo. |
 | Gerente | Acompanha o andamento. |
 
-O papel de cada pessoa vem do cadastro de perfis do sistema de gerenciamento de bases cartográficas; o Feixe não tem cadastro próprio de usuários.
+O papel de cada pessoa vem do cadastro de perfis do sistema de gerenciamento de bases cartográficas; o Feixe não tem cadastro próprio de usuários. Os perfis são cumulativos: quem avalia também pode executar, e o supervisor também avalia e executa.
 
 ## Por onde começar
 
