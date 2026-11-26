@@ -3,7 +3,7 @@ name: Release
 # Tag vX.Y.Z publica no canal estável (plugins.xml) com o banco de PRODUÇÃO chumbado; vX.Y.Z-rc.N publica só em
 # homologação (plugins-hml.xml, experimental) com o banco de HOMOLOGAÇÃO chumbado. O banco de cada ambiente vem dos
 # segredos FEIXE_AMBIENTE_PROD e FEIXE_AMBIENTE_HML (JSON com nome, rotulo, cor, host, porta, banco, sslmode).
-# Os dois XMLs e o índice vão para o GitHub Pages do repositório.
+# Os dois XMLs vão para o GitHub Pages do repositório, junto com o manual (o pages.yml publica o mesmo site).
 on:
   push:
     tags: ["v*"]
@@ -55,10 +55,13 @@ jobs:
           files: dist/feixe-${{ steps.versao.outputs.versao }}.zip
           prerelease: ${{ contains(steps.versao.outputs.versao, '-rc.') }}
           generate_release_notes: true
-      - name: Gerar repositórios de plugins
+      - name: Manual e repositórios de plugins
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python scripts/ci/gerar_plugins_xml.py "${{ github.repository }}" site
+        run: |
+          pip install markdown==3.7
+          python scripts/ci/gerar_manual.py site
+          python scripts/ci/gerar_plugins_xml.py "${{ github.repository }}" site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
