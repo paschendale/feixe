@@ -200,7 +200,7 @@ export default function Design() {
           <tbody>
             <tr>
               <td className="tab font-semibold">2568-1</td>
-              <td>Alan Silva Nascimento</td>
+              <td>Pessoa A</td>
               <td className="tab text-right">380</td>
               <td>
                 <Status s="EM_PRODUCAO" />

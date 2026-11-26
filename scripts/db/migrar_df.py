@@ -21,8 +21,9 @@ Mapeamento (decisões no build log do projeto):
   topológica nas células com ADE. A letra-código é a do tamanho de amostra tabelado mais próximo do n observado; LQA e
   Ac ficam abertos;
 - ignorados (e listados no relatório): atividade nula, massa d'água (não executado), "NNNN-X", "SHOW",
-  "u_3448274", CQ sem amostras e cargas com mais da metade da área fora da folha (exceto grupos de CQ inteiros fora
-  da folha do rótulo, que são erro de digitação do rótulo e vão para a folha onde estão).
+  rótulos que são uma conta de usuário ("u_<número>", lotes de teste), CQ sem amostras e cargas com mais da metade
+  da área fora da folha (exceto grupos de CQ inteiros fora da folha do rótulo, que são erro de digitação do rótulo e
+  vão para a folha onde estão).
 """
 
 from __future__ import annotations
@@ -124,6 +125,8 @@ NIVEL_POR_ROTULO = {"2470-5": "II", "2570-5": "III"}
 
 ROTULO_NUM = re.compile(r"^(\d{4})[-_](\d+)$")
 ROTULO_SUFIXO = re.compile(r"^(\d{4})-([A-Z])$")
+# Lote de teste: o rótulo é a conta de quem testou, não uma folha.
+ROTULO_CONTA = re.compile(r"^u_\d+$")
 
 
 def letra_mais_proxima(n: int) -> Optional[str]:
@@ -286,8 +289,8 @@ def classificar(dados: dict, rel: Relatorio) -> Tuple[Dict[tuple, Passagem], Dic
             rel.ignorar("sem folha_revisao", c)
         elif fr == "SHOW":
             rel.ignorar("demonstração (SHOW)", c)
-        elif fr == "u_3448274":
-            rel.ignorar("lote de teste (u_3448274)", c)
+        elif ROTULO_CONTA.match(fr):
+            rel.ignorar("lote de teste (rótulo com conta de usuário)", c)
         elif sufixo and sufixo.group(2) == "X":
             rel.ignorar("revisão X (fora da conta)", c)
         elif c["geom_ruim"]:
