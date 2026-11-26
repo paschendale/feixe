@@ -129,6 +129,50 @@ def criar_livre(
     return {"tema": fluxo["tema"], "criados": [criado], "existentes": []}
 
 
+def criar_livres(
+    ex: Executor, uf: str, id_fluxo: int, itens: List[Dict], projetos: Optional[Iterable[int]] = None
+) -> Dict:
+    """Vários lotes livres de uma vez, um por polígono (D-154): as feições selecionadas no QGIS (ottobacias,
+    municípios), cada uma com o seu nome. Cada um é conferido sozinho, num savepoint: nome vazio ou repetido na lista,
+    geometria que não é polígono válido com área e nome que já existe no projeto e tema não impedem os outros.
+    Volta `criados`, `existentes` (o nome já é de um lote; nada muda nele) e `erros` (nome e motivo)."""
+    if not itens:
+        raise ErroDados("nenhum polígono para criar", 400)
+    fluxo = _fluxo_da_uf(ex, uf, id_fluxo, projetos)
+    criados, existentes, erros, vistos = [], [], [], set()
+    for i, item in enumerate(itens, 1):
+        nome = (item.get("nome") or "").strip()
+        if not nome:
+            erros.append({"nome": f"polígono {i}", "erro": "sem nome"})
+            continue
+        if nome in vistos:
+            erros.append({"nome": nome, "erro": "nome repetido nesta seleção"})
+            continue
+        vistos.add(nome)
+        ja = ex.um(
+            "SELECT id FROM mapcartacomp.lote WHERE tipo = 'livre' AND cod_projeto = %s AND id_tema = %s AND uf = %s "
+            "AND nome = %s",
+            (fluxo["cod_projeto"], fluxo["id_tema"], uf, nome),
+        )
+        if ja:
+            existentes.append({"cd_mi": nome, "nome": nome, "id_lote": ja["id"], "uf": uf})
+            continue
+        ex.executar("SAVEPOINT livre")
+        try:
+            r = criar_livre(ex, uf, id_fluxo, nome, item.get("wkt") or "", projetos)
+        except ErroDados as e:
+            ex.executar("ROLLBACK TO SAVEPOINT livre")
+            erros.append({"nome": nome, "erro": e.mensagem})
+            continue
+        except Exception as e:  # noqa: BLE001 - WKT ilegível etc.: o banco recusa e este fica de fora
+            ex.executar("ROLLBACK TO SAVEPOINT livre")
+            erros.append({"nome": nome, "erro": f"geometria ilegível ({str(e).splitlines()[0][:80]})"})
+            continue
+        ex.executar("RELEASE SAVEPOINT livre")
+        criados += r["criados"]
+    return {"tema": fluxo["tema"], "criados": criados, "existentes": existentes, "erros": erros}
+
+
 # Etapa em que a folha está trabalhando (D-105): a aberta (pendente ou em andamento; no máximo uma), se houver; senão a
 # atual do lote, que é a que dá o status nacional e fica na concluída até a seguinte começar. Sem isso, uma folha com a
 # próxima etapa aberta e ainda não iniciada apareceria como "esperando" e gerar ou atribuir cargas iria para a etapa

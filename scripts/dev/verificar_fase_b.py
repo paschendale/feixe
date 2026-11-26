@@ -438,24 +438,26 @@ def b3(amb, usuario, senha):
         canvas = QgsMapCanvas()
         canvas.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:3857"))
         recebidos = []
-        ferramenta = FerramentaFolha(canvas, lambda x, y: recebidos.append((x, y)))
+        ferramenta = FerramentaFolha(canvas, lambda x, y: recebidos.append((x, y)), lambda ret: None)
         from qgis.core import QgsCoordinateTransform, QgsProject
-        from qgis.PyQt.QtCore import Qt
 
         para_3857 = QgsCoordinateTransform(
             QgsCoordinateReferenceSystem("EPSG:4674"), QgsCoordinateReferenceSystem("EPSG:3857"), QgsProject.instance()
         )
-        ferramenta._clicou(para_3857.transform(QgsPointXY(centro["x"], centro["y"])), Qt.LeftButton)
+        # O clique (canvasReleaseEvent) leva o ponto para SIRGAS e chama ao_clicar: o mesmo caminho, sem o evento.
+        ponto = ferramenta._para_sirgas().transform(para_3857.transform(QgsPointXY(centro["x"], centro["y"])))
+        ferramenta._ao_clicar(ponto.x(), ponto.y())
         with db.transacao(amb, usuario, senha) as ex:
             achada = dl.folha_no_ponto(ex, *recebidos[0])
         assert achada["cd_mi"] == livre["cd_mi"], achada
         ok(f"clique no mapa em EPSG:3857 acha a folha {achada['cd_mi']}")
 
         # Lote livre a partir de duas feições selecionadas numa camada em EPSG:3857.
-        camada = QgsVectorLayer("Polygon?crs=EPSG:3857", "bacias", "memory")
+        camada = QgsVectorLayer("Polygon?crs=EPSG:3857&field=fid:integer&field=cobacia:string", "bacias", "memory")
         feicoes = []
-        for dx in (0, 0.05):
-            f = QgsFeature()
+        for n, dx in enumerate((0, 0.05)):
+            f = QgsFeature(camada.fields())
+            f.setAttributes([n, f"teste_b3 otto {7531 + n}"])
             g = QgsGeometry.fromWkt(
                 f"POLYGON(({-47.9 + dx} -15.9, {-47.85 + dx} -15.9, {-47.85 + dx} -15.85, {-47.9 + dx} -15.85, "
                 f"{-47.9 + dx} -15.9))"
@@ -480,6 +482,14 @@ def b3(amb, usuario, senha):
             )
         assert float(area["a"]) == 0.005, area  # 0,1 x 0,05 grau: as duas feições unidas, de volta em SIRGAS
         ok("lote livre da seleção de duas feições em EPSG:3857, unidas e em SIRGAS 2000")
+
+        # D-154: um lote por feição, com o nome do campo sugerido (o código da ottobacia, não o fid).
+        assert sel["campo_nome"] == "cobacia" and len(sel["itens"]) == 2, sel["campo_nome"]
+        lotes = [{"nome": i["atributos"]["cobacia"], "wkt": i["wkt"]} for i in sel["itens"]]
+        status, obj = r.despachar("POST", "/api/lotes", {}, {"tipo": "livre", "id_fluxo": fluxo, "lotes": lotes})
+        assert status == 200 and [c["nome"] for c in obj["criados"]] == [x["nome"] for x in lotes], obj
+        criados += [c["id_lote"] for c in obj["criados"]]
+        ok(f"um lote por feição: {', '.join(c['nome'] for c in obj['criados'])}")
     finally:
         with db.transacao(amb, usuario, senha) as ex:
             ex.executar("DELETE FROM mapcartacomp.lote WHERE id = ANY(%s)", (criados,))

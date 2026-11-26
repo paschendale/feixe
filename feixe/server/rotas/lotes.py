@@ -67,6 +67,10 @@ def registrar(r, ctx) -> None:
             if tipo == "folha":
                 folhas = campo(req, "folhas", lambda v: [int(x) for x in v])
                 resultado = dl.criar_folhas(ex, uf, id_fluxo, folhas, projetos)
+            elif tipo == "livre" and campo(req, "lotes", list, padrao=None) is not None:
+                # Um lote por feição selecionada no QGIS (D-154): [{nome, wkt}], cada um conferido sozinho.
+                itens = [x for x in campo(req, "lotes", list) if isinstance(x, dict)]
+                resultado = dl.criar_livres(ex, uf, id_fluxo, itens, projetos)
             elif tipo == "livre":
                 resultado = dl.criar_livre(ex, uf, id_fluxo, campo(req, "nome", str), campo(req, "wkt", str), projetos)
             else:

@@ -69,6 +69,26 @@ def test_lote_livre(amb):
     assert _recusa(ex, dl.criar_livre, "DF", cen.fluxo, "  ", QUADRADO).status == 400
 
 
+def test_um_lote_livre_por_feicao(amb):
+    # D-154: as feições selecionadas no QGIS viram um lote cada; os problemas de uma não impedem as outras.
+    cen, ex = amb
+    dl.criar_livre(ex, "DF", cen.fluxo, "Otto 1", QUADRADO)
+    outro = "POLYGON((-47.7 -15.9, -47.6 -15.9, -47.6 -15.8, -47.7 -15.8, -47.7 -15.9))"
+    r = dl.criar_livres(ex, "DF", cen.fluxo, [
+        {"nome": "Otto 2", "wkt": outro}, {"nome": " Otto 3 ", "wkt": QUADRADO},
+        {"nome": "Otto 1", "wkt": outro},  # já existe: fica como está
+        {"nome": "Otto 2", "wkt": QUADRADO},  # repetido na seleção
+        {"nome": "", "wkt": QUADRADO}, {"nome": "Gravata", "wkt": GRAVATA}, {"nome": "Ruim", "wkt": "POLYGON((1 2"},
+    ])  # fmt: skip
+    assert [c["nome"] for c in r["criados"]] == ["Otto 2", "Otto 3"]
+    assert all(dl.um(ex, c["id_lote"])["passagens"] for c in r["criados"])
+    assert [e["nome"] for e in r["existentes"]] == ["Otto 1"]
+    erros = {e["nome"]: e["erro"] for e in r["erros"]}
+    assert set(erros) == {"Otto 2", "polígono 5", "Gravata", "Ruim"}, erros
+    assert "repetido" in erros["Otto 2"] and "inválida" in erros["Gravata"] and "ilegível" in erros["Ruim"]
+    assert _recusa(ex, dl.criar_livres, "DF", cen.fluxo, []).status == 400
+
+
 def test_folha_no_ponto_e_fluxos(amb):
     cen, ex = amb
     c = ex.um(

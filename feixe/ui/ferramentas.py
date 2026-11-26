@@ -159,14 +159,56 @@ class SemSelecao(Exception):
     pass
 
 
+def _campo_nome(campos, valores) -> str:
+    """Palpite do campo que dá nome a cada lote: um campo de nome (nome, nm_*, name, noriocomp...), senão um de código
+    (cobacia, codigo, cod_*, id_*) com valores distintos, senão o primeiro campo de texto com valores distintos."""
+    distintos = [
+        c for c in campos if all(v.get(c) for v in valores) and len({v.get(c) for v in valores}) == len(valores)
+    ]
+
+    def acha(prefixos, entre):
+        for p in prefixos:
+            for c in entre:
+                if c.lower() == p or c.lower().startswith(p):
+                    return c
+        return None
+
+    return (
+        acha(("nome", "nm_", "name", "noriocomp", "nomerio"), distintos)
+        or acha(("cobacia", "codigo", "cod_", "cd_", "geocod", "id_"), distintos)
+        or (distintos[0] if distintos else (campos[0] if campos else ""))
+    )
+
+
 def selecao_wkt(camada) -> Dict:
-    """União das feições selecionadas da camada (de polígonos), em SIRGAS 2000 geográfico, como WKT."""
+    """As feições selecionadas da camada (de polígonos), em SIRGAS 2000 geográfico: a união (`wkt`, um lote só) e cada
+    uma (`itens`, um lote por feição, com os atributos em texto para dar o nome), mais o palpite do campo do nome."""
     if not isinstance(camada, QgsVectorLayer) or camada.geometryType() != QgsWkbTypes.PolygonGeometry:
         raise SemSelecao("deixe ativa no QGIS uma camada de polígonos com as feições do lote selecionadas")
-    geoms = [f.geometry() for f in camada.getSelectedFeatures() if f.hasGeometry()]
-    if not geoms:
+    feicoes = [f for f in camada.getSelectedFeatures() if f.hasGeometry()]
+    if not feicoes:
         raise SemSelecao(f"nenhuma feição selecionada na camada {camada.name()}")
-    uniao = QgsGeometry.unaryUnion(geoms)
+    para_sirgas = None
     if camada.crs() != SIRGAS:
-        uniao.transform(QgsCoordinateTransform(camada.crs(), SIRGAS, QgsProject.instance()))
-    return {"camada": camada.name(), "feicoes": len(geoms), "wkt": uniao.asWkt(8)}
+        para_sirgas = QgsCoordinateTransform(camada.crs(), SIRGAS, QgsProject.instance())
+    campos = [c.name() for c in camada.fields()]
+    itens = []
+    for f in feicoes:
+        g = QgsGeometry(f.geometry())
+        if para_sirgas is not None:
+            g.transform(para_sirgas)
+        if not g.isGeosValid():
+            g = g.makeValid()
+        atributos = {c: ("" if f[c] is None or str(f[c]) == "NULL" else str(f[c]).strip()) for c in campos}
+        itens.append({"wkt": g.asWkt(8), "atributos": atributos})
+    uniao = QgsGeometry.unaryUnion([f.geometry() for f in feicoes])
+    if para_sirgas is not None:
+        uniao.transform(para_sirgas)
+    return {
+        "camada": camada.name(),
+        "feicoes": len(feicoes),
+        "wkt": uniao.asWkt(8),
+        "campos": campos,
+        "campo_nome": _campo_nome(campos, [i["atributos"] for i in itens]),
+        "itens": itens,
+    }
