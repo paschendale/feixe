@@ -8,9 +8,11 @@ import { Select } from '@/components/ui/select'
 import type { Catalogo, EtapaFluxo, FluxoCompleto } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { enviar } from '@/lib/useApi'
+import { LQAS, NIVEIS, pct } from '../supervisao/PlanosCQ'
 
-// Editor das etapas de um fluxo da unidade: ordem, fase, nome, obrigatória, repetível, conta revisão, fração crítica
-// (só CQ) e as atividades de cada etapa (do catálogo, do projeto, tema e fase do fluxo). Etapa com passagens não sai.
+// Editor das etapas de um fluxo da unidade: ordem, fase, nome, obrigatória, repetível, conta revisão, o padrão dos planos
+// de CQ (nível de inspeção, LQA e fração crítica, só CQ, D-135) e as atividades de cada etapa (do catálogo, do projeto,
+// tema e fase do fluxo). Etapa com passagens não sai.
 export function EditarFluxo({ fluxo, catalogo, fechar }: { fluxo: FluxoCompleto | null; catalogo: Catalogo; fechar: () => void }) {
   const avisar = useAvisar()
   const [nome, setNome] = useState('')
@@ -41,7 +43,10 @@ export function EditarFluxo({ fluxo, catalogo, fechar }: { fluxo: FluxoCompleto 
         `/api/fluxos/${fluxo!.id}`,
         {
           nome,
-          etapas: etapas.map((e) => ({ ...e, atividades: e.atividades.map((a) => a.id), fracao_critica: e.fase === 'cq' ? e.fracao_critica : null })),
+          etapas: etapas.map((e) => {
+            const cq = e.fase === 'cq'
+            return { ...e, atividades: e.atividades.map((a) => a.id), fracao_critica: cq ? e.fracao_critica : null, nivel_inspecao: cq ? e.nivel_inspecao : null, lqa: cq ? e.lqa : null }
+          }),
         },
         'PUT',
       )
@@ -76,7 +81,7 @@ export function EditarFluxo({ fluxo, catalogo, fechar }: { fluxo: FluxoCompleto 
                     <Select
                       value={e.fase}
                       disabled={usada}
-                      onChange={(x) => mudar(i, { fase: x.target.value, atividades: [], fracao_critica: null })}
+                      onChange={(x) => mudar(i, { fase: x.target.value, atividades: [], fracao_critica: null, nivel_inspecao: x.target.value === 'cq' ? 'II' : null, lqa: x.target.value === 'cq' ? 4 : null })}
                       aria-label="Fase"
                     >
                       {catalogo.fases.map((f) => (
@@ -98,22 +103,54 @@ export function EditarFluxo({ fluxo, catalogo, fechar }: { fluxo: FluxoCompleto 
                         <input type="checkbox" checked={e[k]} onChange={(x) => mudar(i, { [k]: x.target.checked })} /> {rot}
                       </label>
                     ))}
-                    {e.fase === 'cq' && (
-                      <label className="flex items-center gap-1.5">
-                        Fração crítica
-                        <Input
-                          className="h-7 w-20"
-                          type="number"
-                          step="0.1"
-                          placeholder="4"
-                          value={e.fracao_critica ?? ''}
-                          onChange={(x) => mudar(i, { fracao_critica: x.target.value ? Number(x.target.value) : null })}
-                        />
-                        %
-                      </label>
-                    )}
                     {usada && <span className="text-xs text-muted-foreground">{e.passagens} passagens</span>}
                   </div>
+                  {e.fase === 'cq' && (
+                    <div className="flex flex-col gap-1.5 rounded-md bg-[#F7F9FB] p-2.5 text-sm">
+                      <div className="flex flex-wrap items-center gap-4">
+                        <label className="flex items-center gap-1.5">
+                          Nível de inspeção
+                          <Select className="h-7 w-24" value={e.nivel_inspecao ?? ''} onChange={(x) => mudar(i, { nivel_inspecao: x.target.value || null })}>
+                            <option value="">—</option>
+                            {NIVEIS.map((n) => (
+                              <option key={n} value={n}>
+                                {n}
+                              </option>
+                            ))}
+                          </Select>
+                        </label>
+                        <label className="flex items-center gap-1.5">
+                          LQA
+                          <Select className="h-7 w-24" value={e.lqa != null ? String(e.lqa) : ''} onChange={(x) => mudar(i, { lqa: x.target.value ? Number(x.target.value) : null })}>
+                            <option value="">—</option>
+                            {LQAS.map((v) => (
+                              <option key={v} value={String(v)}>
+                                {pct(v)}
+                              </option>
+                            ))}
+                          </Select>
+                        </label>
+                        <label className="flex items-center gap-1.5">
+                          Fração crítica
+                          <Input
+                            className="h-7 w-20"
+                            type="number"
+                            step="0.1"
+                            placeholder="4"
+                            value={e.fracao_critica ?? ''}
+                            onChange={(x) => mudar(i, { fracao_critica: x.target.value ? Number(x.target.value) : null })}
+                          />
+                          %
+                        </label>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {e.nivel_inspecao && e.lqa != null
+                          ? 'Ao abrir a etapa, o Feixe sorteia as amostras de cada atividade e gera as cargas, com este padrão; o supervisor pode trocar os parâmetros na gaveta da folha enquanto nada foi avaliado.'
+                          : 'Sem nível e LQA, a etapa abre sem amostras e o supervisor cria os planos na gaveta de cada folha.'}{' '}
+                        Fração crítica vazia: a de cada elemento.
+                      </span>
+                    </div>
+                  )}
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
                     {ativs(e.fase).length === 0 && <span className="text-xs text-muted-foreground">Nenhuma atividade desta fase no catálogo para o tema.</span>}
                     {ativs(e.fase).map((a) => (
@@ -149,7 +186,7 @@ export function EditarFluxo({ fluxo, catalogo, fechar }: { fluxo: FluxoCompleto 
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setEtapas((xs) => [...xs, { fase: 'revisao', nome: 'Nova etapa', obrigatoria: false, repetivel: true, conta_revisao: false, fracao_critica: null, atividades: [] }])}
+            onClick={() => setEtapas((xs) => [...xs, { fase: 'revisao', nome: 'Nova etapa', obrigatoria: false, repetivel: true, conta_revisao: false, fracao_critica: null, nivel_inspecao: null, lqa: null, atividades: [] }])}
           >
             <Plus /> Etapa
           </Button>

@@ -187,11 +187,72 @@ export type ResultadoCriacao = {
 
 // O que o Feixe fez sozinho depois de abrir passagens (D-109): cargas geradas, etapas sem atividade iniciadas e avisos.
 type PassagemPreparada = { id_lote_etapa: number; folha_revisao: string; etapa: string }
+// No CQ, `planos` = quantos planos de amostragem saíram com o padrão da etapa (D-136) e `gravadas` = as amostras;
+// `cq_sem_padrao` = a etapa não tem nível e LQA padrão, e os planos se criam na gaveta.
 export type Preparo = {
-  geradas: (PassagemPreparada & { gravadas: number })[]
+  geradas: (PassagemPreparada & { gravadas: number; planos?: number })[]
   iniciadas: PassagemPreparada[]
-  avisos: (PassagemPreparada & { aviso: string })[]
+  avisos: (PassagemPreparada & { aviso: string; cq_sem_padrao?: boolean })[]
   erro?: string
+}
+
+// --- Planos de amostragem do CQ (D2) ---
+
+export type PlanoCQ = {
+  id: number
+  id_atividade: number
+  atividade: string
+  elemento: string | null
+  N: number
+  nivel: string
+  letra: string | null
+  n: number
+  ac: number
+  lqa: number
+  fracao_critica: number | null
+  semente: number
+  universo: string | null
+  resultado: string
+  amostras: number
+  avaliadas: number
+  distribuidas: number
+  inspecao_completa: boolean
+  pode_refazer: boolean
+  motivo_refazer: string | null
+}
+
+export type AtividadeSemPlano = { id_atividade: number; atividade: string; elemento: string | null; fracao_critica: number | null; por_feicao: boolean }
+
+export type PlanosCQ = {
+  id_lote_etapa: number
+  folha_revisao: string
+  etapa: string
+  situacao: string
+  tipo: 'folha' | 'livre'
+  padrao: { nivel: string | null; lqa: number | null; fracao_critica: number | null }
+  planos: PlanoCQ[]
+  sem_plano: AtividadeSemPlano[]
+}
+
+// Prévia (ou plano gravado) devolvida por POST /api/lote_etapas/{id}/cq_plano.
+export type PreviaCQ = {
+  id_atividade: number
+  atividade: string
+  elemento: string | null
+  N: number
+  nivel: string
+  lqa: number
+  letra: string | null
+  n: number
+  ac: number
+  inspecao_completa: boolean
+  fracao_critica: number | null
+  semente: number
+  universo: string
+  ja_sorteadas: number
+  geocodigos: string[]
+  previa: boolean
+  refeito: boolean
 }
 
 export type FolhaDistribuir = {
@@ -273,6 +334,8 @@ export type EtapaFluxo = {
   repetivel: boolean
   conta_revisao: boolean
   fracao_critica: number | null
+  nivel_inspecao: string | null
+  lqa: number | null
   passagens?: number
   atividades: { id: number; nome: string; geracao?: string }[]
 }

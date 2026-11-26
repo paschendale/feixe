@@ -10,6 +10,7 @@ import { useSessao } from '@/lib/sessao'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 import { EditarFluxo } from '../fluxos/EditarFluxo'
+import { pct } from './PlanosCQ'
 import { NovoFluxo } from '../fluxos/NovoFluxo'
 
 const ABERTAS = ['pendente', 'em_andamento']
@@ -22,12 +23,16 @@ const FASE: Record<string, string> = {
   envio_gcq: 'envio GCQ',
 }
 
-// O que acontece quando a etapa abre (D-109): cargas pela grade, amostras do CQ (fase D), cargas à mão ou nada a
-// distribuir (a etapa começa já em andamento).
+// O que acontece quando a etapa abre (D-109, D-136): cargas pela grade, amostras do CQ sorteadas com o padrão da etapa
+// (sem padrão, os planos se criam na gaveta), cargas à mão ou nada a distribuir (a etapa começa já em andamento).
 function aoAbrir(e: EtapaFluxo) {
   const geram = e.atividades.filter((a) => a.geracao !== 'nenhuma')
+  if (e.fase === 'cq') {
+    if (!e.atividades.length) return { texto: 'sem atividade de CQ: escolha no editor as medidas a inspecionar', alerta: true }
+    if (e.nivel_inspecao && e.lqa != null) return { texto: `sorteia as amostras de cada atividade e gera as cargas (nível ${e.nivel_inspecao}, LQA ${pct(e.lqa)})`, alerta: false }
+    return { texto: 'sem nível e LQA padrão: os planos de CQ se criam na gaveta de cada folha', alerta: true }
+  }
   if (geram.some((a) => a.geracao === 'grade')) return null
-  if (e.fase === 'cq') return { texto: 'amostras pelo plano de CQ (fase D)', alerta: false }
   if (geram.length) return { texto: 'cargas não saem da grade: inicie pela gaveta', alerta: true }
   return { texto: 'sem cargas: começa assim que abre, sem nada a distribuir', alerta: true }
 }
@@ -143,7 +148,7 @@ export default function Fluxos() {
                   </div>
                   <span className="hidden justify-self-start rounded-full bg-[#E9EDF2] px-2 py-0.5 text-xs md:inline">{FASE[e.fase] ?? e.fase_nome ?? e.fase}</span>
                   <span className="hidden text-[13px] text-muted-foreground md:inline">
-                    {[e.obrigatoria ? 'obrigatória' : 'opcional', e.repetivel && 'repetível', e.conta_revisao && 'conta revisão', e.fracao_critica != null && `fração crítica ${e.fracao_critica}%`].filter(Boolean).join(' · ')}
+                    {[e.obrigatoria ? 'obrigatória' : 'opcional', e.repetivel && 'repetível', e.conta_revisao && 'conta revisão', e.fracao_critica != null && `fração crítica ${pct(e.fracao_critica)}`].filter(Boolean).join(' · ')}
                   </span>
                   <span className="text-right text-[13px]">
                     {agora > 0 && <b className="text-ibge">{plural(agora, 'folha agora', 'folhas agora')}</b>}
@@ -175,7 +180,7 @@ export default function Fluxos() {
             </div>
           )}
           <span className="text-xs text-muted-foreground">
-            No editor: subir, descer e tirar etapa, escolher a atividade de cada uma (as de CQ, uma por medida) e marcar obrigatória, repetível e conta revisão. A etapa com atividade pela grade ganha as cargas quando abre; a etapa sem atividade não tem cargas e começa assim que abre.
+            No editor: subir, descer e tirar etapa, escolher a atividade de cada uma (as de CQ, uma por medida) e marcar obrigatória, repetível e conta revisão; no CQ, o nível de inspeção, o LQA e a fração crítica padrão. A etapa com atividade pela grade ganha as cargas quando abre; a de CQ com padrão já abre com as amostras sorteadas; a etapa sem atividade não tem cargas e começa assim que abre.
           </span>
         </Bloco>
       )}

@@ -13,6 +13,7 @@ import { STATUS } from '@/lib/status'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 import { comCargas, resumoPreparo } from '../folhas/preparo'
+import { PlanosCQ } from './PlanosCQ'
 
 const ABERTAS = ['pendente', 'em_andamento']
 
@@ -119,8 +120,8 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
       botoes.push({ titulo: seguinte ? 'Só concluir' : 'Concluir etapa', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/concluir` }] })
     }
   }
-  // Etapa com cargas começa ao distribuir (D-109); só a sem cargas se inicia à mão.
-  if (aberta?.situacao === 'pendente' && !aberta.cargas_total) botoes.push({ titulo: 'Iniciar etapa', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/iniciar` }] })
+  // Etapa com cargas começa ao distribuir (D-109); só a sem cargas se inicia à mão. O CQ começa pelas amostras dos planos.
+  if (aberta?.situacao === 'pendente' && !aberta.cargas_total && aberta.fase !== 'cq') botoes.push({ titulo: 'Iniciar etapa', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/iniciar` }] })
   if (aberta && eAberta && !eAberta.obrigatoria) botoes.push({ titulo: 'Pular etapa', passos: [{ caminho: `/api/lote_etapas/${aberta.id}/pular` }] })
   if (!aberta) {
     if (estado?.sugestao) botoes.push({ titulo: `Abrir ${estado.sugestao.nome}`, passos: [{ caminho: `/api/lotes/${lote.id}/passagens`, corpo: { id_fluxo_etapa: estado.sugestao.id } }] })
@@ -139,7 +140,9 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
           as cargas estão concluídas: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
         </>
       )
+  else if (aberta?.situacao === 'pendente' && aberta.cargas_total && aberta.fase === 'cq') sugestao = <>distribuir as amostras: o CQ começa quando um avaliador as receber.</>
   else if (aberta?.situacao === 'pendente' && aberta.cargas_total) sugestao = <>distribuir a folha: a etapa começa quando alguém receber as cargas.</>
+  else if (aberta?.situacao === 'pendente' && aberta.fase === 'cq') sugestao = <>criar os planos de CQ (acima); as amostras sorteadas viram as cargas a distribuir.</>
   else if (aberta?.situacao === 'pendente') sugestao = <>a etapa não tem cargas; inicie quando a equipe começar.</>
   else if (!aberta && estado?.sugestao) sugestao = <>abrir <b>{estado.sugestao.nome}</b>, a etapa seguinte do fluxo.</>
   else if (!aberta) sugestao = <>a folha terminou a última etapa do fluxo; não há etapa seguinte.</>
@@ -342,8 +345,8 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                   </>
                 ) : (
                   <div className="flex flex-wrap items-center gap-3 text-[13px] text-muted-foreground">
-                    <span>Sem cargas nesta etapa.</span>
-                    {aberta && supervisor && atual && (
+                    <span>{atual.fase === 'cq' ? 'Sem amostras ainda nesta etapa.' : 'Sem cargas nesta etapa.'}</span>
+                    {aberta && supervisor && atual && atual.fase !== 'cq' && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -362,6 +365,7 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                     )}
                   </div>
                 )}
+                {supervisor && atual.fase === 'cq' && <PlanosCQ idLoteEtapa={atual.id} folha={lote.tipo === 'folha'} distribuir={() => distribuir([lote.id])} />}
               </section>
             )}
 

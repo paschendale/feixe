@@ -9,18 +9,25 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
+from ..cq import amostragem as am
 from . import ErroDados, Executor, novo_uuid
 
 ABERTAS = ("pendente", "em_andamento")
-CAMPOS_ETAPA = ("ordem", "fase", "nome", "obrigatoria", "repetivel", "conta_revisao", "fracao_critica")
+CAMPOS_ETAPA = (
+    "ordem", "fase", "nome", "obrigatoria", "repetivel", "conta_revisao", "fracao_critica", "nivel_inspecao", "lqa",
+)  # fmt: skip
+CAMPOS_CQ = ("fracao_critica", "nivel_inspecao", "lqa")  # padrão dos planos de amostragem, só na etapa de CQ (D-135)
 
 # Fluxo modelo da CCAR (D-65): o caminho do DF. Fica no código, não no banco, porque um fluxo no banco é de uma UF.
-# As atividades de cada etapa são escolhidas no catálogo pelo projeto, tema e fase; no CQ, todas as ativas do tema.
+# As atividades de cada etapa são escolhidas no catálogo pelo projeto, tema e fase; no CQ, todas as ativas do tema, com
+# o padrão dos planos no nível II e LQA 4% (a fração crítica fica a de cada elemento, 4% na CCAR, D-75): abrir o CQ já
+# sorteia as amostras (D-136), e a GGC troca o padrão no editor.
 MODELO_CCAR = [
     {"fase": "aquisicao", "nome": "Aquisição", "obrigatoria": True, "repetivel": False, "conta_revisao": True},
     {"fase": "revisao", "nome": "Revisão por outra pessoa", "obrigatoria": False, "repetivel": True,
      "conta_revisao": True},
-    {"fase": "cq", "nome": "Controle de qualidade", "obrigatoria": False, "repetivel": True, "conta_revisao": False},
+    {"fase": "cq", "nome": "Controle de qualidade", "obrigatoria": False, "repetivel": True, "conta_revisao": False,
+     "nivel_inspecao": "II", "lqa": 4},
     {"fase": "correcao_inspecao", "nome": "Correção de inspeção", "obrigatoria": False, "repetivel": True,
      "conta_revisao": False},
     {"fase": "correcao_topologica", "nome": "Correção topológica", "obrigatoria": True, "repetivel": True,
@@ -54,7 +61,7 @@ def listar(ex: Executor, uf: Optional[str]) -> List[Dict]:
         return []
     etapas = ex.todos(
         "SELECT fe.id, fe.id_fluxo, fe.ordem, fe.fase, fa.nome AS fase_nome, fe.nome, fe.obrigatoria, fe.repetivel, "
-        "fe.conta_revisao, fe.fracao_critica, "
+        "fe.conta_revisao, fe.fracao_critica::float8 AS fracao_critica, fe.nivel_inspecao, fe.lqa::float8 AS lqa, "
         "(SELECT count(*) FROM mapcartacomp.lote_etapa le WHERE le.id_fluxo_etapa = fe.id) AS passagens, "
         "coalesce((SELECT json_agg(json_build_object('id', a.id, 'nome', a.nome, 'geracao', a.geracao) "
         "ORDER BY a.nome) "
@@ -88,6 +95,7 @@ def _validar_etapas(ex: Executor, cod_projeto: int, id_tema: int, etapas: List[D
         fc = e.get("fracao_critica")
         if fc is not None and (e["fase"] != "cq" or not 0 < float(fc) < 100):
             raise ErroDados(f"etapa {i}: fração crítica só na etapa de CQ, entre 0 e 100%", 400)
+        _padrao_cq(e, i)
         ids = e.get("atividades") or []
         if ids:
             ok = ex.um(
@@ -97,6 +105,25 @@ def _validar_etapas(ex: Executor, cod_projeto: int, id_tema: int, etapas: List[D
             )["n"]
             if ok != len(set(ids)):
                 raise ErroDados(f"etapa {i} ({e['nome']}): atividade de outro projeto, tema ou fase", 400)
+
+
+def _padrao_cq(e: Dict, i: int) -> None:
+    """Nível de inspeção e LQA padrão da etapa de CQ, normalizados ("2" vira "II", "2,5" vira 2.5) e conferidos nos
+    quadros do manual; fora do CQ não há padrão. Vazio = o supervisor escolhe ao criar o plano."""
+    nivel, lqa = e.get("nivel_inspecao"), e.get("lqa")
+    if nivel in ("", None):
+        nivel = None
+    if lqa in ("", None):
+        lqa = None
+    if e["fase"] != "cq":
+        if nivel is not None or lqa is not None:
+            raise ErroDados(f"etapa {i}: nível de inspeção e LQA só na etapa de CQ", 400)
+        return
+    try:
+        e["nivel_inspecao"] = None if nivel is None else am.normalizar_nivel(nivel)
+        e["lqa"] = None if lqa is None else am.normalizar_lqa(lqa)
+    except am.ErroAmostragem as erro:
+        raise ErroDados(f"etapa {i} ({e['nome']}): {erro}", 400) from None
 
 
 def _gravar_etapas(ex: Executor, id_fluxo: int, etapas: List[Dict]) -> None:
@@ -122,7 +149,7 @@ def _gravar_etapas(ex: Executor, id_fluxo: int, etapas: List[Dict]) -> None:
     for ordem, e in enumerate(etapas, start=1):
         valores = (
             ordem, e["fase"], e["nome"].strip(), e.get("obrigatoria", True), e.get("repetivel", False),
-            e.get("conta_revisao", False), e.get("fracao_critica"),
+            e.get("conta_revisao", False), *(e.get(c) if e["fase"] == "cq" else None for c in CAMPOS_CQ),
         )  # fmt: skip
         if e.get("id"):
             if atuais[e["id"]]["passagens"]:
@@ -193,13 +220,27 @@ def alterar(ex: Executor, uf: str, id_fluxo: int, nome: Optional[str], ativo: Op
     return next(x for x in listar(ex, uf) if x["id"] == id_fluxo)
 
 
+def _padrao_copiavel(e: Dict) -> Dict:
+    """Padrão de CQ de uma etapa copiada de outra unidade: o que se normaliza fica ("2" vira "II"); nível ou LQA fora
+    dos quadros do manual (o banco aceita texto aberto) sai, e a etapa cai em "Criar os planos de CQ" na gaveta, em
+    vez de a cópia falhar."""
+    for campo, normalizar in (("nivel_inspecao", am.normalizar_nivel), ("lqa", am.normalizar_lqa)):
+        if e.get(campo) is not None:
+            try:
+                e[campo] = normalizar(e[campo])
+            except am.ErroAmostragem:
+                e[campo] = None
+    return e
+
+
 def copiar(ex: Executor, uf: str, id_origem: int, nome: str) -> Dict:
     """Copia o fluxo de qualquer unidade para a minha, com as mesmas etapas e atividades."""
     origem = next((f for f in listar(ex, None) if f["id"] == id_origem), None)
     if not origem:
         raise ErroDados("fluxo não encontrado", 404)
     etapas = [
-        {**{k: e[k] for k in CAMPOS_ETAPA}, "atividades": [a["id"] for a in e["atividades"]]} for e in origem["etapas"]
+        _padrao_copiavel({**{k: e[k] for k in CAMPOS_ETAPA}, "atividades": [a["id"] for a in e["atividades"]]})
+        for e in origem["etapas"]
     ]
     return criar(ex, uf, origem["cod_projeto"], origem["id_tema"], nome, etapas)
 

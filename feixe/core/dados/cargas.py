@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from . import ErroDados, Executor, novo_uuid
+from . import ErroDados, Executor, cq, novo_uuid
 
 # Passagens abertas dos lotes (pendentes ou em andamento, no máximo uma por lote): é o que o supervisor está
 # distribuindo agora. Uma folha sem etapa aberta (esperando o supervisor andar) fica de fora (D-105).
@@ -21,14 +21,15 @@ _SQL_ABERTAS = "('pendente', 'em_andamento')"
 
 
 def preparar(ex: Executor, uf: str, ids_lote_etapa: List[int]) -> Dict:
-    """O que a passagem recém-aberta precisa sem decisão de ninguém (D-109): as cargas pela grade, se a etapa tem uma
-    atividade pela grade; se a etapa não tem atividade que gere cargas (nenhuma, ou só de geração "nenhuma", como o
-    envio à GCQ), não há o que distribuir e ela começa já. Etapa com atividade que não é pela grade (CQ por amostragem,
-    fase D; geração manual), ou que já tem cargas, fica como está, com o motivo em `avisos`.
+    """O que a passagem recém-aberta precisa sem decisão de ninguém (D-109, D-136): as cargas pela grade, se a etapa
+    tem uma atividade pela grade; na etapa de CQ, um plano de amostragem por atividade com o padrão da etapa e as cargas
+    das amostras (`cq.gerar_padrao`); se a etapa não tem atividade que gere cargas (nenhuma, ou só de geração "nenhuma",
+    como o envio à GCQ), não há o que distribuir e ela começa já. Etapa com atividade que não é pela grade (geração
+    manual), CQ sem padrão na etapa, ou passagem que já tem cargas, fica como está, com o motivo em `avisos`.
 
     Em lote, em poucas idas e voltas: uma leitura das passagens, uma da grade de todas, um INSERT das cargas e um das
-    etapas iniciadas. Volta `geradas` (por passagem), `iniciadas` (sem atividade) e `avisos` (as que ficaram sem
-    cargas, com o motivo)."""
+    etapas iniciadas. Volta `geradas` (por passagem; no CQ, com `planos`), `iniciadas` (sem atividade) e `avisos` (as
+    que ficaram sem cargas, com o motivo)."""
     if not ids_lote_etapa:
         return {"geradas": [], "iniciadas": [], "avisos": []}
     ps = ex.todos(
@@ -44,6 +45,9 @@ def preparar(ex: Executor, uf: str, ids_lote_etapa: List[int]) -> Dict:
         " JOIN mapcartacomp.atividade a ON a.id = x.id_atividade "
         " WHERE x.id_fluxo_etapa = fe.id AND a.geracao = 'grade' AND a.ativo AND a.grade_nivel IS NOT NULL "
         " LIMIT 1) AS nivel, "
+        "(SELECT count(*) FROM mapcartacomp.fluxo_etapa_atividade x JOIN mapcartacomp.atividade a "
+        " ON a.id = x.id_atividade WHERE x.id_fluxo_etapa = fe.id AND a.fase = 'cq' AND a.ativo "
+        " AND coalesce(a.geracao, '') <> 'nenhuma') AS cq, "
         "EXISTS (SELECT 1 FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id) AS tem_cargas "
         "FROM mapcartacomp.lote_etapa le JOIN mapcartacomp.lote l ON l.id = le.id_lote "
         "JOIN mapcartacomp.fluxo_etapa fe ON fe.id = le.id_fluxo_etapa "
@@ -51,19 +55,19 @@ def preparar(ex: Executor, uf: str, ids_lote_etapa: List[int]) -> Dict:
         "WHERE le.id = ANY(%s) ORDER BY folha_revisao",
         (list(ids_lote_etapa),),
     )
-    gerar, iniciar, avisos = [], [], []
+    gerar, iniciar, avisos, amostrar = [], [], [], []
     for p in ps:
         if p["uf"] != uf or p["situacao"] not in ABERTAS or p["tem_cargas"]:
             continue
-        if not p["atividades"]:
+        if p["fase"] == "cq" and p["cq"]:
+            amostrar.append(p)
+        elif not p["atividades"]:
             if p["situacao"] == "pendente":
                 iniciar.append(p)
         elif p["grade"] and len(p["grade"]) == 1:
             gerar.append(p)
         elif p["grade"]:
             avisos.append({**_ident(p), "aviso": f"a etapa {p['etapa']} tem mais de uma atividade pela grade"})
-        elif p["fase"] == "cq":
-            avisos.append({**_ident(p), "aviso": "as amostras do CQ saem do plano de amostragem (fase D)"})
         else:
             aviso = f"as cargas de {p['etapa']} não saem da grade: inicie a etapa pela gaveta quando a equipe começar"
             avisos.append({**_ident(p), "aviso": aviso})
@@ -96,6 +100,10 @@ def preparar(ex: Executor, uf: str, ids_lote_etapa: List[int]) -> Dict:
                 geradas.append({**_ident(p), "gravadas": n})
             else:
                 avisos.append({**_ident(p), "aviso": "nenhuma célula da grade tem o centroide dentro do lote"})
+    if amostrar:
+        g, a = cq.gerar_padrao(ex, amostrar)
+        geradas += g
+        avisos += a
     if iniciar:
         obs = "Iniciada ao abrir: a etapa não tem atividade, não há cargas a distribuir"
         _iniciar(ex, [p["id"] for p in iniciar], obs)
