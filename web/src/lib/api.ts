@@ -478,6 +478,26 @@ export type FolhaDistribuir = {
 export type PessoaDistribuir = { conta: string; nome: string; perfis: string | null; pendentes: number; na_fila: number }
 export type SugestaoDistribuicao = { folhas: FolhaDistribuir[]; pessoas: PessoaDistribuir[] }
 
+// CQ (D-147): as amostras de várias folhas juntas, repartidas entre avaliadores na proporção dos pesos (em amostras).
+export type ElementoDistribuirCQ = { id_atividade: number; elemento: string; amostras: number; avaliadas: number }
+export type SugestaoDistribuicaoCQ = {
+  folhas: { id_lote: number; id_lote_etapa: number; folha_revisao: string; tema: string; etapa: string; amostras: number; avaliadas: number; sem_avaliador: number }[]
+  fora: { id_lote: number; folha_revisao?: string; motivo: string }[]
+  elementos: ElementoDistribuirCQ[]
+  total: number
+  origem: 'atual' | 'ultima' | 'igual'
+  origem_folha: string | null
+  sem_perfil_v: boolean
+  pessoas: { conta: string; nome: string; pendentes: number; motivo: string | null; com: number; peso: number }[]
+}
+export type ResultadoDistribuicaoCQ = {
+  previa: boolean
+  movidas: number
+  folhas: string[]
+  elementos: ElementoDistribuirCQ[]
+  pessoas: { conta: string; nome: string; total: number; avaliadas: number; recebe: number; perde: number; por_elemento: Record<string, number> }[]
+}
+
 export type ItemAvanco = {
   id_lote: number
   folha_revisao: string

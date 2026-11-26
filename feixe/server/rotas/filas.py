@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 
 from ...core.dados import ErroDados
+from ...core.dados import distribuir_cq as dcq
 from ...core.dados import filas as dfi
 from ..api import ErroApi, campo, inteiro
 from .lotes import uf_de
@@ -101,3 +102,25 @@ def registrar(r, ctx) -> None:
             with contextlib.suppress(ErroApi):
                 ctx.qgis("cargas_mudaram", None)
         return 200, {"agora": agora, "na_fila": na_fila, "erros": erros}
+
+    # --- CQ (D-147): as amostras de várias folhas juntas, repartidas entre avaliadores na proporção dos pesos -------
+
+    @r.rota("POST", "/api/distribuir_cq/sugestao", exige=("supervisor",))
+    def _sugestao_cq(req):
+        with ctx.tx() as ex:
+            return 200, dcq.sugestao(ex, uf_de(ctx.eu()), campo(req, "lotes", lambda v: [int(x) for x in v]))
+
+    @r.rota("POST", "/api/distribuir_cq", exige=("supervisor",))
+    def _distribuir_cq(req):
+        lotes = campo(req, "lotes", lambda v: [int(x) for x in v])
+        pesos = campo(req, "pesos", lambda v: {str(k): float(x) for k, x in dict(v).items()})
+        previa = campo(req, "previa", bool, padrao=False)
+        with ctx.tx() as ex:
+            r = dcq.distribuir(ex, uf_de(ctx.eu()), lotes, pesos, previa)
+        if not previa and r["movidas"]:
+            ctx.publicar("fila", {"cq": True})
+            ctx.publicar("carga", {"distribuidas_cq": r["movidas"]})
+            ctx.publicar("lote", {"distribuidas_cq": r["ids_lote"]})
+            with contextlib.suppress(ErroApi):
+                ctx.qgis("cargas_mudaram", None)
+        return 200, r
