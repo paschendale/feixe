@@ -40,7 +40,7 @@ def _fluxo_da_uf(ex: Executor, uf: str, id_fluxo: int, projetos: Optional[Iterab
     if not fluxo or fluxo["uf"] != uf or not fluxo["ativo"]:
         raise ErroDados("fluxo não encontrado entre os fluxos ativos da sua unidade", 404)
     if fluxo["primeira_etapa"] is None:
-        raise ErroDados("o fluxo não tem etapas: configure o fluxo antes de criar folhas nele")
+        raise ErroDados("o fluxo não tem etapas: configure o fluxo antes de criar lotes nele")
     if projetos is not None and fluxo["cod_projeto"] not in set(projetos):
         raise ErroDados("você não é supervisor no projeto deste fluxo (perfil S no SGBC)", 403)
     return fluxo
@@ -179,7 +179,7 @@ def excluir(ex: Executor, uf: str, ids: List[int], previa: bool, projetos: Optio
     inspeção; com trabalho, recusa com o motivo (o caminho é tirar cargas na gaveta). Cargas pendentes com alguém saem
     do workspace dessa pessoa no próximo pull. Na prévia, o que acontece com cada um; sem prévia, apaga os aceitos."""
     if not ids:
-        raise ErroDados("escolha pelo menos uma folha", 400)
+        raise ErroDados("escolha pelo menos um lote", 400)
     linhas = ex.todos(
         "SELECT l.id AS id_lote, l.uf, l.cod_projeto, l.tipo, coalesce(c.folha_revisao, l.nome) AS folha_revisao, "
         "(SELECT count(*) FROM mapcartacomp.carga_trabalho x JOIN mapcartacomp.lote_etapa le "

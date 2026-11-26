@@ -61,7 +61,7 @@ function Item({ i }: { i: ItemSyncLog }) {
   const zoom = () =>
     a.id_lote &&
     enviar(`/api/lotes/${a.id_lote}/zoom`)
-      .then(() => avisar(`${a.folha ?? 'Folha'} no mapa do QGIS.`))
+      .then(() => avisar(`${a.folha ?? 'Lote'} no mapa do QGIS.`))
       .catch((e) => avisar((e as Error).message, 'erro'))
   return (
     <Bloco className="gap-3">
@@ -71,10 +71,10 @@ function Item({ i }: { i: ItemSyncLog }) {
         <span className="flex flex-wrap items-baseline gap-x-2">
           {a.id_lote && a.existe !== false ? (
             <a href={href(`supervisao/folhas/${a.id_lote}`, { grupo: 'todas' })} className="tab font-semibold text-primary hover:underline">
-              {a.folha ?? `Folha #${a.id_lote}`}
+              {a.folha ?? `Lote #${a.id_lote}`}
             </a>
           ) : (
-            <b className="tab">{a.folha ?? 'Folha não identificada'}</b>
+            <b className="tab">{a.folha ?? 'Lote não identificado'}</b>
           )}
           <span className="text-nota text-muted-foreground">
             {[i.tipo === 'carga' ? (a.geocodigo ? `carga ${a.geocodigo}` : a.id_carga ? `carga nº ${a.id_carga}` : 'carga') : i.tipo === 'fila' ? 'fila' : i.tipo, a.etapa, a.atividade]
@@ -84,7 +84,7 @@ function Item({ i }: { i: ItemSyncLog }) {
           {!a.existe && <span className="text-nota font-semibold text-alerta">apagada na CCAR depois</span>}
         </span>
         {a.id_lote && (
-          <Button variant="outline" size="sm" className="ml-auto" disabled={!conectado} onClick={zoom} title={conectado ? 'Aproximar o mapa do QGIS na folha' : 'Abra o QGIS para ver no mapa'}>
+          <Button variant="outline" size="sm" className="ml-auto" disabled={!conectado} onClick={zoom} title={conectado ? 'Aproximar o mapa do QGIS no lote' : 'Abra o QGIS para ver no mapa'}>
             <MapPin className="size-3.5" /> Ver no mapa
           </Button>
         )}
@@ -150,7 +150,7 @@ export default function Conflitos() {
   return (
     <Conteudo>
       <p className="max-w-[900px] text-lede text-texto-2">
-        Quando duas pessoas mudam a mesma carga sem uma ver a outra (alguém estava sem conexão com a CCAR), o Feixe fica com a ação mais recente e guarda a outra aqui. As recusas são mudanças que a CCAR não aceitou ao receber, como concluir numa etapa já encerrada. Nada é desfeito sozinho: se o que ficou não é o certo, corrija pela folha.
+        Quando duas pessoas mudam a mesma carga sem uma ver a outra (alguém estava sem conexão com a CCAR), o Feixe fica com a ação mais recente e guarda a outra aqui. As recusas são mudanças que a CCAR não aceitou ao receber, como concluir numa etapa já encerrada. Nada é desfeito sozinho: se o que ficou não é o certo, corrija pelo lote.
       </p>
 
       <div className="flex flex-wrap items-end gap-3">
@@ -207,7 +207,7 @@ export default function Conflitos() {
             mudar({ folha: texto.trim() || null })
           }}
         >
-          <Campo rotulo="Folha ou geocódigo">
+          <Campo rotulo="Lote ou geocódigo">
             <Input className="w-[180px] text-foreground" placeholder="ex.: 2534" value={texto} onChange={(e) => setTexto(e.target.value)} onBlur={() => texto.trim() !== folha && mudar({ folha: texto.trim() || null })} />
           </Campo>
         </form>
@@ -245,7 +245,7 @@ export default function Conflitos() {
         </>
       )}
       <p className="text-nota text-muted-foreground">
-        Conflito: a carga mudou na CCAR depois da última sincronização de quem enviou; ficou a ação mais recente pela hora em que foi feita (o relógio de cada computador é acertado pelo da CCAR). Recusa: a CCAR conferiu de novo as regras ao receber (carga que passou para outra pessoa, etapa encerrada, desfazer depois de 24 horas, folha da fila que outra pessoa pegou) e não aplicou; quem enviou recebeu o aviso e o computador dele voltou ao que está na CCAR.
+        Conflito: a carga mudou na CCAR depois da última sincronização de quem enviou; ficou a ação mais recente pela hora em que foi feita (o relógio de cada computador é acertado pelo da CCAR). Recusa: a CCAR conferiu de novo as regras ao receber (carga que passou para outra pessoa, etapa encerrada, desfazer depois de 24 horas, lote da fila que outra pessoa pegou) e não aplicou; quem enviou recebeu o aviso e o computador dele voltou ao que está na CCAR.
       </p>
     </Conteudo>
   )

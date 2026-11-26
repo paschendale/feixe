@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Bloco, Campo, Carregando, Conteudo, Nota, RotuloEstavel, Selo, TituloBloco, Vazio } from '@/components/ds'
 import type { DecisaoCQ, GrupoEsperando, ResultadoAvanco } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
-import { diaMes, num, plural } from '@/lib/formato'
+import { contarLotes, diaMes, num, plural, soFolhas } from '@/lib/formato'
 import { href } from '@/lib/rotas'
 import { enviar } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
@@ -21,14 +21,14 @@ function periodo(g: GrupoEsperando) {
 }
 
 // Recusas agrupadas pelo motivo, para não virar um aviso com uma linha por folha.
-function resumirRecusas(erros: { id_lote: number; erro: string }[], nome: (id: number) => string) {
-  const porMotivo = new Map<string, string[]>()
+function resumirRecusas(erros: { id_lote: number; erro: string }[], nome: (id: number) => string, tipo: (id: number) => string | undefined) {
+  const porMotivo = new Map<string, number[]>()
   for (const e of erros) {
-    const motivo = e.erro.replace(/^a folha /, '')
-    porMotivo.set(motivo, [...(porMotivo.get(motivo) ?? []), nome(e.id_lote)])
+    const motivo = e.erro.replace(/^(a folha|o lote) /, '')
+    porMotivo.set(motivo, [...(porMotivo.get(motivo) ?? []), e.id_lote])
   }
   return [...porMotivo]
-    .map(([motivo, folhas]) => `${plural(folhas.length, 'folha', 'folhas')} não ${folhas.length === 1 ? 'abriu' : 'abriram'}: ${motivo} (${folhas.slice(0, 4).join(', ')}${folhas.length > 4 ? ', …' : ''})`)
+    .map(([motivo, ids]) => `${contarLotes(ids.map((id) => ({ tipo: tipo(id) })))} não ${ids.length === 1 ? 'abriu' : 'abriram'}: ${motivo} (${ids.slice(0, 4).map(nome).join(', ')}${ids.length > 4 ? ', …' : ''})`)
     .join(' · ')
 }
 
@@ -55,7 +55,7 @@ function GrupoCQ({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar:
         }
         sub={
           <>
-            {plural(g.folhas.length, 'folha', 'folhas')} com todas as amostras avaliadas {periodo(g)}
+            {contarLotes(g.folhas)} com todas as amostras avaliadas {periodo(g)}
           </>
         }
         acao={<SeloResultado resultado={r} />}
@@ -101,7 +101,7 @@ function GrupoCQ({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar:
                   ))}
                 </div>
                 <a className="self-start text-nota font-medium text-primary hover:underline" href={href(`supervisao/folhas/${f.id_lote}`, { grupo: 'todas' })}>
-                  Abrir a folha (ocorrências e histórico)
+                  Abrir {f.tipo === 'folha' ? 'a folha' : 'o lote'} (ocorrências e histórico)
                 </a>
               </div>
             )}
@@ -115,9 +115,9 @@ function GrupoCQ({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar:
           </Button>
         ))}
         <Button variant="outline" onClick={() => setMarcadas(tudo ? new Set() : new Set(g.folhas.map((f) => f.id_lote)))}>
-          <RotuloEstavel ocupado={tudo} rotulo={`Marcar as ${num(g.folhas.length)}`} rotuloOcupado="Desmarcar" />
+          <RotuloEstavel ocupado={tudo} rotulo={`Marcar ${soFolhas(g.folhas) ? 'as' : 'os'} ${num(g.folhas.length)}`} rotuloOcupado="Desmarcar" />
         </Button>
-        <span className="text-rodape text-muted-foreground">{RESULTADO[r].rotulo === 'Reprovada' ? 'A observação e o resultado vão para o histórico de cada folha.' : 'A confirmação mostra o que acontece em cada folha.'}</span>
+        <span className="text-rodape text-muted-foreground">{RESULTADO[r].rotulo === 'Reprovada' ? 'A observação e o resultado vão para o histórico de cada lote.' : 'A confirmação mostra o que acontece em cada lote.'}</span>
       </div>
       <DecidirCQ
         lotes={decidir ? [...marcadas] : []}
@@ -149,6 +149,10 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
   // (o que encerra e o que fica de fora, com o motivo); a confirmação grava.
   const [previa, setPrevia] = useState<{ id_lote: number; folha_revisao: string; erro: string | null }[] | null>(null)
   const nEncerra = previa?.filter((i) => !i.erro).length ?? 0
+  const tipoDe = (id: number) => g.folhas.find((f) => f.id_lote === id)?.tipo
+  const marcadosLotes = [...marcadas].map((id) => ({ tipo: tipoDe(id) }))
+  const encerraLotes = (previa ?? []).filter((i) => !i.erro).map((i) => ({ tipo: tipoDe(i.id_lote) }))
+  const fem = soFolhas(encerraLotes)
   async function prever() {
     setOcupado(true)
     try {
@@ -165,8 +169,12 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
     try {
       const r = await enviar<{ encerradas: { id_lote: number }[]; erros: { id_lote: number; erro: string }[] }>('/api/lotes/encerrar', { lotes: [...marcadas], observacao: obs, previa: false })
       const nome = (id: number) => g.folhas.find((f) => f.id_lote === id)?.folha_revisao ?? `#${id}`
-      if (r.encerradas.length) avisar(`${plural(r.encerradas.length, 'folha encerrada', 'folhas encerradas')}: a CCAR passa a ${r.encerradas.length === 1 ? 'vê-la como concluída' : 'vê-las como concluídas'}.`)
-      if (r.erros.length) avisar(resumirRecusas(r.erros, nome), 'erro')
+      if (r.encerradas.length) {
+        const ls = r.encerradas.map((e) => ({ tipo: tipoDe(e.id_lote) }))
+        const um = ls.length === 1
+        avisar(`${contarLotes(ls)} ${soFolhas(ls) ? (um ? 'encerrada' : 'encerradas') : um ? 'encerrado' : 'encerrados'}: a CCAR passa a ${soFolhas(ls) ? (um ? 'vê-la como concluída' : 'vê-las como concluídas') : um ? 'vê-lo como concluído' : 'vê-los como concluídos'}.`)
+      }
+      if (r.erros.length) avisar(resumirRecusas(r.erros, nome, tipoDe), 'erro')
       setMarcadas(new Set())
       setObs('')
       setPrevia(null)
@@ -184,8 +192,8 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
       // Conclui a etapa das que terminaram as cargas e abre a seguinte; as cargas saem na hora (D-109).
       const r = await enviar<ResultadoAvanco>('/api/lotes/avancar', { lotes: [...marcadas], observacao: obs, previa: false })
       const nome = (id: number) => g.folhas.find((f) => f.id_lote === id)?.folha_revisao ?? `#${id}`
-      if (r.abertas.length) avisar(`${g.proxima} aberta em ${plural(r.abertas.length, 'folha', 'folhas')}. ${resumoPreparo(r.preparo)}`.trim())
-      if (r.erros.length) avisar(resumirRecusas(r.erros, nome), 'erro')
+      if (r.abertas.length) avisar(`${g.proxima} aberta em ${contarLotes(r.abertas.map((a) => ({ tipo: tipoDe(a.id_lote) })))}. ${resumoPreparo(r.preparo)}`.trim())
+      if (r.erros.length) avisar(resumirRecusas(r.erros, nome, tipoDe), 'erro')
       const prontas = comCargas(r.preparo)
       const paraDistribuir = r.abertas.filter((a) => prontas.has(a.id_lote_etapa)).map((a) => a.id_lote)
       if (paraDistribuir.length) distribuir(paraDistribuir)
@@ -210,7 +218,7 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
         }
         sub={
           <>
-            {plural(g.folhas.length, 'folha', 'folhas')} · {fim ? `última etapa (${g.etapa}) concluída` : 'paradas'} {periodo(g)}
+            {contarLotes(g.folhas)} · {fim ? `última etapa (${g.etapa}) concluída` : soFolhas(g.folhas) ? 'paradas' : 'parados'} {periodo(g)}
           </>
         }
         acao={<Selo tom={fim ? 'alerta' : 'info'}>{fim ? 'precisa de decisão' : `próxima: ${g.proxima}`}</Selo>}
@@ -218,7 +226,7 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
 
       {fim && (
         <Nota tom="alerta">
-          Não há etapa seguinte no fluxo {g.fluxo}, e a CCAR ainda vê estas folhas no status da última etapa. Marque as que terminaram e encerre: elas passam a concluídas para a CCAR. Se alguma ainda precisa de trabalho, abra outra etapa pela gaveta da folha (isso também reabre uma folha encerrada).
+          Não há etapa seguinte no fluxo {g.fluxo}, e a CCAR ainda vê estes lotes no status da última etapa. Marque os que terminaram e encerre: eles passam a concluídos para a CCAR. Se algum ainda precisa de trabalho, abra outra etapa pela gaveta do lote (isso também reabre um lote encerrado).
         </Nota>
       )}
 
@@ -253,14 +261,14 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
 
       {fim && (
         <div className="flex flex-wrap items-end gap-2.5 border-t border-linha pt-4">
-          <Campo rotulo="Observação (opcional, vai para o histórico de cada folha)" className="min-w-[280px] flex-1">
-            <Input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: revisão pontual feita, folha concluída" className="text-corpo font-normal text-foreground" />
+          <Campo rotulo="Observação (opcional, vai para o histórico de cada lote)" className="min-w-[280px] flex-1">
+            <Input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: revisão pontual feita, lote concluído" className="text-corpo font-normal text-foreground" />
           </Campo>
           <Button variant="destructive-tinted" disabled={ocupado || !marcadas.size} onClick={prever}>
-            {marcadas.size ? `Encerrar ${plural(marcadas.size, 'folha', 'folhas')}…` : 'Encerrar…'}
+            {marcadas.size ? `Encerrar ${contarLotes(marcadosLotes)}…` : 'Encerrar…'}
           </Button>
           <Button variant="outline" onClick={() => setMarcadas(tudo ? new Set() : new Set(g.folhas.map((f) => f.id_lote)))}>
-            <RotuloEstavel ocupado={tudo} rotulo={`Marcar as ${num(g.folhas.length)}`} rotuloOcupado="Desmarcar" />
+            <RotuloEstavel ocupado={tudo} rotulo={`Marcar ${soFolhas(g.folhas) ? 'as' : 'os'} ${num(g.folhas.length)}`} rotuloOcupado="Desmarcar" />
           </Button>
         </div>
       )}
@@ -268,14 +276,14 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
       <Dialog open={!!previa} onOpenChange={(v) => !v && setPrevia(null)}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Encerrar {plural(nEncerra, 'folha', 'folhas')}</DialogTitle>
+            <DialogTitle>Encerrar {contarLotes(encerraLotes)}</DialogTitle>
             <DialogDescription>
-              A CCAR passa a ver {nEncerra === 1 ? 'a folha como concluída' : 'as folhas como concluídas'}. O encerramento fica no histórico; abrir outra etapa pela gaveta reabre a folha.
+              A CCAR passa a ver {fem ? (nEncerra === 1 ? 'a folha como concluída' : 'as folhas como concluídas') : nEncerra === 1 ? 'o lote como concluído' : 'os lotes como concluídos'}. O encerramento fica no histórico; abrir outra etapa pela gaveta {fem ? 'reabre a folha' : 'reabre o lote'}.
             </DialogDescription>
           </DialogHeader>
           {previa && previa.some((i) => i.erro) && (
             <Nota tom="alerta">
-              Ficam de fora: {resumirRecusas(previa.filter((i) => i.erro).map((i) => ({ id_lote: i.id_lote, erro: i.erro ?? '' })), (id) => previa.find((i) => i.id_lote === id)?.folha_revisao ?? `#${id}`)}
+              Ficam de fora: {resumirRecusas(previa.filter((i) => i.erro).map((i) => ({ id_lote: i.id_lote, erro: i.erro ?? '' })), (id) => previa.find((i) => i.id_lote === id)?.folha_revisao ?? `#${id}`, tipoDe)}
             </Nota>
           )}
           <DialogFooter>
@@ -283,7 +291,7 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
               Cancelar
             </Button>
             <Button variant="destructive" disabled={ocupado || !nEncerra} onClick={encerrar}>
-              <RotuloEstavel ocupado={ocupado} rotulo={`Encerrar ${plural(nEncerra, 'folha', 'folhas')}`} rotuloOcupado="Encerrando…" />
+              <RotuloEstavel ocupado={ocupado} rotulo={`Encerrar ${contarLotes(encerraLotes)}`} rotuloOcupado="Encerrando…" />
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -291,14 +299,14 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
 
       {!fim && (
         <div className="flex flex-wrap items-end gap-2.5 border-t border-linha pt-4">
-          <Campo rotulo="Observação (opcional, vai para o histórico de cada folha)" className="min-w-[280px] flex-1">
+          <Campo rotulo="Observação (opcional, vai para o histórico de cada lote)" className="min-w-[280px] flex-1">
             <Input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, CQ por amostragem" className="text-corpo font-normal text-foreground" />
           </Campo>
           <Button disabled={ocupado || !marcadas.size} onClick={abrir}>
-            {marcadas.size ? `Abrir ${g.proxima} em ${plural(marcadas.size, 'folha', 'folhas')}` : `Abrir ${g.proxima}`}
+            {marcadas.size ? `Abrir ${g.proxima} em ${contarLotes(marcadosLotes)}` : `Abrir ${g.proxima}`}
           </Button>
           <Button variant="outline" onClick={() => setMarcadas(tudo ? new Set() : new Set(g.folhas.map((f) => f.id_lote)))}>
-            <RotuloEstavel ocupado={tudo} rotulo={`Marcar as ${num(g.folhas.length)}`} rotuloOcupado="Desmarcar" />
+            <RotuloEstavel ocupado={tudo} rotulo={`Marcar ${soFolhas(g.folhas) ? 'as' : 'os'} ${num(g.folhas.length)}`} rotuloOcupado="Desmarcar" />
           </Button>
         </div>
       )}
@@ -316,16 +324,17 @@ export default function Esperando({ grupos, recarregar }: { grupos: GrupoEsperan
         <Carregando />
       </Conteudo>
     )
-  const n = grupos.reduce((s, g) => s + g.folhas.length, 0)
+  const todos = grupos.flatMap((g) => g.folhas)
+  const n = todos.length
   return (
     <Conteudo largura={1240}>
       {n === 0 ? (
         <Bloco>
-          <Vazio>Nenhuma folha esperando você: todas as folhas da unidade estão com uma etapa aberta ou encerradas.</Vazio>
+          <Vazio>Nenhum lote esperando você: todos os lotes da unidade estão com uma etapa aberta ou encerrados.</Vazio>
         </Bloco>
       ) : (
         <p className="max-w-[820px] text-titulo-3">
-          <b>{plural(n, 'folha', 'folhas')}</b> {n === 1 ? 'terminou' : 'terminaram'} a etapa atual (as cargas estão concluídas) e só {n === 1 ? 'anda' : 'andam'} quando você abrir a próxima. Elas estão agrupadas pela decisão; marque as que vão juntas e decida de uma vez, com uma observação só. Abrir a próxima conclui a etapa, gera as cargas da seguinte e abre a distribuição. No CQ, a decisão é sobre o resultado: aprovar ou nova revisão.
+          <b>{contarLotes(todos)}</b> {n === 1 ? 'terminou' : 'terminaram'} a etapa atual (as cargas estão concluídas) e só {n === 1 ? 'anda' : 'andam'} quando você abrir a próxima. {soFolhas(todos) ? 'Elas estão agrupadas' : 'Eles estão agrupados'} pela decisão; marque {soFolhas(todos) ? 'as que vão juntas' : 'os que vão juntos'} e decida de uma vez, com uma observação só. Abrir a próxima conclui a etapa, gera as cargas da seguinte e abre a distribuição. No CQ, a decisão é sobre o resultado: aprovar ou nova revisão.
         </p>
       )}
       {grupos.map((g) =>

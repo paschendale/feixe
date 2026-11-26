@@ -17,7 +17,7 @@ from . import SQL_ABERTAS, carga_da_folha, converter, data, rotulo
 
 JANELA_DESFAZER_HORAS = 24
 FOLHA_NA_CORRECAO = (
-    "na correção de inspeção a carga é a folha inteira e conclui sozinha quando todas as ocorrências estiverem "
+    "na correção de inspeção a carga é o lote inteiro e conclui sozinha quando todas as ocorrências estiverem "
     "tratadas: marque Tratada em cada uma (barra do Feixe ou Execução › Correção)"
 )
 
@@ -118,7 +118,7 @@ def _minha_para_mudar(ex, id_carga: int) -> Dict:
     if linha["responsavel"] != ex.usuario:
         raise ErroDados("esta carga não está atribuída a você", 403)
     if linha["situacao"] not in ("pendente", "em_andamento"):
-        raise ErroDados("a etapa desta folha já foi encerrada pelo supervisor")
+        raise ErroDados("a etapa deste lote já foi encerrada pelo supervisor")
     if linha["da_folha"]:
         raise ErroDados(FOLHA_NA_CORRECAO)
     return converter(linha, datas=("concluido_em",), bools=("concluido",))

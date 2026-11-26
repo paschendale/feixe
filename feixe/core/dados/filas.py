@@ -59,14 +59,14 @@ def _conferir(ex: Executor, uf: str, responsavel: str, id_lote_etapa: int) -> Di
         (id_lote_etapa,),
     )
     if not p or p["uf"] != uf:
-        raise ErroDados("folha não encontrada na sua unidade", 404)
+        raise ErroDados("lote não encontrado na sua unidade", 404)
     if p["situacao"] not in ("pendente", "em_andamento"):
-        raise ErroDados(f"a etapa da {p['folha']} já foi encerrada: abra a próxima antes de pôr na fila")
+        raise ErroDados(f"a etapa de {p['folha']} já foi encerrada: abra a próxima antes de pôr na fila")
     if not p["cargas"]:
-        raise ErroDados(f"a {p['folha']} ainda não tem cargas: gere as cargas antes de pôr na fila")
+        raise ErroDados(f"o lote {p['folha']} ainda não tem cargas: gere as cargas antes de pôr na fila")
     if responsavel not in {r["conta"] for r in dc.equipe(ex, uf, p["cod_projeto"])}:
         raise ErroDados(
-            f"{responsavel} não pode receber cargas desta folha (conta ativa, lotação {uf} e perfil O, V ou S)"
+            f"{responsavel} não pode receber cargas deste lote (conta ativa, lotação {uf} e perfil O, V ou S)"
         )
     return p
 
@@ -82,7 +82,7 @@ def adicionar(ex: Executor, uf: str, responsavel: str, id_lote_etapa: int, puxar
         (id_lote_etapa,),
     )
     if ja:
-        raise ErroDados(f"a {p['folha']} já está na fila de {ja['nome']}")
+        raise ErroDados(f"o lote {p['folha']} já está na fila de {ja['nome']}")
     ordem = ex.um(
         "SELECT coalesce(max(ordem), 0) + 1 AS o FROM mapcartacomp.fila_folha "
         "WHERE uf = %s AND responsavel = %s AND atribuida_em IS NULL",
@@ -181,7 +181,7 @@ def sugestao(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
     primeiro, depois a fila mais curta), uma folha por pessoa neste lote antes de repetir alguém, e nunca quem já
     trabalhou numa passagem anterior da folha, se houver outra pessoa (a revisão é às cegas)."""
     folhas = ex.todos(
-        "SELECT l.id AS id_lote, l.cod_projeto, le.id AS id_lote_etapa, "
+        "SELECT l.id AS id_lote, l.tipo, l.cod_projeto, le.id AS id_lote_etapa, "
         "mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, t.nome AS tema, fe.nome AS etapa, "
         "fe.fase, (SELECT count(*) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id "
         " AND c.responsavel IS NULL AND NOT c.concluido) AS a_atribuir, "

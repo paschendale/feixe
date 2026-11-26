@@ -271,12 +271,12 @@ export function PlanosCQ({ idLoteEtapa, folha, distribuir }: { idLoteEtapa: numb
           {/* Com amostras sem avaliador, o próximo passo (Distribuir) vem logo abaixo, com o botão. */}
           {aberta && dados.resultado.faltam > 0 && semAvaliador === 0 && (
             <span className="text-nota text-texto-2">
-              <b className="text-foreground">Próximo passo: esperar os avaliadores.</b> A folha aparece em Esperando você, com o resultado, quando todas as amostras forem avaliadas.
+              <b className="text-foreground">Próximo passo: esperar os avaliadores.</b> {folha ? 'A folha aparece' : 'O lote aparece'} em Esperando você, com o resultado, quando todas as amostras forem avaliadas.
             </span>
           )}
           {aberta && dados.resultado.faltam === 0 && (
             <span className="text-nota text-texto-2">
-              <b className="text-foreground">Próximo passo: decidir</b> em “Andar com a folha” (abaixo): Aprovar ou Nova revisão.
+              <b className="text-foreground">Próximo passo: decidir</b> em {folha ? '“Andar com a folha”' : '“Andar com o lote”'} (abaixo): Aprovar ou Nova revisão.
             </span>
           )}
         </div>

@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import type { ResultadoDistribuicaoCQ, SugestaoDistribuicaoCQ } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
-import { lista, num, plural } from '@/lib/formato'
+import { contarLotes, lista, num, oLote, plural, soFolhas } from '@/lib/formato'
 import { enviar } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 
@@ -125,13 +125,13 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
     <Dialog open={lotes.length > 0} onOpenChange={(v) => !v && fechar(false)}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Distribuir as amostras de {nFolhas === 1 && dados?.folhas[0] ? dados.folhas[0].folha_revisao : plural(nFolhas, 'folha', 'folhas')}</DialogTitle>
+          <DialogTitle>Distribuir as amostras de {nFolhas === 1 && dados?.folhas[0] ? dados.folhas[0].folha_revisao : dados ? contarLotes(dados.folhas) : plural(nFolhas, 'lote', 'lotes')}</DialogTitle>
           <DialogDescription>
-            As amostras {nFolhas > 1 ? 'das folhas se juntam e ' : ''}se repartem entre os avaliadores que você escolher, na proporção de cada um, com uma fatia de cada elemento para cada pessoa. Quem recebe começa agora, sem fila. Quem executou a folha não avalia.
+            As amostras {nFolhas > 1 ? `${soFolhas(dados?.folhas ?? []) ? 'das folhas' : 'dos lotes'} se juntam e ` : ''}se repartem entre os avaliadores que você escolher, na proporção de cada um, com uma fatia de cada elemento para cada pessoa. Quem recebe começa agora, sem fila. Quem executou {nFolhas === 1 ? oLote(dados?.folhas[0]?.tipo) : soFolhas(dados?.folhas ?? []) ? 'a folha' : 'o lote'} não avalia.
           </DialogDescription>
         </DialogHeader>
         {!dados && <div className="grid h-[200px] place-items-center rounded-xl bg-preenchimento-2 text-muted-foreground">Montando a sugestão…</div>}
-        {dados && !total && <p className="text-muted-foreground">Nenhuma destas folhas tem amostras de CQ: os planos ainda não foram criados (gaveta da folha).</p>}
+        {dados && !total && <p className="text-muted-foreground">Nenhum destes lotes tem amostras de CQ: os planos ainda não foram criados (gaveta do lote).</p>}
         {dados && total > 0 && (
           <p className="text-nota text-texto-2">
             <b className="text-foreground">{plural(total, 'amostra', 'amostras')}</b> em {folhasTxt(dados.folhas.map((f) => f.folha_revisao))}
@@ -144,7 +144,7 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
             <span>
               {dados.origem === 'atual' ? (
                 <>
-                  Estas folhas já estão com <b>{nomes(sugeridos)}</b>. Manter esta equipe e ajustar a divisão?
+                  {soFolhas(dados.folhas) ? 'Estas folhas já estão' : 'Estes lotes já estão'} com <b>{nomes(sugeridos)}</b>. Manter esta equipe e ajustar a divisão?
                 </>
               ) : (
                 <>
@@ -191,7 +191,7 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
                               {p?.com ? ` · está com ${num(p.com)} destas` : ''}
                             </span>
                             {!!p?.nao_avalia.length && (
-                              <span className="block truncate text-rodape text-alerta" title={`Executou ${p.nao_avalia.join(', ')}: fica fora destas folhas, as amostras delas vão para os outros.`}>
+                              <span className="block truncate text-rodape text-alerta" title={`Executou ${p.nao_avalia.join(', ')}: fica fora destes lotes, as amostras deles vão para os outros.`}>
                                 fora de {folhasTxt(p.nao_avalia)} (executou)
                               </span>
                             )}
@@ -234,7 +234,7 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
                 {paraAdicionar.map((p) => (
                   <option key={p.conta} value={p.conta} disabled={!!p.motivo}>
                     {primeiro(p.nome)} · {p.motivo ?? (p.pendentes ? `${num(p.pendentes)} pendentes` : 'sem carga')}
-                    {!p.motivo && p.nao_avalia.length ? ` · fora de ${plural(p.nao_avalia.length, 'folha', 'folhas')} (executou)` : ''}
+                    {!p.motivo && p.nao_avalia.length ? ` · fora de ${plural(p.nao_avalia.length, 'lote', 'lotes')} (executou)` : ''}
                   </option>
                 ))}
               </Select>
@@ -251,7 +251,7 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
 
         {!pergunta && previa && previa.sem_avaliador.length > 0 && (
           <Nota tom="alerta">
-            Ficam sem avaliador: {previa.sem_avaliador.map((x) => `${x.folha_revisao} (${plural(x.amostras, 'amostra', 'amostras')})`).join(', ')}. Todos os escolhidos executaram {previa.sem_avaliador.length === 1 ? 'esta folha' : 'estas folhas'}: adicione alguém que possa avaliar.
+            Ficam sem avaliador: {previa.sem_avaliador.map((x) => `${x.folha_revisao} (${plural(x.amostras, 'amostra', 'amostras')})`).join(', ')}. Todos os escolhidos executaram {previa.sem_avaliador.length === 1 ? 'este lote' : 'estes lotes'}: adicione alguém que possa avaliar.
           </Nota>
         )}
         <DialogFooter className="items-center gap-3 sm:justify-between">

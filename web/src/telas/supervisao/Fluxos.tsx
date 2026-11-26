@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Bloco, Carregando, Conteudo, Nota, Selo } from '@/components/ds'
 import type { Catalogo, EtapaFluxo, FluxoCompleto, Lote } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
-import { plural } from '@/lib/formato'
+import { contarLotes, plural } from '@/lib/formato'
 import { href, navegar, useRota } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'
 import { enviar, useApi } from '@/lib/useApi'
@@ -30,24 +30,16 @@ function aoAbrir(e: EtapaFluxo) {
   if (e.fase === 'cq') {
     if (!e.atividades.length) return { texto: 'sem atividade de CQ: escolha no editor as medidas a inspecionar', alerta: true }
     if (e.nivel_inspecao && e.lqa != null) return { texto: `sorteia as amostras de cada atividade e gera as cargas (nível ${e.nivel_inspecao}, LQA ${pct(e.lqa)})`, alerta: false }
-    return { texto: 'sem nível e LQA padrão: os planos de CQ se criam na gaveta de cada folha', alerta: true }
+    return { texto: 'sem nível e LQA padrão: os planos de CQ se criam na gaveta de cada lote', alerta: true }
   }
   if (geram.some((a) => a.geracao === 'grade')) return null
   // Correção de inspeção (D5): a carga é a folha inteira, e quem a recebe trata as ocorrências de todas as revisões.
   if (e.fase === 'correcao_inspecao')
     return geram.length
-      ? { texto: 'a folha inteira vai a quem você distribuir, que trata as ocorrências de todas as revisões', alerta: false }
-      : { texto: 'sem atividade de correção: ninguém recebe a folha para tratar as ocorrências; escolha a atividade no editor', alerta: true }
+      ? { texto: 'o lote inteiro vai a quem você distribuir, que trata as ocorrências de todas as revisões', alerta: false }
+      : { texto: 'sem atividade de correção: ninguém recebe o lote para tratar as ocorrências; escolha a atividade no editor', alerta: true }
   if (geram.length) return { texto: 'cargas não saem da grade: inicie pela gaveta', alerta: true }
   return { texto: 'sem cargas: começa assim que abre, sem nada a distribuir', alerta: true }
-}
-
-// "62 folhas e 3 lotes": a UI diz folha quando é folha e lote quando é lote livre (D-156).
-function quantas(ls: { tipo: string }[], depois = '') {
-  const folhas = ls.filter((l) => l.tipo !== 'livre').length
-  const livres = ls.length - folhas
-  const partes = [folhas && plural(folhas, 'folha', 'folhas'), livres && plural(livres, 'lote', 'lotes')].filter(Boolean)
-  return `${partes.join(' e ') || '0 folhas'}${depois}`
 }
 
 // Supervisão › Fluxos: cada fluxo é a sequência de etapas de um tema na unidade; as folhas andam por ele quando o
@@ -89,7 +81,7 @@ export default function Fluxos() {
   return (
     <Conteudo className="flex-row flex-wrap items-start gap-6">
       <div className="flex min-w-[260px] flex-[1_1_280px] flex-col gap-3">
-        <p className="text-nota text-muted-foreground">Cada fluxo é a sequência de etapas de um tema na sua unidade. As folhas andam por ele quando você decide.</p>
+        <p className="text-nota text-muted-foreground">Cada fluxo é a sequência de etapas de um tema na sua unidade. Os lotes andam por ele quando você decide.</p>
         <nav aria-label="Fluxos" className="flex flex-col overflow-hidden rounded-xl bg-card shadow-cartao">
           {dados.itens.length === 0 && <span className="p-4 text-muted-foreground">Nenhum fluxo na unidade.</span>}
           {dados.itens.map((x) => (
@@ -101,7 +93,7 @@ export default function Fluxos() {
             >
               <b className={cn(x.id === f?.id && 'text-primary')}>{x.nome}</b>
               <span className="text-nota text-muted-foreground">
-                {plural(x.etapas.length, 'etapa', 'etapas')} · {lotes ? quantas(lotes.itens.filter((l) => l.id_fluxo === x.id)) : plural(x.lotes, 'folha', 'folhas')}
+                {plural(x.etapas.length, 'etapa', 'etapas')} · {lotes ? contarLotes(lotes.itens.filter((l) => l.id_fluxo === x.id)) : plural(x.lotes, 'lote', 'lotes')}
                 {!x.ativo ? ' · inativo' : ''}
               </span>
             </a>
@@ -139,7 +131,7 @@ export default function Fluxos() {
           )}
           {noFim > 0 && (
             <Nota tom="alerta">
-              {quantas(fimDoFluxo)} {noFim === 1 ? 'terminou' : 'terminaram'} a última etapa e não {noFim === 1 ? 'tem' : 'têm'} próxima. Para a CCAR, {noFim === 1 ? 'segue' : 'seguem'} no status dessa etapa até você encerrar em Esperando você (grupo "fim do fluxo").
+              {contarLotes(fimDoFluxo)} {noFim === 1 ? 'terminou' : 'terminaram'} a última etapa e não {noFim === 1 ? 'tem' : 'têm'} próxima. Para a CCAR, {noFim === 1 ? 'segue' : 'seguem'} no status dessa etapa até você encerrar em Esperando você (grupo "fim do fluxo").
             </Nota>
           )}
           <ol className="flex flex-col">
@@ -167,7 +159,7 @@ export default function Fluxos() {
                     {[e.obrigatoria ? 'obrigatória' : 'opcional', e.repetivel && 'repetível', e.conta_revisao && 'conta revisão', e.fracao_critica != null && `fração crítica ${pct(e.fracao_critica)}`].filter(Boolean).join(' · ')}
                   </span>
                   <span className="text-right text-nota">
-                    {agora > 0 && <b className="text-primary">{quantas(abertas, ' agora')}</b>}
+                    {agora > 0 && <b className="text-primary">{contarLotes(abertas, ' agora')}</b>}
                     {agora > 0 && paradas > 0 && <br />}
                     {paradas > 0 && (
                       <span className="text-alerta">

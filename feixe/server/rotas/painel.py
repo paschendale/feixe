@@ -118,7 +118,7 @@ def registrar(r, ctx) -> None:
     def _cq_decisao(req):
         ids = campo(req, "lotes", lambda v: [int(x) for x in v])
         if not ids:
-            raise ErroApi(400, "escolha pelo menos uma folha")
+            raise ErroApi(400, "escolha pelo menos um lote")
         return 200, decidir_cq(
             ctx, uf_de(ctx.eu()), ids, campo(req, "decisao", str), campo(req, "observacao", str, padrao=""),
             campo(req, "previa", bool, padrao=True), campo(req, "forcar", bool, padrao=False),
@@ -130,7 +130,7 @@ def registrar(r, ctx) -> None:
         # Fim do fluxo (D-153): a folha passa a CONCLUIDA para a CCAR, por decisão do supervisor, em lote, com prévia.
         ids = campo(req, "lotes", lambda v: [int(x) for x in v])
         if not ids:
-            raise ErroApi(400, "escolha pelo menos uma folha")
+            raise ErroApi(400, "escolha pelo menos um lote")
         previa = campo(req, "previa", bool, padrao=True)
         with ctx.tx() as ex:
             r = df.encerrar(ex, uf_de(ctx.eu()), ids, campo(req, "observacao", str, padrao=""), previa)
@@ -142,6 +142,6 @@ def registrar(r, ctx) -> None:
     def _avancar(req):
         ids = campo(req, "lotes", lambda v: [int(x) for x in v])
         if not ids:
-            raise ErroApi(400, "escolha pelo menos uma folha")
+            raise ErroApi(400, "escolha pelo menos um lote")
         previa = campo(req, "previa", bool, padrao=True)
         return 200, avancar(ctx, uf_de(ctx.eu()), ids, campo(req, "observacao", str, padrao=""), previa)

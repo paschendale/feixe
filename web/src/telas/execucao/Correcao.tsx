@@ -37,8 +37,8 @@ function useTratar() {
         const p = r.progresso
         const andamento = p ? ` · ${p.folha_revisao} ${num(p.tratadas)}/${num(p.total)}` : ''
         if (!tratado) return `Tratamento desfeito: ${o.elemento ?? 'ocorrência'}${andamento}.`
-        const fila = r.fila ? ` A próxima folha da sua fila, a ${r.fila.folha_revisao}, já está com você.` : ''
-        if (p && p.pendentes === 0) return `Tratada${andamento}. Todas as ocorrências da folha estão tratadas: o supervisor decide o próximo passo.${fila}`
+        const fila = r.fila ? ` O próximo lote da sua fila, ${r.fila.folha_revisao}, já está com você.` : ''
+        if (p && p.pendentes === 0) return `Tratada${andamento}. Todas as ocorrências do lote estão tratadas: o supervisor decide o próximo passo.${fila}`
         return `Tratada: ${o.elemento ?? 'ocorrência'}${andamento}.${fila}`
       }),
   }
@@ -53,7 +53,7 @@ function ContinuarCorrecao({ idLote }: { idLote: number }) {
     setOcupado(true)
     try {
       const r = await enviar<{ ocorrencia: Ocorrencia | null }>('/api/inspecoes/proxima', { id_lote: idLote })
-      avisar(r.ocorrencia ? `Ocorrência atual no QGIS: ${r.ocorrencia.elemento ?? 'ocorrência'} (${r.ocorrencia.folha_revisao}).` : 'Nenhuma ocorrência por tratar nesta folha.')
+      avisar(r.ocorrencia ? `Ocorrência atual no QGIS: ${r.ocorrencia.elemento ?? 'ocorrência'} (${r.ocorrencia.folha_revisao}).` : 'Nenhuma ocorrência por tratar neste lote.')
     } catch (e) {
       avisar((e as Error).message, 'erro')
     } finally {
@@ -73,11 +73,11 @@ function ProximoPasso({ f }: { f: FolhaCorrecao }) {
       <>
         Corrija no QGIS cada ponto apontado pelo avaliador e marque <b>Tratada</b> (barra do Feixe, ou aqui).{' '}
         {f.cargas_pendentes > 0 ? <>Conclua também as {plural(f.cargas_pendentes, 'carga', 'cargas')} da etapa em Minhas cargas. </> : null}
-        Com a última tratada, a folha vai para o supervisor.
+        Com a última tratada, o lote vai para o supervisor.
       </>
     )
-  if (f.cargas_pendentes > 0) return <>Ocorrências tratadas. Faltam {plural(f.cargas_pendentes, 'carga', 'cargas')} da etapa em Minhas cargas; depois a folha vai para o supervisor.</>
-  return <>Todas as ocorrências da folha estão tratadas: a sua parte terminou. A folha está em Esperando você do supervisor, que decide o próximo passo. Até ele decidir, dá para desfazer uma marcação.</>
+  if (f.cargas_pendentes > 0) return <>Ocorrências tratadas. Faltam {plural(f.cargas_pendentes, 'carga', 'cargas')} da etapa em Minhas cargas; depois o lote vai para o supervisor.</>
+  return <>Todas as ocorrências do lote estão tratadas: a sua parte terminou. O lote está em Esperando você do supervisor, que decide o próximo passo. Até ele decidir, dá para desfazer uma marcação.</>
 }
 
 function Tabela({ f, acoes }: { f: FolhaCorrecao; acoes: ReturnType<typeof useTratar> }) {
@@ -136,7 +136,7 @@ export function Correcao({ folhas }: { folhas: FolhaCorrecao[] }) {
   if (!folhas.length)
     return (
       <Bloco>
-        <Vazio>Nenhuma folha com você na correção de inspeção. O supervisor distribui as folhas aprovadas no CQ.</Vazio>
+        <Vazio>Nenhum lote com você na correção de inspeção. O supervisor distribui os lotes aprovados no CQ.</Vazio>
       </Bloco>
     )
   const pedida = Number(rota.query.get('folha')) || null
@@ -145,7 +145,7 @@ export function Correcao({ folhas }: { folhas: FolhaCorrecao[] }) {
     <>
       {folhas.length > 1 && (
         <Fichas
-          rotulo="Folha"
+          rotulo="Lote"
           ativa={String(f.id_lote)}
           escolher={(k) => navegar(`execucao/correcao?folha=${k}`)}
           fichas={folhas.map((x) => ({ id: String(x.id_lote), rotulo: x.folha_revisao, contagem: x.pendentes ? `${num(x.pendentes)} por tratar` : 'tudo tratado' }))}

@@ -524,8 +524,8 @@ class FeixePlugin:
         if f:
             self.iface.messageBar().pushMessage(
                 "Feixe",
-                f"Folha {p['folha_revisao']} concluída. A próxima da sua fila é a {f['folha_revisao']} "
-                f"({f['atribuidas']} cargas), já atribuída a você.",
+                f"Lote {p['folha_revisao']} concluído. O próximo da sua fila é o {f['folha_revisao']} "
+                f"({f['atribuidas']} cargas), já atribuído a você.",
                 Qgis.Success,
                 8,
             )
@@ -564,7 +564,7 @@ class FeixePlugin:
             )
         elif r is not None:
             self.iface.messageBar().pushMessage(
-                "Feixe", f"Carga pulada: volta depois das outras da {carga['folha_revisao']}.", Qgis.Info, 4
+                "Feixe", f"Carga pulada: volta depois das outras de {carga['folha_revisao']}.", Qgis.Info, 4
             )
 
     # --- ações das camadas (formulário, identificar, clique direito) ----------------------------------------------
@@ -577,7 +577,7 @@ class FeixePlugin:
             return
         r = self._proxima(camadas.carga_atual(), int(id_lote))
         if r is not None and r["carga"] is None:
-            self.iface.messageBar().pushMessage("Feixe", "Você não tem carga pendente nesta folha.", Qgis.Info, 5)
+            self.iface.messageBar().pushMessage("Feixe", "Você não tem carga pendente neste lote.", Qgis.Info, 5)
 
     def abrir_folha(self, id_lote):
         """Abre o painel na gaveta da folha (ações de fluxo, histórico, atribuir)."""
@@ -647,7 +647,7 @@ class FeixePlugin:
         if est.get("correcao") and antes is not None and not antes.get("correcao"):
             self.iface.messageBar().pushMessage(
                 "Feixe",
-                f"Chegou uma folha para a correção de inspeção ({est.get('correcao_pendentes') or 0} ocorrências por "
+                f"Chegou um lote para a correção de inspeção ({est.get('correcao_pendentes') or 0} ocorrências por "
                 "tratar). Use Próxima ocorrência na barra do Feixe.",
                 Qgis.Info,
                 10,
@@ -878,7 +878,7 @@ class FeixePlugin:
             self.trocar_modo("execucao")
         if not (self._ler(lgrupos.estado_cq, {}) or {}).get("correcao"):
             self.iface.messageBar().pushMessage(
-                "Feixe", "Você não está com nenhuma folha na correção de inspeção.", Qgis.Info, 5
+                "Feixe", "Você não está com nenhum lote na correção de inspeção.", Qgis.Info, 5
             )
             return False
         return True

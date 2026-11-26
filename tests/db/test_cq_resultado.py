@@ -168,7 +168,7 @@ def test_aprovar_reprovada_so_com_confirmacao_e_abre_a_proxima(amb):
     le = ex.um("SELECT situacao, resultado, concluida_em FROM mapcartacomp.lote_etapa WHERE id = %s", (le_cq,))
     assert (le["situacao"], le["resultado"]) == ("concluida", "aprovada") and le["concluida_em"]
     (h,) = [h for h in _hist(ex, le_cq) if h["acao"] == "cq_aprovada"]
-    assert h["observacao"].startswith("Aprovada no CQ pelo supervisor, apesar de reprovada: ")
+    assert h["observacao"].startswith("Aprovado no CQ pelo supervisor, apesar de reprovado: ")
     assert "Comissão 3 de 20 (aceita até 2)" in h["observacao"]
     assert h["observacao"].endswith("comissão em área urbana, aceito")
     nova = ex.um(
@@ -191,7 +191,7 @@ def test_aprovada_abre_a_proxima(amb):
     d = df.decidir_cq(ex, "DF", cen.lote, "aprovar", "dentro do aceito")
     assert d["proxima"] == "Etapa correcao_inspecao" and d["id_lote_etapa_nova"]
     (h,) = [h for h in _hist(ex, le_cq) if h["acao"] == "cq_aprovada"]
-    assert h["observacao"].startswith("Aprovada no CQ: ") and "Comissão 1 de 20 (aceita até 2)" in h["observacao"]
+    assert h["observacao"].startswith("Aprovado no CQ: ") and "Comissão 1 de 20 (aceita até 2)" in h["observacao"]
     assert df.estado(ex, cen.lote)["etapa"] == "Etapa correcao_inspecao"
 
 
@@ -205,7 +205,7 @@ def test_nova_revisao_abre_a_revisao_seguinte_com_cargas(amb, expor):
     le = ex.um("SELECT resultado FROM mapcartacomp.lote_etapa WHERE id = %s", (le_cq,))
     assert le["resultado"] == "reprovada"
     (h,) = [h for h in _hist(ex, le_cq) if h["acao"] == "cq_reprovada"]
-    assert h["observacao"].startswith("Reprovada no CQ: ") and "Comissão 3 de 20" in h["observacao"]
+    assert h["observacao"].startswith("Reprovado no CQ: ") and "Comissão 3 de 20" in h["observacao"]
     nova = ex.um(
         "SELECT le.revisao, le.instancia, le.situacao, le.expor_ocorrencias, fe.fase, "
         "mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS rotulo FROM mapcartacomp.lote_etapa le "
@@ -283,4 +283,4 @@ def test_plano_sem_ac_mostra_sem_quebrar(amb):
     assert "sem Ac" in p["aviso"]
     df.decidir_cq(ex, "DF", cen.lote, "aprovar", "conferido à mão")
     (h,) = [h for h in _hist(ex, le_cq) if h["acao"] == "cq_aprovada"]
-    assert h["observacao"].startswith("Aprovada no CQ (plano sem Ac): ")
+    assert h["observacao"].startswith("Aprovado no CQ (plano sem Ac): ")

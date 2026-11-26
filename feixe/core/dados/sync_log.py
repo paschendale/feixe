@@ -167,7 +167,7 @@ def _acao_campos(tabela: str, operacao: str, campos: Dict) -> Tuple[str, str]:
             return "pegou a carga pela fila", "a atribuição pela fila"
         return "alterou a carga", "a alteração"
     if tabela == "fila_folha":
-        return "pegou a folha da fila", "a atribuição pela fila"
+        return "pegou o lote da fila", "a atribuição pela fila"
     if tabela == "lote_etapa":
         return "iniciou a etapa", "o início da etapa"
     if tabela == "lote_etapa_hist":

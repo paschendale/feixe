@@ -147,7 +147,7 @@ TABELAS: Dict[str, Tabela] = {
             "fila_folha",
             [("id_lote_etapa", "INTEGER"), ("uf", "TEXT"), ("responsavel", "TEXT"), ("ordem", "INTEGER"),
              ("atribuida_em", "DATETIME"), ("atribuidas", "INTEGER")],
-            descricao="Fila de folhas por pessoa",
+            descricao="Fila de lotes por pessoa",
         ),
         _sync(
             "cq_plano",
@@ -295,8 +295,8 @@ VIEWS = [
 
 # (nome, data_type do gpkg_contents, tipo da geometria ou None, descrição)
 VIEWS_GPKG = [
-    (VW_CARGA_INFO, "attributes", None, "Minhas cargas: folha, etapa, atividade e progresso (camada do Feixe)"),
-    (VW_MINHAS_FOLHAS, "features", "MULTIPOLYGON", "Folhas em que tenho cargas abertas (camada do Feixe)"),
+    (VW_CARGA_INFO, "attributes", None, "Minhas cargas: lote, etapa, atividade e progresso (camada do Feixe)"),
+    (VW_MINHAS_FOLHAS, "features", "MULTIPOLYGON", "Lotes em que tenho cargas abertas (camada do Feixe)"),
 ]
 
 # --- views das camadas do CQ (D3c, esquema 6) -------------------------------------------------------------------------
@@ -337,8 +337,8 @@ VIEWS_CQ = [
 ]
 
 VIEWS_GPKG_CQ = [
-    (VW_AMOSTRA_INFO, "attributes", None, "Amostras de CQ: status, plano, folha e progresso (camada do Feixe)"),
-    (VW_OCORRENCIA_INFO, "attributes", None, "Ocorrências: folha, amostra e autor da carga (camada do Feixe)"),
+    (VW_AMOSTRA_INFO, "attributes", None, "Amostras de CQ: status, plano, lote e progresso (camada do Feixe)"),
+    (VW_OCORRENCIA_INFO, "attributes", None, "Ocorrências: lote, amostra e autor da carga (camada do Feixe)"),
 ]
 
 

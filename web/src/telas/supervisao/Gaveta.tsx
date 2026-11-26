@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Barra, Bloco, COR, Campo, Nota, Rotulo, Tabela, TituloBloco } from '@/components/ds'
 import type { DecisaoCQ, EstadoLote, FluxoCompleto, Historico, LoteCompleto, PassagemLote, PlanosCQ as Planos, Preparo } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
-import { diaMes, diasAtras, num, pc, plural } from '@/lib/formato'
+import { diaMes, diasAtras, num, oLote, pc, plural } from '@/lib/formato'
 import { useSessao } from '@/lib/sessao'
 import { STATUS } from '@/lib/status'
 import { enviar, useApi } from '@/lib/useApi'
@@ -142,17 +142,19 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
     if (ultima?.situacao === 'concluida') botoes.push({ titulo: 'Reabrir a última', passos: [{ caminho: `/api/lote_etapas/${ultima.id}/reabrir` }] })
   }
 
+  const oL = oLote(lote.tipo)
+  const doL = lote.tipo === 'folha' ? 'da folha' : 'do lote'
   let sugestao: React.ReactNode = null
   if (cqAberto && resultado)
     sugestao =
       resultado.faltam > 0 ? (
         <>
           {resultado.faltam === 1 ? 'falta avaliar 1 amostra' : `faltam avaliar ${num(resultado.faltam)} amostras`}
-          {resultado.sem_avaliador > 0 ? ` (${num(resultado.sem_avaliador)} sem avaliador: distribua)` : ' (com os avaliadores)'}; com tudo avaliado, a folha vai para Esperando você com o resultado, e você decide: aprovar{seguinte ? <> e abrir <b>{seguinte.nome}</b></> : ''}, ou nova revisão.
+          {resultado.sem_avaliador > 0 ? ` (${num(resultado.sem_avaliador)} sem avaliador: distribua)` : ' (com os avaliadores)'}; com tudo avaliado, {oL} vai para Esperando você com o resultado, e você decide: aprovar{seguinte ? <> e abrir <b>{seguinte.nome}</b></> : ''}, ou nova revisão.
         </>
       ) : resultado.resultado === 'reprovado' ? (
         <>
-          <b>reprovada no CQ</b> ({resultado.frase}): abrir uma <b>nova revisão</b> por outra pessoa. Aprovar mesmo assim também é possível, com observação.
+          <b>{lote.tipo === 'folha' ? 'reprovada' : 'reprovado'} no CQ</b> ({resultado.frase}): abrir uma <b>nova revisão</b> por outra pessoa. Aprovar mesmo assim também é possível, com observação.
         </>
       ) : resultado.resultado === 'aprovado' ? (
         <>
@@ -166,20 +168,20 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
   else if (correcao && aberta?.situacao === 'pendente' && aberta.cargas_total)
     sugestao = (
       <>
-        distribuir a folha: quem receber trata as <b>{plural(aTratar, 'ocorrência', 'ocorrências')}</b> da folha (de todas as revisões), marcando cada uma como tratada. A etapa começa quando alguém receber.
+        distribuir {oL}: quem receber trata as <b>{plural(aTratar, 'ocorrência', 'ocorrências')}</b> {doL} (de todas as revisões), marcando cada uma como tratada. A etapa começa quando alguém receber.
       </>
     )
   else if (correcao && aberta && !aberta.cargas_total && aTratar > 0)
     sugestao = (
       <>
-        a etapa não tem atividade de correção de inspeção no fluxo, então ninguém recebe a folha para tratar as {plural(aTratar, 'ocorrência', 'ocorrências')}. Acrescente a atividade à etapa em Fluxos e use <b>Gerar as cargas</b>; ou conclua a etapa se a correção foi feita por fora.
+        a etapa não tem atividade de correção de inspeção no fluxo, então ninguém recebe {oL} para tratar as {plural(aTratar, 'ocorrência', 'ocorrências')}. Acrescente a atividade à etapa em Fluxos e use <b>Gerar as cargas</b>; ou conclua a etapa se a correção foi feita por fora.
       </>
     )
   else if (correcao && aberta?.situacao === 'em_andamento' && seguinte)
     sugestao =
       aTratar > 0 ? (
         <>
-          quando {aTratar === 1 ? 'a' : 'as'} <b>{plural(aTratar, 'ocorrência restante', 'ocorrências restantes')}</b> {aTratar === 1 ? 'for tratada' : 'forem tratadas'}{faltam > 0 && aberta.cargas_total > 1 ? ' e as cargas concluídas' : ''}, a folha vai para Esperando você: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
+          quando {aTratar === 1 ? 'a' : 'as'} <b>{plural(aTratar, 'ocorrência restante', 'ocorrências restantes')}</b> {aTratar === 1 ? 'for tratada' : 'forem tratadas'}{faltam > 0 && aberta.cargas_total > 1 ? ' e as cargas concluídas' : ''}, {oL} vai para Esperando você: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
         </>
       ) : faltam > 0 ? (
         <>
@@ -187,7 +189,7 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
         </>
       ) : (
         <>
-          todas as ocorrências da folha estão tratadas: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
+          todas as ocorrências {doL} estão tratadas: concluir {aberta.etapa} e abrir <b>{seguinte.nome}</b>.
         </>
       )
   else if (aberta?.situacao === 'em_andamento' && seguinte && aberta.fase !== 'envio_gcq')
@@ -212,16 +214,16 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
         </>
       )
   else if (aberta?.situacao === 'pendente' && aberta.cargas_total && aberta.fase === 'cq') sugestao = <>distribuir as amostras: o CQ começa quando um avaliador as receber.</>
-  else if (aberta?.situacao === 'pendente' && aberta.cargas_total) sugestao = <>distribuir a folha: a etapa começa quando alguém receber as cargas.</>
+  else if (aberta?.situacao === 'pendente' && aberta.cargas_total) sugestao = <>distribuir {oL}: a etapa começa quando alguém receber as cargas.</>
   else if (aberta?.situacao === 'pendente' && aberta.fase === 'cq') sugestao = <>criar os planos de CQ (acima); as amostras sorteadas viram as cargas a distribuir.</>
   else if (aberta?.situacao === 'pendente') sugestao = <>a etapa não tem cargas; inicie quando a equipe começar.</>
   else if (!aberta && estado?.sugestao) sugestao = <>abrir <b>{estado.sugestao.nome}</b>, a etapa seguinte do fluxo.</>
-  else if (!aberta) sugestao = <>a folha terminou a última etapa do fluxo; não há etapa seguinte.</>
+  else if (!aberta) sugestao = <>{oL} terminou a última etapa do fluxo; não há etapa seguinte.</>
 
   return (
     <section aria-labelledby="andar" className="flex flex-col gap-3">
       <Rotulo>
-        <span id="andar">Andar com a folha</span>
+        <span id="andar">Andar com {oL}</span>
       </Rotulo>
       {sugestao && (
         <Nota tom="info" semIcone>
@@ -356,7 +358,7 @@ export function Gaveta({ id, fluxos, fechar, distribuir, excluir }: { id: number
                 Ver no QGIS
               </Button>
               {supervisor && aberta && lote.pessoas.some((p) => !p.conta && p.total > p.concluidas) && (
-                <Button onClick={() => distribuir([lote.id])}>{atual?.fase === 'cq' ? 'Distribuir as amostras' : atual?.fase === 'correcao_inspecao' ? 'Distribuir a folha' : 'Distribuir'}</Button>
+                <Button onClick={() => distribuir([lote.id])}>{atual?.fase === 'cq' ? 'Distribuir as amostras' : atual?.fase === 'correcao_inspecao' ? `Distribuir ${oLote(lote.tipo)}` : 'Distribuir'}</Button>
               )}
               {supervisor && aberta && atual?.fase !== 'cq' && atual?.fase !== 'correcao_inspecao' && (atual?.cargas_total ?? 0) > atual!.cargas_concluidas && (
                 <Button
@@ -379,7 +381,7 @@ export function Gaveta({ id, fluxos, fechar, distribuir, excluir }: { id: number
                 </Button>
               )}
               {supervisor && excluir && (
-                <Button variant="destructive-tinted" title="Para a folha criada por engano, antes de qualquer trabalho: a prévia diz se dá" onClick={() => excluir([lote.id])}>
+                <Button variant="destructive-tinted" title={`Para ${lote.tipo === 'folha' ? 'a folha criada' : 'o lote criado'} por engano, antes de qualquer trabalho: a prévia diz se dá`} onClick={() => excluir([lote.id])}>
                   Excluir…
                 </Button>
               )}
@@ -427,10 +429,10 @@ export function Gaveta({ id, fluxos, fechar, distribuir, excluir }: { id: number
                     {lote.pessoas.find((p) => p.conta) ? (
                       <>
                         Com <b>{lote.pessoas.find((p) => p.conta)!.nome}</b>
-                        {lote.pessoas.find((p) => p.conta)!.conta === eu?.conta ? ' (você)' : ''}, que trata as ocorrências da folha.
+                        {lote.pessoas.find((p) => p.conta)!.conta === eu?.conta ? ' (você)' : ''}, que trata as ocorrências {lote.tipo === 'folha' ? 'da folha' : 'do lote'}.
                       </>
                     ) : (
-                      'A folha ainda não está com ninguém: distribua.'
+                      `${lote.tipo === 'folha' ? 'A folha' : 'O lote'} ainda não está com ninguém: distribua.`
                     )}
                   </span>
                 ) : atual.cargas_total > 0 ? (
@@ -472,7 +474,7 @@ export function Gaveta({ id, fluxos, fechar, distribuir, excluir }: { id: number
                         ? 'Sem amostras ainda nesta etapa.'
                         : atual.fase === 'correcao_inspecao'
                           ? lote.ocorrencias.total > lote.ocorrencias.tratadas
-                            ? 'Ninguém está com a folha: a etapa não tem atividade de correção no fluxo.'
+                            ? `Ninguém está com ${oLote(lote.tipo)}: a etapa não tem atividade de correção no fluxo.`
                             : 'Nenhuma ocorrência a tratar.'
                           : 'Sem cargas nesta etapa.'}
                     </span>

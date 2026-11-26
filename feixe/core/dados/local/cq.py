@@ -120,7 +120,7 @@ def _amostra_para_mudar(ex, id_amostra: int) -> Dict:
     if linha["responsavel"] != ex.usuario:
         raise ErroDados("esta amostra não é de uma carga sua", 403)
     if linha["situacao"] not in ABERTAS:
-        raise ErroDados("a etapa de CQ desta folha já foi encerrada pelo supervisor")
+        raise ErroDados("a etapa de CQ deste lote já foi encerrada pelo supervisor")
     return converter(linha, bools=("concluido",))
 
 
@@ -290,7 +290,7 @@ def registrar(ex, x: Any, y: Any, id_carga: int, anotacao: Any = None) -> Dict:
     if carga["responsavel"] != ex.usuario:
         raise ErroDados("esta carga de CQ não está atribuída a você", 403)
     if carga["situacao"] not in ABERTAS:
-        raise ErroDados("a etapa de CQ desta folha já foi encerrada pelo supervisor")
+        raise ErroDados("a etapa de CQ deste lote já foi encerrada pelo supervisor")
     uuid = ex.inserir(
         "cq_inspecao",
         {"id_lote": carga["id_lote"], "id_carga_trabalho": carga["id"], "id_lote_etapa": carga["id_lote_etapa"],
@@ -311,7 +311,7 @@ def _minha_para_mudar(ex, uuid: str) -> Dict:
     if linha["responsavel"] != ex.usuario:
         raise ErroDados("esta ocorrência foi registrada por outra pessoa", 403)
     if linha["situacao"] not in ABERTAS:
-        raise ErroDados("a etapa de CQ desta folha já foi encerrada: a ocorrência não muda mais")
+        raise ErroDados("a etapa de CQ deste lote já foi encerrada: a ocorrência não muda mais")
     return linha
 
 
@@ -503,7 +503,7 @@ def tratar(ex, uuid: str, tratado: bool = True) -> Dict:
     if not linha:
         raise ErroDados("ocorrência não encontrada", 404)
     if linha["id_lote"] not in em_correcao(ex):
-        raise ErroDados("só quem está com a folha na correção de inspeção aberta marca a ocorrência como tratada", 403)
+        raise ErroDados("só quem está com o lote na correção de inspeção aberta marca a ocorrência como tratada", 403)
     if bool(linha["tratado"]) != bool(tratado):
         campos = (
             {"tratado": True, "tratado_em": ex.agora, "tratado_por": ex.usuario}

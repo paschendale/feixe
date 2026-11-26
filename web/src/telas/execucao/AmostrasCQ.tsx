@@ -132,7 +132,7 @@ function Amostras({ r }: { r: ResumoCQ }) {
           {itens.length === 0 && (
             <tr>
               <td colSpan={6} className="text-muted-foreground">
-                {aba === 'pendentes' ? `Nenhuma pendente: as suas amostras de ${nomeDe(r)} nesta folha estão avaliadas.` : 'Nenhuma avaliada ainda. A avaliação é no QGIS, pela barra do Feixe.'}
+                {aba === 'pendentes' ? `Nenhuma pendente: as suas amostras de ${nomeDe(r)} neste lote estão avaliadas.` : 'Nenhuma avaliada ainda. A avaliação é no QGIS, pela barra do Feixe.'}
               </td>
             </tr>
           )}
@@ -272,7 +272,7 @@ function MinhasOcorrencias({ r }: { r: ResumoCQ }) {
                         variant="ghost"
                         disabled={ocupado === o.uuid}
                         onClick={() => {
-                          if (window.confirm('Apagar esta ocorrência? Ela some da folha e do QGIS.')) rodar(o, () => enviar(`/api/inspecoes/${o.uuid}`, undefined, 'DELETE'), 'Ocorrência apagada.')
+                          if (window.confirm('Apagar esta ocorrência? Ela some do lote e do QGIS.')) rodar(o, () => enviar(`/api/inspecoes/${o.uuid}`, undefined, 'DELETE'), 'Ocorrência apagada.')
                         }}
                       >
                         Apagar
@@ -294,13 +294,13 @@ function MinhasOcorrencias({ r }: { r: ResumoCQ }) {
 
 // O próximo passo da história (D-136) quando a folha (ou este elemento nela) termina.
 function ProximoPasso({ r, daFolha }: { r: ResumoCQ; daFolha: ResumoCQ[] }) {
-  if (!r.aberta) return <p className="text-nota text-muted-foreground">A etapa de CQ desta folha foi encerrada pelo supervisor.</p>
+  if (!r.aberta) return <p className="text-nota text-muted-foreground">A etapa de CQ deste lote foi encerrada pelo supervisor.</p>
   if (r.pendentes > 0) return null
   const faltam = daFolha.filter((x) => x.pendentes > 0)
   const outras = daFolha.reduce((s, x) => s + x.outras, 0)
   if (faltam.length)
     return (
-      <Nota tom="info" titulo={`${nomeDe(r)} avaliado nesta folha.`}>
+      <Nota tom="info" titulo={`${nomeDe(r)} avaliado neste lote.`}>
         Faltam{' '}
         {faltam.map((x, i) => (
           <span key={x.id_atividade}>
@@ -315,10 +315,10 @@ function ProximoPasso({ r, daFolha }: { r: ResumoCQ; daFolha: ResumoCQ[] }) {
       </Nota>
     )
   return (
-    <Nota tom="info" titulo="Folha avaliada: o supervisor decide aprovar ou nova revisão.">
+    <Nota tom="info" titulo="Lote avaliado: o supervisor decide aprovar ou nova revisão.">
       {outras > 0
         ? `As suas amostras de ${r.folha_revisao} estão todas avaliadas; ${plural(outras, 'amostra do plano está', 'amostras do plano estão')} com outro avaliador.`
-        : `Todas as amostras de ${r.folha_revisao} estão avaliadas. Nada mais a fazer aqui; a folha segue quando o supervisor decidir.`}
+        : `Todas as amostras de ${r.folha_revisao} estão avaliadas. Nada mais a fazer aqui; o lote segue quando o supervisor decidir.`}
     </Nota>
   )
 }
@@ -330,7 +330,7 @@ export function AmostrasCQ({ cq }: { cq: ResumoCQ[] }) {
   if (cq.length === 0)
     return (
       <Bloco>
-        <Vazio>Nenhuma amostra de CQ com você. O supervisor distribui as amostras das folhas em controle de qualidade.</Vazio>
+        <Vazio>Nenhuma amostra de CQ com você. O supervisor distribui as amostras dos lotes em controle de qualidade.</Vazio>
       </Bloco>
     )
   const chaves = [...new Set(cq.map(chaveDe))]
@@ -391,10 +391,10 @@ export function AmostrasCQ({ cq }: { cq: ResumoCQ[] }) {
       <ProximoPasso r={atual} daFolha={daFolha} />
       {outras.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          <span className="text-muted-foreground">Outras folhas em {nomeDe(atual)}:</span>
+          <span className="text-muted-foreground">Outros lotes em {nomeDe(atual)}:</span>
           {outras.map((r) => (
             <a key={r.id_lote_etapa} href={href('execucao/cq', { atividade: chave, folha: r.id_lote_etapa })} className="tab font-medium text-primary hover:underline">
-              {r.folha_revisao} ({r.aberta ? (r.pendentes ? `${num(r.pendentes)} pendentes` : 'avaliada') : 'encerrada'})
+              {r.folha_revisao} ({r.aberta ? (r.pendentes ? `${num(r.pendentes)} pendentes` : 'avaliado') : 'encerrado'})
             </a>
           ))}
         </div>

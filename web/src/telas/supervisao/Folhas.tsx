@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Barra, Bloco, COR, Campo, Carregando, Colunas, Conteudo, Fichas, Tabela } from '@/components/ds'
 import type { FluxoCompleto, GrupoAtividade, LotePainel } from '@/lib/api'
-import { diasAtras, lista, num, parado, pc, plural, quando } from '@/lib/formato'
+import { contarLotes, diasAtras, lista, num, parado, pc, plural, quando, soFolhas } from '@/lib/formato'
 import { href, navegar, useRota } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'
 import { SITUACAO, Status } from '@/lib/status'
@@ -93,7 +93,7 @@ export default function Folhas() {
   const fluxosDoGrupo = grupo ? [...new Set(doGrupo.map((l) => l.id_fluxo))].map((id) => fluxos?.itens.find((f) => f.id === id)).filter(Boolean) : []
   const descricao = grupo
     ? fluxosDoGrupo.map((f) => `Fluxo ${f!.nome}: ${f!.etapas.map((e) => e.nome).join(' → ')}`).join(' · ') || grupo.tema
-    : 'em produção, esperando a próxima etapa e encerradas, de todos os temas'
+    : 'em produção, esperando a próxima etapa e encerrados, de todos os temas'
 
   if (!p || !lotes.dados)
     return (
@@ -110,13 +110,13 @@ export default function Folhas() {
         escolher={(id) => navegar(`supervisao/folhas?grupo=${id}`)}
         fichas={[
           ...p.grupos.map((g) => ({ id: g.chave, rotulo: g.rotulo, contagem: num(g.lotes.length) })),
-          { id: 'todas', rotulo: 'Todas as folhas', contagem: num(todos.length), todas: true },
+          { id: 'todas', rotulo: 'Todos os lotes', contagem: num(todos.length), todas: true },
         ]}
       />
 
       <Bloco className="min-h-[100px] flex-row flex-wrap items-center gap-x-7 gap-y-3 px-5 py-4">
         <div className="flex min-w-[300px] flex-[1_1_360px] flex-col gap-0.5">
-          <span className="text-titulo-3 font-semibold">{grupo ? grupo.rotulo : 'Todas as folhas da unidade'}</span>
+          <span className="text-titulo-3 font-semibold">{grupo ? grupo.rotulo : 'Todos os lotes da unidade'}</span>
           <span className="line-clamp-2 text-nota text-muted-foreground" title={descricao}>
             {descricao}
           </span>
@@ -150,8 +150,8 @@ export default function Folhas() {
 
       {/* Barra das marcadas: flutua sobre a lista, sem empurrar os filtros e a tabela para baixo do ponteiro. */}
       {supervisor && marcadosLotes.length > 0 && (
-        <div role="region" aria-label="Folhas marcadas" className="fixed inset-x-0 bottom-5 z-40 mx-auto flex w-fit max-w-[calc(100%-2rem)] items-center gap-3 rounded-xl bg-card/90 px-4 py-3 shadow-flutuante backdrop-blur">
-          <b className="whitespace-nowrap">{plural(marcadosLotes.length, 'folha marcada', 'folhas marcadas')}</b>
+        <div role="region" aria-label="Lotes marcados" className="fixed inset-x-0 bottom-5 z-40 mx-auto flex w-fit max-w-[calc(100%-2rem)] items-center gap-3 rounded-xl bg-card/90 px-4 py-3 shadow-flutuante backdrop-blur">
+          <b className="whitespace-nowrap">{contarLotes(marcadosLotes)} {soFolhas(marcadosLotes) ? (marcadosLotes.length === 1 ? 'marcada' : 'marcadas') : marcadosLotes.length === 1 ? 'marcado' : 'marcados'}</b>
           <span className="max-w-[360px] truncate text-texto-2">{marcadosLotes.length <= 5 ? lista(marcadosLotes.map((l) => l.folha_revisao)) : ''}</span>
           <div className="flex shrink-0 gap-2">
             <Button onClick={() => setDistribuir(marcadosLotes.map((l) => l.id))}>
@@ -171,7 +171,7 @@ export default function Folhas() {
       )}
 
       <div className="flex flex-wrap items-end gap-2.5">
-        <Campo rotulo="Buscar folha">
+        <Campo rotulo="Buscar lote">
           <Input type="search" className="w-60" placeholder="MI ou nome (ex.: 2573)" value={busca} onChange={(e) => setBusca(e.target.value)} />
         </Campo>
         <Campo rotulo="Situação">
@@ -180,7 +180,7 @@ export default function Folhas() {
             <option value="pendente">A iniciar</option>
             <option value="em_andamento">Em andamento</option>
             <option value="parado">Sem conclusão há 7 dias</option>
-            {!grupo && <option value="esperando">Esperando a próxima etapa ou encerradas</option>}
+            {!grupo && <option value="esperando">Esperando a próxima etapa ou encerrados</option>}
           </Select>
         </Campo>
         <Campo rotulo="Responsável">
@@ -191,7 +191,7 @@ export default function Folhas() {
             ))}
           </Select>
         </Campo>
-        <span className="pb-2 text-muted-foreground">{plural(itens.length, 'folha', 'folhas')}</span>
+        <span className="pb-2 text-muted-foreground">{contarLotes(itens)}</span>
       </div>
 
       <Tabela fixa largura={900}>
@@ -202,13 +202,13 @@ export default function Folhas() {
                 <th className="pr-2">
                   <input
                     type="checkbox"
-                    aria-label="Marcar todas"
+                    aria-label="Marcar todos"
                     checked={todosMarcados}
                     onChange={() => setMarcados(todosMarcados ? new Set() : new Set(itens.map((l) => l.id)))}
                   />
                 </th>
               )}
-              <th className={cn(supervisor && 'pl-2')}>Folha</th>
+              <th className={cn(supervisor && 'pl-2')}>Lote</th>
               <th>Etapa</th>
               <th>Cargas concluídas</th>
               <th>Responsáveis</th>
@@ -220,7 +220,7 @@ export default function Folhas() {
             {itens.length === 0 && (
               <tr>
                 <td colSpan={7} className="text-muted-foreground">
-                  {todos.length ? 'Nenhuma folha com esses filtros.' : supervisor ? 'A unidade ainda não tem folhas no Feixe: use "Novas folhas" acima.' : 'A unidade ainda não tem folhas no Feixe.'}
+                  {todos.length ? 'Nenhum lote com esses filtros.' : supervisor ? 'A unidade ainda não tem lotes no Feixe: use "Novas folhas" ou "Lote livre" acima.' : 'A unidade ainda não tem lotes no Feixe.'}
                 </td>
               </tr>
             )}
@@ -259,7 +259,7 @@ export default function Folhas() {
                         </span>
                       </div>
                     ) : (
-                      <span className="text-muted-foreground">{grupo?.fase === 'cq' && aberta ? 'sem amostras: veja na folha o próximo passo' : 'sem cargas'}</span>
+                      <span className="text-muted-foreground">{grupo?.fase === 'cq' && aberta ? `sem amostras: veja ${l.tipo === 'folha' ? 'na folha' : 'no lote'} o próximo passo` : 'sem cargas'}</span>
                     )}
                   </td>
                   <td className="truncate" title={x?.responsaveis.join(', ')}>{x?.responsaveis.length ? lista(x.responsaveis.map((n) => n.split(' ')[0])) : <span className="text-muted-foreground">—</span>}</td>
@@ -274,7 +274,7 @@ export default function Folhas() {
             })}
           </tbody>
       </Tabela>
-      <p className="text-nota text-muted-foreground">Em laranja: em andamento e sem conclusão há mais de 7 dias. Clicar na folha abre a gaveta com o andamento e as ações do fluxo.</p>
+      <p className="text-nota text-muted-foreground">Em laranja: em andamento e sem conclusão há mais de 7 dias. Clicar no lote abre a gaveta com o andamento e as ações do fluxo.</p>
 
       {selecionado && (
         <Gaveta

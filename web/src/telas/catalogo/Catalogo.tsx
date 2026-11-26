@@ -105,7 +105,7 @@ function Temas({ dados, gerente }: { dados: TCatalogo; gerente: boolean }) {
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <p className="max-w-[760px] text-nota text-muted-foreground">Temas agrupam as atividades e os fluxos (hidrografia, áreas densamente edificadas, LML…). Cada folha é de um tema.</p>
+        <p className="max-w-[760px] text-nota text-muted-foreground">Temas agrupam as atividades e os fluxos (hidrografia, áreas densamente edificadas, LML…). Cada lote é de um tema.</p>
         {gerente && (
           <Button onClick={novoTema}>
             <Plus /> Novo tema
@@ -151,7 +151,7 @@ function Elementos({ dados }: { dados: TCatalogo }) {
   return (
     <>
       <p className="max-w-[820px] text-nota text-muted-foreground">
-        Os elementos de qualidade que o CQ inspeciona, no vocabulário da GCQ. Cada atividade de CQ do catálogo mede um elemento, e o plano de amostragem de cada folha usa a fração crítica do elemento quando a etapa do fluxo não define outra. Mantidos pela CCAR; aqui, só leitura.
+        Os elementos de qualidade que o CQ inspeciona, no vocabulário da GCQ. Cada atividade de CQ do catálogo mede um elemento, e o plano de amostragem de cada lote usa a fração crítica do elemento quando a etapa do fluxo não define outra. Mantidos pela CCAR; aqui, só leitura.
       </p>
       <Tabela fixa>
         <Colunas larguras={[undefined, 130, 150, 260, 110]} />

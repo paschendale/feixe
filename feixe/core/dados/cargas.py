@@ -78,7 +78,7 @@ def preparar(ex: Executor, uf: str, ids_lote_etapa: List[int]) -> Dict:
             # iniciar, com o próximo passo (a gaveta diz o mesmo).
             avisos.append({**_ident(p), "aviso": (
                 f"a etapa {p['etapa']} não tem atividade de CQ no fluxo: escolha as medidas a inspecionar em Fluxos "
-                "e crie os planos na gaveta da folha"
+                "e crie os planos na gaveta do lote"
             )})  # fmt: skip
         elif p["fase"] == "correcao_inspecao" and not p["grade"]:
             # Correção de inspeção (D5): quem varre as ocorrências é quem recebe a folha. Sem atividade pela grade, a
@@ -93,7 +93,7 @@ def preparar(ex: Executor, uf: str, ids_lote_etapa: List[int]) -> Dict:
                 if p["situacao"] == "pendente":
                     iniciar.append(p)
                 avisos.append({**_ident(p), "aviso": (
-                    f"a etapa {p['etapa']} não tem atividade no fluxo: ninguém recebe a folha para tratar as "
+                    f"a etapa {p['etapa']} não tem atividade no fluxo: ninguém recebe o lote para tratar as "
                     f"{p['a_tratar']} ocorrências. Acrescente a atividade de correção de inspeção à etapa (Fluxos) "
                     "e use Gerar as cargas na gaveta"
                 )})  # fmt: skip
@@ -245,7 +245,7 @@ def atribuir(
     """Passa cargas para `responsavel` (None = devolve para disponível). Alvo: `ids` de cargas e/ou todas as cargas de
     `lote_etapas`; `so_disponiveis` restringe às sem responsável; `de` restringe às de uma pessoa (troca no meio)."""
     if not ids and not lote_etapas:
-        raise ErroDados("escolha as cargas ou as folhas", 400)
+        raise ErroDados("escolha as cargas ou os lotes", 400)
     filtro = (
         "c.uf = %s AND NOT c.concluido AND le.situacao IN ('pendente', 'em_andamento') "
         "AND (c.id = ANY(%s) OR c.id_lote_etapa = ANY(%s))"

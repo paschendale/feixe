@@ -43,7 +43,7 @@ MODOS: List[Tuple[str, str, str, str]] = [
         "execucao",
         "Executar",
         "modo_execucao",
-        "Mostra só o subgrupo Execução: Minhas cargas e Minhas folhas, para trabalhar sobre a imagem.",
+        "Mostra só o subgrupo Execução: Minhas cargas e Meus lotes, para trabalhar sobre a imagem.",
     ),
     (
         "cq",
@@ -56,7 +56,7 @@ MODOS: List[Tuple[str, str, str, str]] = [
         "supervisao",
         "Supervisionar",
         "modo_supervisao",
-        "Só supervisor. Mostra só o subgrupo Supervisão: cargas por responsável, cargas a atribuir e folhas.",
+        "Só supervisor. Mostra só o subgrupo Supervisão: cargas por responsável, cargas a atribuir e lotes.",
     ),
 ]
 
@@ -131,7 +131,7 @@ class BarraFeixe(QToolBar):
     }
 
     TEXTO_SINCRONIZAR = (
-        "Envia o que você fez e traz da CCAR as suas cargas, a sua fila e as folhas da UF. O Feixe testa a "
+        "Envia o que você fez e traz da CCAR as suas cargas, a sua fila e os lotes da UF. O Feixe testa a "
         "conexão sozinho a cada minuto."
     )
 
@@ -174,7 +174,7 @@ class BarraFeixe(QToolBar):
         # 3. Abrir o painel no navegador (o ícone tem a seta de link externo).
         self.acao_painel = self._acao(
             "abrir", "abrir", "Abrir o Feixe no navegador",
-            "Abre o painel do Feixe no navegador padrão: folhas, fluxos, equipe e atribuição.", self.abrir_painel,
+            "Abre o painel do Feixe no navegador padrão: lotes, fluxos, equipe e atribuição.", self.abrir_painel,
         )  # fmt: skip
         self.addAction(self.acao_painel)
         self.separador_execucao = self.addSeparator()
@@ -192,7 +192,7 @@ class BarraFeixe(QToolBar):
         )  # fmt: skip
         self.acao_pular = self._acao(
             "pular", "pular", "Pular carga",
-            "Deixa a carga atual para depois e vai para a próxima. Ela volta quando acabarem as outras desta folha, "
+            "Deixa a carga atual para depois e vai para a próxima. Ela volta quando acabarem as outras deste lote, "
             "ou quando você reabrir o QGIS.", self.pular,
         )  # fmt: skip
         self.addAction(self.acao_proxima)
@@ -230,14 +230,14 @@ class BarraFeixe(QToolBar):
             # Correção de inspeção (D5): só para quem está com uma folha na correção aberta.
             "proxima_ocorrencia": self._acao(
                 "proxima_ocorrencia", "proxima_ocorrencia", "Próxima ocorrência",
-                "Vai para a próxima ocorrência por tratar da folha na correção de inspeção: ela vira a ocorrência "
+                "Vai para a próxima ocorrência por tratar do lote na correção de inspeção: ela vira a ocorrência "
                 "atual (pino maior em Ocorrências pendentes) e o mapa a mostra, sem mudar a escala.",
                 self.proxima_ocorrencia,
             ),
             "tratada": self._acao(
                 "tratada", "tratada", "Tratada",
                 "Marca a ocorrência atual (ou a selecionada em Ocorrências pendentes) como tratada e já vai para a "
-                "próxima. Na última, a folha terminou e o supervisor decide o próximo passo.", self.tratada,
+                "próxima. Na última, o lote terminou e o supervisor decide o próximo passo.", self.tratada,
             ),
         }  # fmt: skip
         self.acao_ocorrencia = self.acoes_cq["ocorrencia"]

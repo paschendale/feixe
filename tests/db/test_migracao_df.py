@@ -112,7 +112,8 @@ def test_folhas_viram_lotes_por_tema(convertido):
         )
         lotes = set(cur.fetchall())
         cur.execute(
-            "SELECT count(*) FROM mapcartacomp.lote "
+            # Só folhas: lote livre não tem articulação (os criados à mão no dev ficariam todos no mesmo grupo nulo).
+            "SELECT count(*) FROM mapcartacomp.lote WHERE tipo = 'folha' "
             "GROUP BY cod_projeto, id_tema, id_articulacao_scn HAVING count(*) > 1"
         )
         assert cur.fetchall() == []

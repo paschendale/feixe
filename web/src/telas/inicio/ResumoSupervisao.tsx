@@ -1,6 +1,6 @@
 import { Barra, Bloco, COR, Legenda, LinkSeta, Metrica, Rotulo, Secao, Tabela, TituloBloco, Vazio } from '@/components/ds'
 import type { GrupoAtividade, GrupoEsperando, Lote, PainelSupervisao, StatusNacional } from '@/lib/api'
-import { lista, num, parado, pc, plural, quando } from '@/lib/formato'
+import { contarLotes, lista, num, parado, pc, plural, quando, soFolhas, termoLote } from '@/lib/formato'
 import { href } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'
 import { STATUS } from '@/lib/status'
@@ -22,7 +22,8 @@ export function usePainel() {
 
 export function fraseSupervisao(p: PainelSupervisao, esperando: GrupoEsperando[] | null, unidade: string) {
   const folhas = new Set(p.grupos.flatMap((g) => g.lotes)).size
-  const nEsperando = (esperando ?? []).reduce((s, g) => s + g.folhas.length, 0)
+  const esperam = (esperando ?? []).flatMap((g) => g.folhas)
+  const nEsperando = esperam.length
   const aAtribuir = p.grupos.filter((g) => !ehCq(g) && g.a_atribuir > 0)
   const nAtribuir = aAtribuir.reduce((s, g) => s + g.a_atribuir, 0)
   const temas = [...new Set(aAtribuir.map((g) => g.tema.toLowerCase()))]
@@ -30,15 +31,15 @@ export function fraseSupervisao(p: PainelSupervisao, esperando: GrupoEsperando[]
     <>
       {p.grupos.length ? (
         <>
-          {unidade}, <b>{plural(p.grupos.length, 'atividade está', 'atividades estão')}</b> em produção em <b>{plural(folhas, 'folha', 'folhas')}</b>.
+          {unidade}, <b>{plural(p.grupos.length, 'atividade está', 'atividades estão')}</b> em produção em <b>{plural(folhas, 'lote', 'lotes')}</b>.
         </>
       ) : (
-        <>{unidade}, nenhuma folha está em produção.</>
+        <>{unidade}, nenhum lote está em produção.</>
       )}
       {nEsperando > 0 && (
         <>
           {' '}
-          <b>{plural(nEsperando, 'folha', 'folhas')}</b> {nEsperando === 1 ? 'terminou a etapa e espera' : 'terminaram a etapa e esperam'} você abrir a próxima
+          <b>{contarLotes(esperam)}</b> {nEsperando === 1 ? 'terminou a etapa e espera' : 'terminaram a etapa e esperam'} você abrir a próxima
           {nAtribuir > 0 ? ', e ' : '.'}
         </>
       )}
@@ -56,6 +57,8 @@ function PrecisaDeVoce({ p, esperando, lotes }: { p: PainelSupervisao; esperando
   const { tem } = useSessao()
   const { dados: conflitos } = useContagemConflitos(tem('supervisor'))
   const nome = (id: number) => lotes.find((l) => l.id === id)?.folha_revisao ?? `#${id}`
+  const contar = (ids: number[]) => contarLotes(ids.map((id) => ({ tipo: lotes.find((l) => l.id === id)?.tipo })))
+  const esperam = esperando.flatMap((g) => g.folhas)
   const nEsperando = esperando.reduce((s, g) => s + g.folhas.length, 0)
   const porTema = new Map<string, number>()
   esperando.forEach((g) => porTema.set(g.tema, (porTema.get(g.tema) ?? 0) + g.folhas.length))
@@ -68,7 +71,7 @@ function PrecisaDeVoce({ p, esperando, lotes }: { p: PainelSupervisao; esperando
         key="esp"
         valor={nEsperando}
         tom="info"
-        rotulo={`${nEsperando === 1 ? 'folha terminou a etapa e espera' : 'folhas terminaram a etapa e esperam'} você abrir a próxima`}
+        rotulo={`${termoLote(soFolhas(esperam) ? 'folha' : 'livre', nEsperando !== 1)} ${nEsperando === 1 ? 'terminou a etapa e espera' : 'terminaram a etapa e esperam'} você abrir a próxima`}
         detalhe={lista([...porTema].map(([t, n]) => `${num(n)} de ${t}`))}
       >
         <LinkSeta href="#/supervisao/esperando" className="mt-2">
@@ -84,7 +87,7 @@ function PrecisaDeVoce({ p, esperando, lotes }: { p: PainelSupervisao; esperando
         valor={g.a_atribuir}
         tom="alerta"
         rotulo={`cargas de ${g.tema.toLowerCase()} sem responsável`}
-        detalhe={<>{comCargas.length <= 4 ? lista(comCargas.map((l) => `${nome(l.id_lote)} (${num(l.a_atribuir)})`)) : plural(comCargas.length, 'folha', 'folhas')} · {g.rotulo}</>}
+        detalhe={<>{comCargas.length <= 4 ? lista(comCargas.map((l) => `${nome(l.id_lote)} (${num(l.a_atribuir)})`)) : contar(comCargas.map((l) => l.id_lote))} · {g.rotulo}</>}
       >
         <LinkSeta href={href('supervisao/folhas', { grupo: g.chave, distribuir: 1 })} className="mt-2">
           Distribuir
@@ -108,7 +111,7 @@ function PrecisaDeVoce({ p, esperando, lotes }: { p: PainelSupervisao; esperando
           <>
             {porAtividade.length ? lista(porAtividade.map((a) => `${a.elemento ?? a.atividade} (${num(a.amostras)})`)) : null}
             {porAtividade.length ? ' · ' : ''}
-            {folhas.length && folhas.length <= 3 ? lista(folhas.map(nome)) : plural(folhas.length || g.lotes.length, 'folha', 'folhas')}
+            {folhas.length && folhas.length <= 3 ? lista(folhas.map(nome)) : contar(folhas.length ? folhas : g.lotes)}
           </>
         }
       >
@@ -135,7 +138,7 @@ function PrecisaDeVoce({ p, esperando, lotes }: { p: PainelSupervisao; esperando
   return (
     <div className="flex flex-col gap-2.5">
       <Rotulo>Precisa de você</Rotulo>
-      {cartoes.length ? <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4">{cartoes}</div> : <Bloco><Vazio>Nada esperando você: nenhuma folha parada, nenhuma carga sem responsável e nenhuma amostra sem avaliador.</Vazio></Bloco>}
+      {cartoes.length ? <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4">{cartoes}</div> : <Bloco><Vazio>Nada esperando você: nenhum lote parado, nenhuma carga sem responsável e nenhuma amostra sem avaliador.</Vazio></Bloco>}
     </div>
   )
 }
@@ -148,7 +151,7 @@ function CartaoAtividade({ g }: { g: GrupoAtividade }) {
       <div className="flex flex-col gap-0.5">
         <span className="text-titulo-3 font-semibold">{g.rotulo}</span>
         <span className="text-nota text-muted-foreground">
-          {plural(g.lotes.length, 'folha', 'folhas')} · {plural(g.pessoas, cq ? 'avaliador' : 'pessoa', cq ? 'avaliadores' : 'pessoas')}
+          {plural(g.lotes.length, 'lote', 'lotes')} · {plural(g.pessoas, cq ? 'avaliador' : 'pessoa', cq ? 'avaliadores' : 'pessoas')}
           {cq && g.atividades.length > 1 ? ` · ${g.atividades.length} medidas` : ''}
         </span>
       </div>
@@ -194,7 +197,7 @@ function CartaoAtividade({ g }: { g: GrupoAtividade }) {
         )}
         {!cq && pendentes === 0 && g.total > 0 && <span className="text-muted-foreground">todas concluídas</span>}
       </div>
-      <LinkSeta href={href('supervisao/folhas', { grupo: g.chave })}>{cq ? 'Ver folhas e amostras' : 'Ver folhas e cargas'}</LinkSeta>
+      <LinkSeta href={href('supervisao/folhas', { grupo: g.chave })}>{cq ? 'Ver lotes e amostras' : 'Ver lotes e cargas'}</LinkSeta>
     </Bloco>
   )
 }
@@ -207,7 +210,7 @@ function StatusNacionalCartao({ p, nEsperando }: { p: PainelSupervisao; nEsperan
   const sem = ORDEM_STATUS.filter((k) => !p.status[k])
   return (
     <Bloco className="flex-[1_1_420px] gap-3.5">
-      <TituloBloco titulo="Status nacional da unidade" sub={`${plural(total, 'folha', 'folhas')} · o que a CCAR vê`} />
+      <TituloBloco titulo="Status nacional da unidade" sub={`${plural(total, 'lote', 'lotes')} · o que a CCAR vê`} />
       <div className="flex h-9 gap-0.5 overflow-hidden rounded-lg text-nota font-semibold">
         {com.map((k) => {
           return (
@@ -231,7 +234,7 @@ function StatusNacionalCartao({ p, nEsperando }: { p: PainelSupervisao; nEsperan
       )}
       {nEsperando > 0 && (
         <p className="text-nota text-muted-foreground">
-          As {plural(nEsperando, 'folha parada', 'folhas paradas')} esperando a próxima etapa seguem no status da etapa que terminou: só mudam quando a seguinte abrir.
+          {nEsperando === 1 ? 'O lote parado esperando a próxima etapa segue no status da etapa que terminou: só muda' : `Os ${plural(nEsperando, 'lote parado', 'lotes parados')} esperando a próxima etapa seguem no status da etapa que terminou: só mudam`} quando a seguinte abrir.
         </p>
       )}
     </Bloco>
@@ -305,8 +308,8 @@ export function ResumoSupervisao({ dados }: { dados: ReturnType<typeof usePainel
           </div>
         ) : (
           <Bloco className="flex-row flex-wrap items-center justify-between text-muted-foreground">
-            Nenhuma atividade em produção: nenhuma folha com etapa aberta.
-            <LinkSeta href={href('supervisao/folhas', { grupo: 'todas' })}>Ver as folhas da unidade</LinkSeta>
+            Nenhuma atividade em produção: nenhum lote com etapa aberta.
+            <LinkSeta href={href('supervisao/folhas', { grupo: 'todas' })}>Ver os lotes da unidade</LinkSeta>
           </Bloco>
         )}
       </div>

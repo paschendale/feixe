@@ -14,7 +14,7 @@ export function EscolherFluxo({ valor, mudar }: { valor: number | null; mudar: (
       dica={
         // A linha fica reservada antes da escolha: o diálogo não cresce ao escolher o fluxo.
         <span className="block h-4 truncate">
-          {atual ? (atual.primeira_etapa ? `Começa em: ${atual.primeira_etapa}` : 'Este fluxo ainda não tem etapas.') : 'A folha começa na primeira etapa do fluxo.'}
+          {atual ? (atual.primeira_etapa ? `Começa em: ${atual.primeira_etapa}` : 'Este fluxo ainda não tem etapas.') : 'O lote começa na primeira etapa do fluxo.'}
         </span>
       }
     >

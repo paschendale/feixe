@@ -125,9 +125,9 @@ export function DecidirCQ({
     setOcupado(true)
     try {
       const r = await enviar<ResultadoDecisaoCQ>('/api/lotes/cq_decisao', { lotes: validos.map((i) => i.id_lote), decisao, observacao: obs, previa: false, forcar, expor_ocorrencias: expor })
-      const feito = aprovar ? 'aprovada' : 'com nova revisão'
+      const feito = aprovar ? 'aprovado' : 'com nova revisão'
       const etapas = lista([...new Set(r.abertas.map((a) => a.etapa))])
-      avisar([r.decididas.length && `${plural(r.decididas.length, `folha ${feito}`, `folhas ${aprovar ? 'aprovadas' : 'com nova revisão'}`)} no CQ.`, r.abertas.length && `${etapas} aberta.`, resumoPreparo(r.preparo)].filter(Boolean).join(' '))
+      avisar([r.decididas.length && `${plural(r.decididas.length, `lote ${feito}`, `lotes ${aprovar ? 'aprovados' : 'com nova revisão'}`)} no CQ.`, r.abertas.length && `${etapas} aberta.`, resumoPreparo(r.preparo)].filter(Boolean).join(' '))
       r.erros.forEach((e) => avisar(e.erro, 'erro'))
       const prontas = comCargas(r.preparo)
       fechar(r.abertas.filter((a) => prontas.has(a.id_lote_etapa)).map((a) => a.id_lote))
@@ -138,7 +138,7 @@ export function DecidirCQ({
     }
   }
 
-  const rotulo = aprovar ? `Aprovar ${plural(validos.length, 'folha', 'folhas')}` : `Abrir nova revisão em ${plural(validos.length, 'folha', 'folhas')}`
+  const rotulo = aprovar ? `Aprovar ${plural(validos.length, 'lote', 'lotes')}` : `Abrir nova revisão em ${plural(validos.length, 'lote', 'lotes')}`
   return (
     <Dialog open={aberto} onOpenChange={(v) => !v && fechar()}>
       <DialogContent className="max-w-2xl">
@@ -150,7 +150,7 @@ export function DecidirCQ({
               : `Conclui o CQ como reprovada e abre ${destino.length ? lista(destino) : 'a revisão'} na revisão seguinte, com as cargas pela grade. A distribuição sugere outra pessoa que não quem fez a revisão avaliada.`}
           </DialogDescription>
         </DialogHeader>
-        {!itens && <div className="grid min-h-[200px] place-items-center rounded-xl bg-preenchimento-2 text-muted-foreground">Conferindo as folhas…</div>}
+        {!itens && <div className="grid min-h-[200px] place-items-center rounded-xl bg-preenchimento-2 text-muted-foreground">Conferindo os lotes…</div>}
         {itens && (
           <div className="flex max-h-[50vh] min-h-[200px] flex-col gap-2.5 overflow-auto">
             {validos.map((i) => (
@@ -204,7 +204,7 @@ export function DecidirCQ({
               <label className="flex items-start gap-2 rounded-xl bg-alerta-suave px-4 py-3 text-nota text-foreground">
                 <input type="checkbox" className="mt-0.5" checked={forcar} onChange={(e) => setForcar(e.target.checked)} />
                 <span>
-                  <b>Aprovar mesmo reprovada{reprovadas.length > 1 ? 's' : ''} no CQ</b> ({folhas(reprovadas)}): os não conformes passaram do aceito. A decisão é sua e fica no histórico com o resultado e a sua observação.
+                  <b>Aprovar mesmo reprovado{reprovadas.length > 1 ? 's' : ''} no CQ</b> ({folhas(reprovadas)}): os não conformes passaram do aceito. A decisão é sua e fica no histórico com o resultado e a sua observação.
                 </span>
               </label>
             )}
@@ -218,8 +218,8 @@ export function DecidirCQ({
               </label>
             )}
             <label className="flex flex-col gap-1.5 text-nota text-texto-2">
-              Observação (opcional; o resultado por elemento vai para o histórico de cada folha de todo jeito)
-              <Textarea rows={2} value={obs} onChange={(e) => setObs(e.target.value)} placeholder={aprovar ? 'Ex.: dentro do aceito, segue para a correção de inspeção' : 'Ex.: comissão acima do aceito, revisar a folha toda'} className="text-foreground" />
+              Observação (opcional; o resultado por elemento vai para o histórico de cada lote de todo jeito)
+              <Textarea rows={2} value={obs} onChange={(e) => setObs(e.target.value)} placeholder={aprovar ? 'Ex.: dentro do aceito, segue para a correção de inspeção' : 'Ex.: comissão acima do aceito, revisar o lote todo'} className="text-foreground" />
             </label>
           </div>
         )}

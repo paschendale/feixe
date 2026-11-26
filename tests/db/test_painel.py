@@ -135,7 +135,7 @@ def test_encerrar_a_folha_no_fim_do_fluxo(amb):  # noqa: F811
     r = df.encerrar(ex, "GO", [a, b], "", previa=False)
     assert [x["id_lote"] for x in r["encerradas"]] == [a] and [x["id_lote"] for x in r["erros"]] == [b]
     assert status(a) == "CONCLUIDA" and df.historico(ex, a)[0]["acao"] == "encerrar"
-    assert "já está concluída" in df.encerrar(ex, "GO", [a], None, previa=True)["itens"][0]["erro"]
+    assert "já está concluído" in df.encerrar(ex, "GO", [a], None, previa=True)["itens"][0]["erro"]
     assert dl.um(ex, a)["status_nacional"] == "CONCLUIDA"
 
     # Abrir outra etapa depois reabre a folha: a etapa atual muda e o encerramento fica no histórico.

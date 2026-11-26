@@ -107,9 +107,9 @@ def _acao(camada: QgsVectorLayer, titulo: str, chamada: str) -> QgsAction:
 # (`vw_minhas_cargas_info`), com as contagens em texto (a view não tipa expressão: daí o `to_int`).
 def minhas_cargas(camada: QgsVectorLayer) -> None:
     _campo_expressao(camada, "situacao_txt", "Situação", _quando_concluida())
-    _campo_expressao(camada, "folha_txt", "Folha", '"folha_revisao" || \' · \' || "tema"')
+    _campo_expressao(camada, "folha_txt", "Lote", '"folha_revisao" || \' · \' || "tema"')
     _campo_expressao(
-        camada, "progresso_txt", "Minhas cargas na folha",
+        camada, "progresso_txt", "Minhas cargas no lote",
         "to_int(\"minhas_concluidas_na_folha\") || ' de ' || to_int(\"minhas_na_folha\") || ' concluídas (' || "
         "round(100.0 * to_int(\"minhas_concluidas_na_folha\") / to_int(\"minhas_na_folha\")) || '%)'",
     )  # fmt: skip
@@ -121,7 +121,7 @@ def minhas_cargas(camada: QgsVectorLayer) -> None:
         camada,
         [
             ("Situação", ["concluido", "situacao_txt"], None, False),
-            ("Folha", ["folha_txt", "etapa", "progresso_txt"], None, False),
+            ("Lote", ["folha_txt", "etapa", "progresso_txt"], None, False),
             ("Detalhes", ["atividade", "id"], None, True),
         ],
         editaveis=("concluido",),
@@ -129,7 +129,7 @@ def minhas_cargas(camada: QgsVectorLayer) -> None:
     camada.setDisplayExpression("'Carga · ' || \"folha_revisao\"")
     camada.setMapTipTemplate(
         "<b>[% \"folha_revisao\" %]</b> · carga [% CASE WHEN \"concluido\" THEN 'concluída' ELSE 'pendente' END %]"
-        '<br>Minhas na folha: [% to_int("minhas_concluidas_na_folha") %] de [% to_int("minhas_na_folha") %]'
+        '<br>Minhas no lote: [% to_int("minhas_concluidas_na_folha") %] de [% to_int("minhas_na_folha") %]'
     )
     _acao(camada, "Trabalhar nesta carga", 'trabalhar_em([% "id" %])')
     _acao(camada, "Pular esta carga", 'pular_carga([% "id" %])')
@@ -148,18 +148,18 @@ def minhas_folhas(camada: QgsVectorLayer, id_camada_minhas: str) -> None:
     feitas = contar.format(id=id_camada_minhas, extra=' AND "concluido"')
     _campo_expressao(camada, "minhas_txt", "Minhas cargas", f"{feitas} || ' de ' || {total} || ' concluídas'")
     _campo_expressao(camada, "etapa_txt", "Etapa", f"\"etapa\" || ' · ' || {_SITUACAO.format(c='situacao')}")
-    camada.setFieldAlias(camada.fields().indexOf("folha_revisao"), "Folha")
+    camada.setFieldAlias(camada.fields().indexOf("folha_revisao"), "Lote")
     camada.setFieldAlias(camada.fields().indexOf("tema"), "Tema")
     _formulario(
         camada,
         [
-            ("Folha", ["folha_revisao", "tema", "etapa_txt"], None, False),
+            ("Lote", ["folha_revisao", "tema", "etapa_txt"], None, False),
             ("Andamento", ["minhas_txt"], None, False),
         ],
     )
-    camada.setDisplayExpression("'Folha · ' || \"folha_revisao\"")
+    camada.setDisplayExpression("'Lote · ' || \"folha_revisao\"")
     camada.setMapTipTemplate(f'<b>[% "folha_revisao" %]</b> · [% "tema" %]<br>Minhas: [% {feitas} %] de [% {total} %]')
-    _acao(camada, "Próxima carga nesta folha", 'proxima_na_folha([% "id_lote" %])')
+    _acao(camada, "Próxima carga neste lote", 'proxima_na_folha([% "id_lote" %])')
 
 
 # --- Supervisor: cargas por responsável e a atribuir ------------------------------------------------------------------
@@ -169,7 +169,7 @@ def cargas_supervisao(camada: QgsVectorLayer) -> None:
         "coalesce(\"responsavel_nome\" || ' (' || \"responsavel\" || ')', 'a atribuir')",
     )  # fmt: skip
     _campo_expressao(camada, "situacao_txt", "Situação", _quando_concluida())
-    _campo_expressao(camada, "folha_txt", "Folha", '"folha_revisao" || \' · \' || "tema"')
+    _campo_expressao(camada, "folha_txt", "Lote", '"folha_revisao" || \' · \' || "tema"')
     _campo_expressao(camada, "etapa_txt", "Etapa", f"\"etapa\" || ' · ' || {_SITUACAO.format(c='situacao_etapa')}")
     for campo, rotulo in (("atividade", "Atividade"), ("geocodigo", "Geocódigo da célula"), ("criado_em", "Criada em")):
         camada.setFieldAlias(camada.fields().indexOf(campo), rotulo)
@@ -177,7 +177,7 @@ def cargas_supervisao(camada: QgsVectorLayer) -> None:
         camada,
         [
             ("Carga", ["responsavel_txt", "situacao_txt"], None, False),
-            ("Folha", ["folha_txt", "atividade", "etapa_txt"], None, False),
+            ("Lote", ["folha_txt", "atividade", "etapa_txt"], None, False),
             ("Detalhes", ["geocodigo", "criado_em"], None, True),
         ],
     )
@@ -186,7 +186,7 @@ def cargas_supervisao(camada: QgsVectorLayer) -> None:
         '<b>[% coalesce("responsavel_nome", \'A atribuir\') %]</b> · [% "folha_revisao" %] · '
         "[% CASE WHEN \"concluido\" THEN 'concluída' ELSE 'pendente' END %]"
     )
-    _acao(camada, "Abrir a folha no Feixe", 'abrir_folha([% "id_lote" %])')
+    _acao(camada, "Abrir o lote no Feixe", 'abrir_folha([% "id_lote" %])')
 
 
 # --- Supervisor: folhas -----------------------------------------------------------------------------------------------
@@ -206,7 +206,7 @@ def folhas_supervisao(camada: QgsVectorLayer) -> None:
     )
     _campo_expressao(camada, "tipo_txt", "Tipo", "CASE WHEN \"tipo\" = 'folha' THEN 'folha' ELSE 'lote livre' END")
     for campo, rotulo in (
-        ("folha_revisao", "Folha"), ("tema", "Tema"), ("status_nacional", "Status nacional"),
+        ("folha_revisao", "Lote"), ("tema", "Tema"), ("status_nacional", "Status nacional"),
         ("responsavel_nome", "Responsável principal"), ("ultimo_cq_folha_revisao", "Último CQ"),
         ("ultimo_cq_resultado", "Resultado"),
     ):  # fmt: skip
@@ -214,7 +214,7 @@ def folhas_supervisao(camada: QgsVectorLayer) -> None:
     _formulario(
         camada,
         [
-            ("Folha", ["folha_revisao", "tema", "tipo_txt"], None, False),
+            ("Lote", ["folha_revisao", "tema", "tipo_txt"], None, False),
             ("Andamento", ["etapa_txt", "status_nacional", "inicio_txt"], None, False),
             ("Cargas", ["cargas_txt", "responsavel_nome"], None, False),
             (
@@ -223,7 +223,7 @@ def folhas_supervisao(camada: QgsVectorLayer) -> None:
             ),
         ],
     )  # fmt: skip
-    camada.setDisplayExpression("'Folha · ' || \"folha_revisao\"")
+    camada.setDisplayExpression("CASE WHEN \"tipo\" = 'folha' THEN 'Folha · ' ELSE 'Lote · ' END || \"folha_revisao\"")
     camada.setMapTipTemplate(
         '<b>[% "folha_revisao" %]</b> · [% "etapa" %] ([% ' + _SITUACAO.format(c="situacao") + " %])"
         '<br>[% "cargas_concluidas" %] de [% "cargas_total" %] cargas · '
@@ -248,7 +248,7 @@ def amostras(camada: QgsVectorLayer) -> None:
         f"{_data_hora('avaliado_em')} || CASE WHEN {dias} = 0 THEN ' (hoje)' "
         f"WHEN {dias} = 1 THEN ' (ontem)' ELSE ' (há ' || {dias} || ' dias)' END ELSE '' END",
     )  # fmt: skip
-    _campo_expressao(camada, "folha_txt", "Folha", '"folha_revisao" || \' · \' || "tema"')
+    _campo_expressao(camada, "folha_txt", "Lote", '"folha_revisao" || \' · \' || "tema"')
     _campo_expressao(
         camada, "plano_txt", "Plano",
         "'n = ' || to_int(\"plano_n\") || ', Ac = ' || to_int(\"plano_ac\") || "
@@ -256,7 +256,7 @@ def amostras(camada: QgsVectorLayer) -> None:
         "format_number(\"plano_lqa\", 1) || '%)', '')",
     )  # fmt: skip
     _campo_expressao(
-        camada, "progresso_txt", "Minhas amostras na folha",
+        camada, "progresso_txt", "Minhas amostras no lote",
         "to_int(\"avaliadas_na_folha\") || ' de ' || to_int(\"amostras_na_folha\") || ' avaliadas'",
     )  # fmt: skip
     _campo_expressao(
@@ -276,7 +276,7 @@ def amostras(camada: QgsVectorLayer) -> None:
         camada,
         [
             ("Amostra", ["elemento", "status_txt", "observacao", "ocorrencias_txt"], None, False),
-            ("Folha", ["folha_txt", "etapa", "plano_txt", "progresso_txt"], None, False),
+            ("Lote", ["folha_txt", "etapa", "plano_txt", "progresso_txt"], None, False),
             ("Detalhes", ["geocodigo", "id"], None, True),
         ],
         acoes=acoes,
@@ -292,10 +292,10 @@ def amostras(camada: QgsVectorLayer) -> None:
 def folhas_cq(camada: QgsVectorLayer) -> None:
     """Minhas folhas no subgrupo do CQ: a moldura das folhas em avaliação, só com folha, tema e etapa."""
     _campo_expressao(camada, "etapa_txt", "Etapa", f"\"etapa\" || ' · ' || {_SITUACAO.format(c='situacao')}")
-    camada.setFieldAlias(camada.fields().indexOf("folha_revisao"), "Folha")
+    camada.setFieldAlias(camada.fields().indexOf("folha_revisao"), "Lote")
     camada.setFieldAlias(camada.fields().indexOf("tema"), "Tema")
-    _formulario(camada, [("Folha", ["folha_revisao", "tema", "etapa_txt"], None, False)])
-    camada.setDisplayExpression("'Folha · ' || \"folha_revisao\"")
+    _formulario(camada, [("Lote", ["folha_revisao", "tema", "etapa_txt"], None, False)])
+    camada.setDisplayExpression("'Lote · ' || \"folha_revisao\"")
     camada.setMapTipTemplate('<b>[% "folha_revisao" %]</b> · [% "tema" %] · [% "etapa" %]')
 
 
@@ -305,7 +305,7 @@ def folhas_cq(camada: QgsVectorLayer) -> None:
 # vai pela outbox (`core/edicao.py`). Para ciência (o APM autor) e correção (a revisão com "incluir correções"): tudo só
 # leitura; o Ciente é ação.
 def ocorrencias(camada: QgsVectorLayer, papel: str) -> None:
-    _campo_expressao(camada, "folha_txt", "Folha", "\"folha_revisao\" || coalesce(' · ' || \"tema\", '')")
+    _campo_expressao(camada, "folha_txt", "Lote", "\"folha_revisao\" || coalesce(' · ' || \"tema\", '')")
     _campo_expressao(
         camada, "amostra_txt", "Amostra",
         "coalesce('célula ' || \"amostra_geocodigo\", 'carga ' || to_int(\"id_carga_amostra\"), '—')",

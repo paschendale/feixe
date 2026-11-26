@@ -465,6 +465,8 @@ export type FolhaDistribuir = {
   id_lote: number
   id_lote_etapa: number
   folha_revisao: string
+  // Ainda não vem do servidor; sem ele, a UI diz "lote".
+  tipo?: 'folha' | 'livre'
   tema: string
   etapa: string
   fase: string
@@ -481,7 +483,7 @@ export type SugestaoDistribuicao = { folhas: FolhaDistribuir[]; pessoas: PessoaD
 // CQ (D-147): as amostras de várias folhas juntas, repartidas entre avaliadores na proporção dos pesos (em amostras).
 export type ElementoDistribuirCQ = { id_atividade: number; elemento: string; amostras: number; avaliadas: number }
 export type SugestaoDistribuicaoCQ = {
-  folhas: { id_lote: number; id_lote_etapa: number; folha_revisao: string; tema: string; etapa: string; amostras: number; avaliadas: number; sem_avaliador: number }[]
+  folhas: { id_lote: number; id_lote_etapa: number; folha_revisao: string; tipo?: 'folha' | 'livre'; tema: string; etapa: string; amostras: number; avaliadas: number; sem_avaliador: number }[]
   fora: { id_lote: number; folha_revisao?: string; motivo: string }[]
   elementos: ElementoDistribuirCQ[]
   total: number
@@ -686,7 +688,7 @@ export type GrupoEsperando = {
   desde: string | null
   ate: string | null
   // Na correção de inspeção (D5), quantas ocorrências da folha foram tratadas; fora dela, nulo.
-  folhas: { id_lote: number; folha_revisao: string; situacao: string; desde: string | null; cq: (ResultadoPassagemCQ & { planos: ResultadoPlano[] }) | null; ocorrencias_tratadas: number | null }[]
+  folhas: { id_lote: number; folha_revisao: string; tipo?: 'folha' | 'livre'; situacao: string; desde: string | null; cq: (ResultadoPassagemCQ & { planos: ResultadoPlano[] }) | null; ocorrencias_tratadas: number | null }[]
 }
 
 export type PessoaLote = { conta: string | null; nome: string | null; total: number; concluidas: number; ultima: string | null }

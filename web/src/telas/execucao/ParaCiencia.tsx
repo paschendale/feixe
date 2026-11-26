@@ -111,7 +111,7 @@ export function ParaCiencia({ dados, limite, comCientes }: { dados: Dados; limit
                 </span>
                 {itens.length > 1 && (
                   <Button size="sm" variant="outline" className="ml-auto" disabled={acoes.ocupado === `f-${f.id_lote}`} onClick={() => acoes.todas(f.id_lote, f.folha_revisao, itens.length)}>
-                    <RotuloEstavel ocupado={acoes.ocupado === `f-${f.id_lote}`} rotulo="Ciente em todas desta folha" rotuloOcupado="Marcando…" />
+                    <RotuloEstavel ocupado={acoes.ocupado === `f-${f.id_lote}`} rotulo="Ciente em todas deste lote" rotuloOcupado="Marcando…" />
                   </Button>
                 )}
               </div>
@@ -122,7 +122,7 @@ export function ParaCiencia({ dados, limite, comCientes }: { dados: Dados; limit
       )}
       {limite && folhas.length > mostrar.length && (
         <LinkSeta href="#/execucao/ciencia">
-          e mais {plural(folhas.length - mostrar.length, 'folha', 'folhas')} em Execução › Para ciência
+          e mais {plural(folhas.length - mostrar.length, 'lote', 'lotes')} em Execução › Para ciência
         </LinkSeta>
       )}
       {comCientes && dados.cientes.length > 0 && (

@@ -32,7 +32,7 @@ function ComecePorAqui() {
     },
     {
       titulo: 'Distribuir',
-      texto: 'Uma folha por pessoa: quem recebe começa na hora (a etapa inicia), e as folhas que sobram vão para a fila de cada um.',
+      texto: 'Um lote por pessoa: quem recebe começa na hora (a etapa inicia), e os lotes que sobram vão para a fila de cada um.',
       feito: false,
       link: null,
     },
@@ -41,7 +41,7 @@ function ComecePorAqui() {
     <Bloco className="mt-6 gap-5">
       <div className="flex flex-col gap-1">
         <h2 className="text-titulo-2 font-semibold">Comece por aqui</h2>
-        <span className="text-nota text-muted-foreground">A sua unidade ainda não tem folhas no Feixe. São três passos; o resto o Feixe faz sozinho.</span>
+        <span className="text-nota text-muted-foreground">A sua unidade ainda não tem lotes no Feixe. São três passos; o resto o Feixe faz sozinho.</span>
       </div>
       <ol className="flex flex-col gap-4">
         {passos.map((p, i) => (
@@ -60,7 +60,7 @@ function ComecePorAqui() {
         ))}
       </ol>
       <p className="border-t border-linha pt-4 text-nota text-texto-2">
-        <b>Depois, no dia a dia:</b> quando uma folha termina as cargas, ela aparece aqui em "Precisa de você". Você abre a próxima etapa (as cargas saem na hora) e distribui de novo. Com as filas montadas, quem termina já recebe a próxima folha sem esperar você.
+        <b>Depois, no dia a dia:</b> quando um lote termina as cargas, ele aparece aqui em "Precisa de você". Você abre a próxima etapa (as cargas saem na hora) e distribui de novo. Com as filas montadas, quem termina já recebe o próximo lote sem esperar você.
       </p>
     </Bloco>
   )

@@ -223,7 +223,7 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
     para a CCAR fica de fora.
     """
     linhas = ex.todos(
-        "SELECT l.id AS id_lote, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, "
+        "SELECT l.id AS id_lote, l.tipo, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, "
         "l.id_tema, t.nome AS tema, fe.id AS id_etapa, fe.nome AS etapa, le.situacao, le.id AS id_lote_etapa, "
         "fe.fase, le.resultado, coalesce(le.concluida_em, le.atualizado_em) AS desde, l.id_fluxo, fl.nome AS fluxo, "
         "n.id AS id_proxima, n.nome AS proxima "
@@ -246,7 +246,7 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
     # carga da folha conclui sozinha com a última tratada; carga pela grade, quem a tem conclui); sem carga nenhuma
     # (nada a tratar ao abrir), basta não ter ocorrência por tratar.
     linhas += ex.todos(
-        "SELECT l.id AS id_lote, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, "
+        "SELECT l.id AS id_lote, l.tipo, mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, "
         "l.id_tema, t.nome AS tema, fe.id AS id_etapa, fe.nome AS etapa, le.situacao, le.id AS id_lote_etapa, "
         "fe.fase, le.resultado, "
         "coalesce((SELECT max(c.concluido_em) FROM mapcartacomp.carga_trabalho c WHERE c.id_lote_etapa = le.id), "
@@ -297,6 +297,7 @@ def esperando(ex: Executor, uf: str) -> List[Dict]:
             {
                 "id_lote": r["id_lote"],
                 "folha_revisao": r["folha_revisao"],
+                "tipo": r["tipo"],
                 "situacao": r["situacao"],
                 "desde": r["desde"],
                 "cq": cq,

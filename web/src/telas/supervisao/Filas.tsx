@@ -5,14 +5,14 @@ import { Select } from '@/components/ui/select'
 import { Bloco, Carregando, Colunas, Conteudo, Selo, Tabela, TituloBloco } from '@/components/ds'
 import type { Filas as TFilas, ItemFila, Pessoa } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
-import { dataHora, num, plural } from '@/lib/formato'
+import { contarLotes, dataHora, num, plural } from '@/lib/formato'
 import { href } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'
 import { enviar, useApi } from '@/lib/useApi'
 import { cn } from '@/lib/utils'
 import { rotuloCurto, usePainel } from '../inicio/ResumoSupervisao'
 
-type Candidata = { id_lote_etapa: number; id_lote: number; rotulo: string; a_atribuir: number }
+type Candidata = { id_lote_etapa: number; id_lote: number; tipo: string; rotulo: string; a_atribuir: number }
 
 // Supervisão › Filas (B8, D-106): a fila de folhas de cada pessoa. Quando a pessoa conclui a última carga pendente que
 // tem, o Feixe atribui a ela as cargas a atribuir da primeira folha da fila. Ninguém fica com várias folhas abertas e
@@ -37,8 +37,9 @@ export default function Filas() {
   const naFila = new Set(filas.itens.map((i) => i.id_lote_etapa))
   const candidatas: Candidata[] = lotes.dados.itens
     .filter((l) => ['pendente', 'em_andamento'].includes(l.situacao ?? '') && l.id_lote_etapa_atual && !naFila.has(l.id_lote_etapa_atual) && (aAtribuir.get(l.id) ?? 0) > 0)
-    .map((l) => ({ id_lote_etapa: l.id_lote_etapa_atual!, id_lote: l.id, rotulo: `${l.folha_revisao} · ${l.tema} · ${l.etapa}`, a_atribuir: aAtribuir.get(l.id) ?? 0 }))
+    .map((l) => ({ id_lote_etapa: l.id_lote_etapa_atual!, id_lote: l.id, tipo: l.tipo, rotulo: `${l.folha_revisao} · ${l.tema} · ${l.etapa}`, a_atribuir: aAtribuir.get(l.id) ?? 0 }))
   const nomeLote = (id: number) => lotes.dados!.itens.find((l) => l.id === id)?.folha_revisao ?? `#${id}`
+  const tipoLote = (id: number) => lotes.dados!.itens.find((l) => l.id === id)?.tipo
   const grupo = (c: string) => p.grupos.find((g) => g.chave === c)
   const doPainel = new Map(p.pessoas.map((x) => [x.conta, x]))
   const filaDe = (conta: string) => filas.itens.filter((i) => i.responsavel === conta).sort((a, b) => a.ordem - b.ordem)
@@ -67,7 +68,7 @@ export default function Filas() {
       (r) => {
         const a = (r as { atribuida: { folha_revisao: string; atribuidas: number } | null }).atribuida
         return a
-          ? `${pessoa.nome.split(' ')[0]} estava sem carga: a ${a.folha_revisao} já foi atribuída (${num(a.atribuidas)} cargas).`
+          ? `${pessoa.nome.split(' ')[0]} estava sem carga: ${c.tipo === 'folha' ? 'a' : 'o'} ${a.folha_revisao} já foi ${c.tipo === 'folha' ? 'atribuída' : 'atribuído'} (${num(a.atribuidas)} cargas).`
           : `${c.rotulo.split(' · ')[0]} na fila de ${pessoa.nome.split(' ')[0]}.`
       },
     )
@@ -81,10 +82,10 @@ export default function Filas() {
   return (
     <Conteudo>
       <p className="max-w-[880px] text-lede text-texto-2 [&_b]:font-semibold [&_b]:text-foreground">
-        Quando a pessoa conclui a última carga pendente que tem, o Feixe atribui a ela a primeira folha da fila. Ninguém fica com várias folhas abertas e ninguém fica parado.{' '}
+        Quando a pessoa conclui a última carga pendente que tem, o Feixe atribui a ela o primeiro lote da fila. Ninguém fica com vários lotes abertos e ninguém fica parado.{' '}
         {paradas.length > 0 && (
           <>
-            <b className="text-alerta">{plural(paradas.length, 'pessoa está', 'pessoas estão')}</b> sem carga e sem fila; quem está sem carga recebe na hora a folha que você puser na fila.
+            <b className="text-alerta">{plural(paradas.length, 'pessoa está', 'pessoas estão')}</b> sem carga e sem fila; quem está sem carga recebe na hora o lote que você puser na fila.
           </>
         )}
       </p>
@@ -115,7 +116,7 @@ export default function Filas() {
                         {agora && (
                           <span className="block text-nota text-muted-foreground">
                             {agora.grupos.map((c) => (grupo(c) ? rotuloCurto(grupo(c)!) : c)).join(', ')}
-                            {agora.lotes.length ? ` · ${agora.lotes.length <= 2 ? agora.lotes.map(nomeLote).join(', ') : plural(agora.lotes.length, 'folha', 'folhas')}` : ''}
+                            {agora.lotes.length ? ` · ${agora.lotes.length <= 2 ? agora.lotes.map(nomeLote).join(', ') : contarLotes(agora.lotes.map((id) => ({ tipo: tipoLote(id) })))}` : ''}
                           </span>
                         )}
                       </>
@@ -159,9 +160,9 @@ export default function Filas() {
                         const c = candidatas.find((k) => k.id_lote_etapa === Number(e.target.value))
                         if (c) adicionar(x, c)
                       }}
-                      aria-label={`Pôr folha na fila de ${x.nome}`}
+                      aria-label={`Pôr lote na fila de ${x.nome}`}
                     >
-                      <option value="">{candidatas.length ? '+ Pôr uma folha na fila…' : naFila.size ? 'Todas as folhas com cargas a atribuir já estão numa fila' : 'Nenhuma folha com cargas a atribuir'}</option>
+                      <option value="">{candidatas.length ? '+ Pôr um lote na fila…' : naFila.size ? 'Todos os lotes com cargas a atribuir já estão numa fila' : 'Nenhum lote com cargas a atribuir'}</option>
                       {candidatas.map((c) => (
                         <option key={c.id_lote_etapa} value={c.id_lote_etapa}>
                           {c.rotulo} · {num(c.a_atribuir)} a atribuir
@@ -189,7 +190,7 @@ export default function Filas() {
         </Bloco>
       )}
       <p className="text-nota text-muted-foreground">
-        Na lista para pôr na fila entram as folhas com etapa aberta e cargas a atribuir que não estão na fila de ninguém. Uma folha da fila que não tem mais nada a atribuir (alguém pegou as cargas) é pulada e fica marcada aqui para você tirar. Desfazer uma conclusão não desfaz a atribuição.
+        Na lista para pôr na fila entram os lotes com etapa aberta e cargas a atribuir que não estão na fila de ninguém. Um lote da fila que não tem mais nada a atribuir (alguém pegou as cargas) é pulado e fica marcado aqui para você tirar. Desfazer uma conclusão não desfaz a atribuição.
       </p>
     </Conteudo>
   )

@@ -79,7 +79,7 @@ function Cargas({ p }: { p: Passagem }) {
           {lista.length === 0 && (
             <tr>
               <td colSpan={variasAtividades ? 4 : 3} className="text-muted-foreground">
-                {aba === 'pendentes' ? 'Nenhuma pendente: sua parte nesta folha terminou.' : aba === 'hoje' ? 'Nenhuma concluída hoje.' : 'Nenhuma concluída ainda.'}
+                {aba === 'pendentes' ? 'Nenhuma pendente: sua parte neste lote terminou.' : aba === 'hoje' ? 'Nenhuma concluída hoje.' : 'Nenhuma concluída ainda.'}
               </td>
             </tr>
           )}
@@ -231,7 +231,7 @@ function MinhasCargas({ passagens: todas, temCQ }: { passagens: Passagem[]; temC
                 Nenhuma carga de produção com você agora. As suas amostras de CQ estão em <a className="font-medium text-primary hover:underline" href={href('execucao/cq')}>Minhas amostras</a>.
               </>
             ) : (
-              'Nenhuma carga atribuída a você em folhas abertas. O supervisor atribui as cargas.'
+              'Nenhuma carga atribuída a você em lotes abertos. O supervisor atribui as cargas.'
             )}
           </Vazio>
         </Bloco>
@@ -265,7 +265,7 @@ function MinhasCargas({ passagens: todas, temCQ }: { passagens: Passagem[]; temC
           )}
           {outras.length > 0 && (
             <div className="flex flex-wrap gap-2">
-              <span className="text-muted-foreground">Outras folhas nesta atividade:</span>
+              <span className="text-muted-foreground">Outros lotes nesta atividade:</span>
               {outras.map((p) => (
                 <a key={p.id_lote_etapa} href={href('execucao/cargas', { atividade: chave, folha: p.id_lote_etapa })} className="tab font-medium text-primary hover:underline">
                   {p.folha_revisao} ({num(pendentesDe(p))})
@@ -279,7 +279,7 @@ function MinhasCargas({ passagens: todas, temCQ }: { passagens: Passagem[]; temC
               <Bloco key={p.id_lote_etapa} className="gap-1.5">
                 <TituloBloco titulo={`${p.folha_revisao} · ${p.tema}`} />
                 <span className="text-nota text-muted-foreground">
-                  {plural(p.total, 'carga concluída', 'cargas concluídas')}. Sua parte terminou; a folha segue quando o supervisor abrir a próxima etapa.
+                  {plural(p.total, 'carga concluída', 'cargas concluídas')}. Sua parte terminou; o lote segue quando o supervisor abrir a próxima etapa.
                 </span>
                 <LinkSeta href={href('execucao/cargas', { atividade: chave, folha: p.id_lote_etapa })} className="text-nota">
                   Ver as cargas

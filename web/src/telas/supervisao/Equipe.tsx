@@ -5,7 +5,7 @@ import { Carregando, Colunas, Conteudo, Fichas, RotuloEstavel, Selo, Tabela } fr
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { Pessoa, ResultadoPassar } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
-import { lista, num, parado, plural, quando } from '@/lib/formato'
+import { contarLotes, lista, num, parado, plural, quando } from '@/lib/formato'
 import { href, navegar, useRota } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'
 import { enviar, useApi } from '@/lib/useApi'
@@ -66,6 +66,7 @@ export default function Equipe() {
   const doPainel = new Map(p.pessoas.map((x) => [x.conta, x]))
   const grupo = (c: string) => p.grupos.find((g) => g.chave === c)
   const nomeLote = (id: number) => lotes.dados?.itens.find((l) => l.id === id)?.folha_revisao ?? `#${id}`
+  const contar = (ids: number[]) => contarLotes(ids.map((id) => ({ tipo: lotes.dados?.itens.find((l) => l.id === id)?.tipo })))
   const linhas = equipe.itens
     .map((x) => ({ ...x, painel: doPainel.get(x.conta) }))
     .filter((x) => ativa === 'todas' || x.painel?.grupos.includes(ativa))
@@ -142,7 +143,7 @@ export default function Equipe() {
               const onde = x.painel?.grupos.map((c) => ondeDe(c, x.painel?.por_grupo)) ?? []
               const destino = destinoDe(x)
               const folhas = x.painel?.lotes ?? []
-              const textoOnde = `${lista(onde)}${folhas.length > 0 ? ` · ${folhas.length <= 2 ? lista(folhas.map(nomeLote)) : plural(folhas.length, 'folha', 'folhas')}` : ''}`
+              const textoOnde = `${lista(onde)}${folhas.length > 0 ? ` · ${folhas.length <= 2 ? lista(folhas.map(nomeLote)) : contar(folhas)}` : ''}`
               const nome = `${x.nome}${x.conta === eu?.conta ? ' (você)' : ''}`
               return (
                 <tr key={x.conta}>
@@ -156,7 +157,7 @@ export default function Equipe() {
                     {x.pendentes ? (
                       <>
                         {lista(onde)}
-                        {folhas.length > 0 && <span className="text-muted-foreground"> · {folhas.length <= 2 ? lista(folhas.map(nomeLote)) : plural(folhas.length, 'folha', 'folhas')}</span>}
+                        {folhas.length > 0 && <span className="text-muted-foreground"> · {folhas.length <= 2 ? lista(folhas.map(nomeLote)) : contar(folhas)}</span>}
                       </>
                     ) : (
                       <Selo tom="alerta">sem carga</Selo>
@@ -178,7 +179,7 @@ export default function Equipe() {
                         <PopoverContent>
                           <div className="flex flex-col gap-1">
                             <p className="font-semibold">Passar as {plural(x.pendentes, 'pendente', 'pendentes')}</p>
-                            <p className="text-nota text-muted-foreground">Uma folha por pessoa: o que não couber agora entra na fila de quem recebe. As concluídas ficam com {x.nome.split(' ')[0]}.</p>
+                            <p className="text-nota text-muted-foreground">Um lote por pessoa: o que não couber agora entra na fila de quem recebe. As concluídas ficam com {x.nome.split(' ')[0]}.</p>
                           </div>
                           <Select value={passar?.para ?? ''} onChange={(e) => passar && setPassar({ ...passar, para: e.target.value })} aria-label="Para quem">
                             <option value="">Para quem?</option>

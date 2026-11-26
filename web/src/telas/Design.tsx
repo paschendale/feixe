@@ -75,7 +75,7 @@ export default function Design() {
           <Button variant="ghost">Limpar</Button>
           <Button variant="destructive-tinted">Desfazer</Button>
           <Button variant="destructive">Excluir</Button>
-          <Button variant="link">Abrir a folha</Button>
+          <Button variant="link">Abrir o lote</Button>
           <Button variant="tinted" size="icon" className="rounded-full" aria-label="Continuar no QGIS">
             <Play className="size-3.5 fill-current" />
           </Button>
@@ -89,7 +89,7 @@ export default function Design() {
       <Exemplo titulo="Campos e filtros" uso="Campo rotula um controle; Segmentado para 2 a 6 escolhas exclusivas; Fichas para muitas escolhas com contagem (atividades).">
         <Bloco className="gap-5">
           <div className="flex flex-wrap items-end gap-3">
-            <Campo rotulo="Buscar folha">
+            <Campo rotulo="Buscar lote">
               <Input type="search" placeholder="MI ou nome" className="w-56" />
             </Campo>
             <Campo rotulo="Situação">
@@ -115,7 +115,7 @@ export default function Design() {
             fichas={[
               { id: 'a', rotulo: 'Aquisição BC100 - LML', contagem: 7 },
               { id: 'b', rotulo: 'CQ · ADE', contagem: 47 },
-              { id: 't', rotulo: 'Todas as folhas', contagem: 163, todas: true },
+              { id: 't', rotulo: 'Todos os lotes', contagem: 163, todas: true },
             ]}
           />
         </Bloco>
@@ -124,7 +124,7 @@ export default function Design() {
       <Exemplo titulo="Métricas" uso="O número que resume a tela ou pede atenção. tom='alerta' quando há algo esperando alguém; um gráfico pequeno pode ir embaixo.">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
           <Metrica valor={160} rotulo="cargas pendentes" detalhe="2568-1" />
-          <Metrica valor={63} tom="alerta" rotulo="folhas esperando você" detalhe="62 de Hidrografia e 1 de LML">
+          <Metrica valor={63} tom="alerta" rotulo="lotes esperando você" detalhe="62 de Hidrografia e 1 de LML">
             <LinkSeta href="#/design" className="mt-2">
               Decidir
             </LinkSeta>
@@ -162,7 +162,7 @@ export default function Design() {
         </Bloco>
       </Exemplo>
 
-      <Exemplo titulo="Lista agrupada" uso="Coleções que se navegam item a item (folhas, pessoas, fluxos). A seta aparece quando a linha leva a outra tela; ações que não navegam ficam à direita, fora do link.">
+      <Exemplo titulo="Lista agrupada" uso="Coleções que se navegam item a item (lotes, pessoas, fluxos). A seta aparece quando a linha leva a outra tela; ações que não navegam ficam à direita, fora do link.">
         <Lista>
           <LinhaLista href="#/design" inicio={<Anel partes={[{ valor: 8, cor: COR.concluida }]} total={168} />} titulo="2568-1" sub="LML · Aquisição e revisão" fim={<span className="tab">8/168 cargas</span>} />
           <LinhaLista
@@ -182,7 +182,7 @@ export default function Design() {
               </Button>
             }
           />
-          <LinhaLista titulo="2571-1" sub="Sua parte terminou. A folha segue quando o supervisor abrir a próxima etapa." fim={<Selo tom="sucesso">concluída</Selo>} />
+          <LinhaLista titulo="2571-1" sub="Sua parte terminou. O lote segue quando o supervisor abrir a próxima etapa." fim={<Selo tom="sucesso">concluída</Selo>} />
         </Lista>
       </Exemplo>
 
@@ -191,7 +191,7 @@ export default function Design() {
           <Colunas larguras={[110, undefined, 120, 140]} />
           <thead>
             <tr>
-              <th>Folha</th>
+              <th>Lote</th>
               <th>Responsável</th>
               <th className="text-right">Pendentes</th>
               <th>Status</th>
@@ -224,7 +224,7 @@ export default function Design() {
             A carga 2568-1 · 3417 foi concluída por outra pessoa antes da sua sincronização.
           </Nota>
           <Nota tom="info">As cargas saem sozinhas quando a etapa abre.</Nota>
-          <Nota tom="sucesso">Folha distribuída para 3 pessoas.</Nota>
+          <Nota tom="sucesso">Lote distribuído para 3 pessoas.</Nota>
           <Nota tom="perigo">Sem conexão com a CCAR.</Nota>
           <Bloco>
             <TituloBloco titulo="Equipe" sub="16 pessoas com carga" acao={<LinkSeta href="#/design">Abrir Equipe</LinkSeta>} />

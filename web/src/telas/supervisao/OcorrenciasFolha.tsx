@@ -48,7 +48,7 @@ export function OcorrenciasFolha({ idLote }: { idLote: number }) {
         <Colunas larguras={[64, undefined, 104, 100, 112]} />
         <thead>
           <tr>
-            <th>Folha</th>
+            <th>Lote</th>
             <th>Elemento e anotação</th>
             <th>Quem</th>
             <th>Situação</th>

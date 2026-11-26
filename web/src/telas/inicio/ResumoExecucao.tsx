@@ -48,13 +48,13 @@ function situacao(i: Item): string | null {
   if (i.tipo === 'carga') {
     const falta = pendentesDe(i.p)
     if (falta > 0 && !ABERTAS.includes(i.p.situacao)) return `A etapa foi encerrada pelo supervisor com ${plural(falta, 'carga pendente', 'cargas pendentes')} suas.`
-    if (falta === 0) return 'Sua parte terminou. A folha segue quando o supervisor abrir a próxima etapa.'
+    if (falta === 0) return 'Sua parte terminou. O lote segue quando o supervisor abrir a próxima etapa.'
     return null
   }
   if (i.tipo === 'cq') {
     const f = i.linhas[0]
     if (!f.aberta) return 'A etapa de CQ foi encerrada pelo supervisor.'
-    if (somaCQ(i.linhas).pendentes === 0) return 'Folha avaliada: o supervisor decide aprovar ou nova revisão.'
+    if (somaCQ(i.linhas).pendentes === 0) return 'Lote avaliado: o supervisor decide aprovar ou nova revisão.'
     return null
   }
   return i.f.pendentes > 0 ? null : 'Todas as ocorrências tratadas: o supervisor decide o próximo passo.'
@@ -199,10 +199,10 @@ export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
         <Metrica
           valor={pendentesProducao}
           rotulo={pendentesProducao === 1 ? 'carga pendente' : 'cargas pendentes'}
-          detalhe={folhasProducao.length ? (folhasProducao.length <= 3 ? lista(folhasProducao.map((p) => p.folha_revisao)) : plural(folhasProducao.length, 'folha', 'folhas')) : 'nenhuma folha de produção com você'}
+          detalhe={folhasProducao.length ? (folhasProducao.length <= 3 ? lista(folhasProducao.map((p) => p.folha_revisao)) : plural(folhasProducao.length, 'lote', 'lotes')) : 'nenhum lote de produção com você'}
         />
         {(amostrasPendentes > 0 || folhasCQ.length > 0) && (
-          <Metrica valor={amostrasPendentes} rotulo={amostrasPendentes === 1 ? 'amostra de CQ para avaliar' : 'amostras de CQ para avaliar'} detalhe={plural(cqComPendentes.length, 'folha', 'folhas')} />
+          <Metrica valor={amostrasPendentes} rotulo={amostrasPendentes === 1 ? 'amostra de CQ para avaliar' : 'amostras de CQ para avaliar'} detalhe={plural(cqComPendentes.length, 'lote', 'lotes')} />
         )}
         {aTratar > 0 && <Metrica valor={aTratar} tom="alerta" rotulo={aTratar === 1 ? 'ocorrência para tratar' : 'ocorrências para tratar'} detalhe="na correção de inspeção" />}
         <Metrica valor={hoje} rotulo={hoje === 1 ? 'concluída hoje' : 'concluídas hoje'}>
@@ -229,7 +229,7 @@ export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
       {resto.length > 0 && (
         <div className="flex flex-col gap-2.5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <Rotulo>{proxima ? 'As outras folhas' : 'Suas folhas'}</Rotulo>
+            <Rotulo>{proxima ? 'Os outros lotes' : 'Seus lotes'}</Rotulo>
             {tiposPresentes > 1 && <Segmentado rotulo="Tipo de trabalho" opcoes={opcoes} ativa={filtro} escolher={setFiltro} />}
           </div>
           <Lista>
@@ -241,7 +241,7 @@ export function ResumoExecucao({ comTitulo }: { comTitulo: boolean }) {
       )}
     </>
   )
-  if (!comTitulo) return <section aria-label="Suas folhas" className="flex flex-col gap-6">{corpo}</section>
+  if (!comTitulo) return <section aria-label="Seus lotes" className="flex flex-col gap-6">{corpo}</section>
   return (
     <Secao titulo="Execução" sub="as cargas que estão com você" link={{ href: '#/execucao', rotulo: 'Abrir Execução' }}>
       {corpo}

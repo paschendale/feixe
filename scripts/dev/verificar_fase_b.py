@@ -186,9 +186,9 @@ def b1(amb, usuario, senha):
             return [(f.name(), arvore(f)) if f.children() else f.name() for f in no.children()]
 
         feixe = raiz.findGroup("Feixe")
-        trio = ["Folhas", "Cargas por responsável", "Cargas a atribuir"]
+        trio = ["Lotes", "Cargas por responsável", "Cargas a atribuir"]
         assert arvore(feixe) == [
-            ("Execução", ["Minhas cargas", "Minhas folhas"]),
+            ("Execução", ["Minhas cargas", "Meus lotes"]),
             ("Supervisão", [(g["rotulo"], trio) for g in sup]),
         ], arvore(feixe)
         ok(f"subgrupos por atividade em produção (CQ de um tema junto): {[g['rotulo'] for g in sup]}")
@@ -196,10 +196,10 @@ def b1(amb, usuario, senha):
             sub = feixe.findGroup("Supervisão").findGroup(g["rotulo"])
             n = {no.name(): no.layer().featureCount() for no in sub.findLayers()}
             e = esperado[g["rotulo"]]
-            assert n == {"Folhas": e["folhas"], "Cargas por responsável": e["atribuidas"],
+            assert n == {"Lotes": e["folhas"], "Cargas por responsável": e["atribuidas"],
                          "Cargas a atribuir": e["a_atribuir"]}, (g["rotulo"], n, e)  # fmt: skip
         n = {c["nome"]: c["feicoes"] for c in r["camadas"][:2]}
-        assert n == {"Minhas cargas": 5, "Minhas folhas": 1}, n
+        assert n == {"Minhas cargas": 5, "Meus lotes": 1}, n
         ok(f"contagens por subgrupo conferem com o banco: {esperado}")
         ligados = [s_.name() for s_ in feixe.findGroup("Supervisão").children() if s_.itemVisibilityChecked()]
         maior = max(sup, key=lambda g: esperado[g["rotulo"]]["folhas"])["rotulo"]
@@ -246,7 +246,7 @@ def b1(amb, usuario, senha):
         assert [a.name() for a in minhas.actions().actions()] == ["Trabalhar nesta carga", "Pular esta carga"]
         ff = next(mfolhas.getFeatures())
         assert ff["minhas_txt"].endswith("de 5 concluídas"), ff["minhas_txt"]
-        assert [a.name() for a in mfolhas.actions().actions()] == ["Próxima carga nesta folha"]
+        assert [a.name() for a in mfolhas.actions().actions()] == ["Próxima carga neste lote"]
         for camada in [no.layer() for no in feixe.findGroup("Supervisão").findLayers()]:
             f = next(camada.getFeatures(), None)
             if f is None:
@@ -260,7 +260,7 @@ def b1(amb, usuario, senha):
         ok("formulários, dicas e ações: APM com situação e progresso; supervisor só leitura, com abrir no Feixe")
 
         apm = camadas.montar(amb, authcfg, {"uf": "DF", "papeis": ["apm"]}, [], None, exe, ws.caminho)
-        assert apm["modo"] == "execucao" and [c["nome"] for c in apm["camadas"]] == ["Minhas cargas", "Minhas folhas"]
+        assert apm["modo"] == "execucao" and [c["nome"] for c in apm["camadas"]] == ["Minhas cargas", "Meus lotes"]
         try:
             camadas.modo("supervisao")
             raise AssertionError("APM entrou no modo supervisão")
@@ -290,7 +290,7 @@ def b1(amb, usuario, senha):
         crua.rollBack()
         ok("Minhas cargas é do workspace; gravar nele por fora do Feixe é recusado (a edição vai pela outbox, c4)")
 
-        caminho = _renderizar(os.path.join(SAIDA, "feixe-b1-camadas.png"), "Folhas")
+        caminho = _renderizar(os.path.join(SAIDA, "feixe-b1-camadas.png"), "Lotes")
         ok(f"imagem das camadas em {caminho}")
     finally:
         QgsProject.instance().clear()

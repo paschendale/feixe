@@ -104,10 +104,10 @@ def mensagens_edicao(r: Dict) -> Tuple[List[str], List[str]]:
     f = r.get("fila")
     if f:
         ok.append(
-            f"A próxima folha da sua fila é a {f['folha_revisao']} ({f['atribuidas']} cargas), já atribuída a você."
+            f"O próximo lote da sua fila é o {f['folha_revisao']} ({f['atribuidas']} cargas), já atribuído a você."
         )
     for x in r.get("recusadas") or []:
-        folha = f" da {x['folha_revisao']}" if x.get("folha_revisao") else ""
+        folha = f" em {x['folha_revisao']}" if x.get("folha_revisao") else ""
         motivo = x["motivo"][:1].upper() + x["motivo"][1:]
         avisos.append(f"Carga {x['id']}{folha}: {motivo}. A mudança foi desfeita.")
     return ok, avisos

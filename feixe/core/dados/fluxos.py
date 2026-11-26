@@ -145,7 +145,7 @@ def _gravar_etapas(ex: Executor, id_fluxo: int, etapas: List[Dict]) -> None:
     for id_etapa, r in atuais.items():
         if id_etapa not in ficam:
             if r["passagens"]:
-                raise ErroDados(f"a etapa {r['nome']} já tem passagens de folhas e não pode sair do fluxo")
+                raise ErroDados(f"a etapa {r['nome']} já tem passagens de lotes e não pode sair do fluxo")
             ex.executar("DELETE FROM mapcartacomp.fluxo_etapa WHERE id = %s", (id_etapa,))
     for ordem, e in enumerate(etapas, start=1):
         valores = (
@@ -331,7 +331,7 @@ def acao(ex: Executor, uf: str, id_lote_etapa: int, qual: str, observacao: str, 
             raise ErroDados(f"{nome}: só se reabre a última etapa concluída")
         aberta = _outra_aberta(ex, p["id_lote"], p["id"])
         if aberta:
-            raise ErroDados(f"a folha já tem a etapa {aberta['etapa']} aberta")
+            raise ErroDados(f"o lote já tem a etapa {aberta['etapa']} aberta")
         ex.executar(
             "UPDATE mapcartacomp.lote_etapa SET situacao = 'em_andamento', concluida_em = NULL, concluida_por = NULL, "
             "resultado = NULL WHERE id = %s",
@@ -368,10 +368,10 @@ def nova_passagem(
         (id_fluxo_etapa, lote["id_fluxo"]),
     )
     if not etapa:
-        raise ErroDados("etapa fora do fluxo desta folha", 400)
+        raise ErroDados("etapa fora do fluxo deste lote", 400)
     aberta = _outra_aberta(ex, id_lote, -1)
     if aberta:
-        raise ErroDados(f"a folha já tem a etapa {aberta['etapa']} aberta: conclua ou pule antes")
+        raise ErroDados(f"o lote já tem a etapa {aberta['etapa']} aberta: conclua ou pule antes")
     feitas = ex.um(
         "SELECT count(*) AS n, coalesce(max(instancia), 0) AS ultima FROM mapcartacomp.lote_etapa "
         "WHERE id_lote = %s AND id_fluxo_etapa = %s",
@@ -424,7 +424,7 @@ def abrir_proximas(ex: Executor, uf: str, ids: List[int], observacao: str) -> Di
         if not r or r["uf"] != uf:
             erros.append({"id_lote": i, "erro": "lote não encontrado na sua unidade"})
         elif r["aberta"]:
-            erros.append({"id_lote": i, "erro": f"a folha já tem a etapa {r['aberta']} aberta"})
+            erros.append({"id_lote": i, "erro": f"o lote já tem a etapa {r['aberta']} aberta"})
         elif r["id_etapa"] is None:
             erros.append({"id_lote": i, "erro": "sem próxima etapa no fluxo"})
         elif r["nao_puladas"] and not r["repetivel"]:
@@ -486,11 +486,11 @@ def avancar(ex: Executor, uf: str, ids: List[int], observacao: Optional[str], pr
     for r in linhas:
         erro = None
         if r["uf"] != uf:
-            erro = "folha de outra unidade"
+            erro = "lote de outra unidade"
         elif r["situacao"] == "pendente":
             erro = f"{r['etapa']} ainda não começou: distribua as cargas, ou pule a etapa pela gaveta"
         elif r["situacao"] == "em_andamento" and r["fase"] == "envio_gcq":
-            erro = "o resultado da GCQ se registra na gaveta da folha"
+            erro = "o resultado da GCQ se registra na gaveta do lote"
         elif r["situacao"] == "em_andamento" and r["fase"] == "cq":
             # O CQ termina pela decisão sobre o resultado (D4), que fica registrada: aprovar ou nova revisão.
             erro = (
@@ -551,13 +551,13 @@ def encerrar(ex: Executor, uf: str, ids: List[int], observacao: Optional[str], p
     for r in linhas:
         erro = None
         if r["uf"] != uf:
-            erro = "folha de outra unidade"
+            erro = "lote de outra unidade"
         elif r["status_nacional"] == "CONCLUIDA":
-            erro = "a folha já está concluída"
+            erro = "o lote já está concluído"
         elif r["id_lote_etapa"] is None:
-            erro = "a folha ainda não entrou no fluxo"
+            erro = "o lote ainda não entrou no fluxo"
         elif r["situacao"] != "concluida":
-            erro = f"{r['etapa']} ainda está aberta: termine a etapa antes de encerrar a folha"
+            erro = f"{r['etapa']} ainda está aberta: termine a etapa antes de encerrar o lote"
         elif r["proxima"] is not None:
             erro = f"o fluxo ainda tem {r['proxima']}: abra a próxima etapa em vez de encerrar"
         itens.append({"id_lote": r["id_lote"], "folha_revisao": r["folha_revisao"], "tema": r["tema"],
@@ -619,7 +619,7 @@ def _item_cq(r: Dict, res: Optional[Dict], decisao: str, uf: str) -> Dict:
     """O que a decisão faz numa folha (ou por que não), para a prévia e para a execução."""
     erro = aviso = None
     if r["uf"] != uf:
-        erro = "folha de outra unidade"
+        erro = "lote de outra unidade"
     elif r["fase"] != "cq":
         erro = f"a etapa atual ({r['etapa'] or 'nenhuma'}) não é de CQ"
     elif r["situacao"] == "pendente":
@@ -636,7 +636,7 @@ def _item_cq(r: Dict, res: Optional[Dict], decisao: str, uf: str) -> Dict:
     if not erro:
         avisos = []
         if decisao == "aprovar" and resultado == "reprovado":
-            avisos.append("reprovada no CQ: aprovar assim mesmo pede a sua confirmação e fica no histórico")
+            avisos.append("reprovado no CQ: aprovar assim mesmo pede a sua confirmação e fica no histórico")
         if res and res["faltam"]:
             falta = "falta avaliar 1 amostra" if res["faltam"] == 1 else f"faltam avaliar {res['faltam']} amostras"
             avisos.append(f"{falta}: decidir agora encerra o CQ com o que foi avaliado")
@@ -667,15 +667,15 @@ def previa_cq(ex: Executor, uf: str, ids: List[int], decisao: str) -> Dict:
 def _texto_cq(decisao: str, item: Dict, obs: Optional[str]) -> str:
     """A linha do histórico: a decisão, o resultado por elemento e a observação do supervisor."""
     if decisao == "aprovar":
-        cabeca = "Aprovada no CQ"
+        cabeca = "Aprovado no CQ"
         if item["resultado"] == "reprovado":
-            cabeca += " pelo supervisor, apesar de reprovada"
+            cabeca += " pelo supervisor, apesar de reprovado"
         elif item["resultado"] == "sem_ac":
             cabeca += " (plano sem Ac)"
     else:
-        cabeca = "Reprovada no CQ" if item["resultado"] == "reprovado" else "Nova revisão pedida no CQ"
+        cabeca = "Reprovado no CQ" if item["resultado"] == "reprovado" else "Nova revisão pedida no CQ"
         if item["resultado"] == "aprovado":
-            cabeca += ", apesar de aprovada"
+            cabeca += ", apesar de aprovado"
     corpo = f": {item['resumo']}" if item["resumo"] else ""
     if item["faltam"]:
         corpo += f" ({item['faltam']} sem avaliação)"
@@ -700,14 +700,14 @@ def decidir_cq(
         raise ErroDados("decisão do CQ: aprovar ou nova_revisao", 400)
     linhas = _alvos_cq(ex, [id_lote], travar=True)
     if not linhas:
-        raise ErroDados("folha não encontrada na sua unidade", 404)
+        raise ErroDados("lote não encontrado na sua unidade", 404)
     r = linhas[0]
     res = dcq.resultados(ex, [r["id_lote_etapa"]]).get(r["id_lote_etapa"]) if r["fase"] == "cq" else None
     item = _item_cq(r, res, decisao, uf)
     if item["erro"]:
         raise ErroDados(f"{r['folha_revisao']}: {item['erro']}")
     if decisao == "aprovar" and item["resultado"] == "reprovado" and not forcar:
-        raise ErroDados(f"{r['folha_revisao']}: reprovada no CQ; para aprovar assim mesmo, confirme o aviso")
+        raise ErroDados(f"{r['folha_revisao']}: reprovado no CQ; para aprovar assim mesmo, confirme o aviso")
     ex.executar(
         "UPDATE mapcartacomp.lote_etapa SET resultado = %s, situacao = 'concluida', "
         "concluida_em = coalesce(concluida_em, now()), concluida_por = coalesce(concluida_por, current_user) "

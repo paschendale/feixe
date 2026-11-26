@@ -185,7 +185,7 @@ def registrar(r, ctx) -> None:
             itens = dq.ocorrencias_do_lote(ex, uf_de(ctx.eu()), inteiro(req.params["id"]))["itens"]
         o = next((i for i in itens if i["uuid"] == u), None)
         if o is None:
-            raise ErroApi(404, "ocorrência não encontrada nesta folha")
+            raise ErroApi(404, "ocorrência não encontrada neste lote")
         return 200, _zoom_ponto(ctx, o["x"], o["y"])
 
     # --- execução sobre o workspace (D3a) ---

@@ -44,7 +44,7 @@ def maiores_restos(total: int, pesos: List[Tuple[str, float]]) -> Dict[str, int]
 
 def _passagens(ex: Executor, uf: str, id_lotes: List[int]) -> List[Dict]:
     return ex.todos(
-        "SELECT l.id AS id_lote, l.cod_projeto, le.id AS id_lote_etapa, le.id_fluxo_etapa, "
+        "SELECT l.id AS id_lote, l.tipo, l.cod_projeto, le.id AS id_lote_etapa, le.id_fluxo_etapa, "
         "mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, t.nome AS tema, fe.nome AS etapa "
         "FROM mapcartacomp.lote l JOIN mapcartacomp.tema t ON t.id = l.id_tema "
         f"JOIN mapcartacomp.lote_etapa le ON le.id_lote = l.id AND le.situacao IN {_ABERTAS} "
@@ -111,7 +111,7 @@ def _ultima_equipe(ex: Executor, uf: str, etapas: List[int], fora: List[int]) ->
 def _contexto(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
     ps = _passagens(ex, uf, id_lotes)
     com_cq = {p["id_lote"] for p in ps}
-    fora = [{"id_lote": i, "motivo": "a folha não está numa etapa de CQ aberta"} for i in id_lotes if i not in com_cq]
+    fora = [{"id_lote": i, "motivo": "o lote não está numa etapa de CQ aberta"} for i in id_lotes if i not in com_cq]
     amostras = _amostras(ex, [p["id_lote_etapa"] for p in ps]) if ps else []
     tem = {a["id_lote_etapa"] for a in amostras}
     for p in ps:
@@ -139,7 +139,7 @@ def _contexto(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
         if ps and len(x["bloqueadas"]) == len(ps):
             x["motivo"] = f"executou {', '.join(x['executou'])}: ninguém avalia o próprio trabalho"
         elif x["projetos"] != set(projetos):
-            x["motivo"] = "sem perfil num dos projetos destas folhas"
+            x["motivo"] = "sem perfil num dos projetos destes lotes"
         elif tem_v and ":V" not in x["perfis"]:
             x["motivo"] = "sem perfil de avaliador (V) no projeto"
         else:
@@ -202,6 +202,7 @@ def sugestao(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
         da = [a for a in amostras if a["id_lote_etapa"] == p["id_lote_etapa"]]
         folhas.append({
             "id_lote": p["id_lote"], "id_lote_etapa": p["id_lote_etapa"], "folha_revisao": p["folha_revisao"],
+            "tipo": p["tipo"],
             "tema": p["tema"], "etapa": p["etapa"], "amostras": len(da),
             "avaliadas": sum(1 for a in da if a["concluido"]),
             "sem_avaliador": sum(1 for a in da if not a["responsavel"] and not a["concluido"]),
@@ -308,16 +309,16 @@ def distribuir(ex: Executor, uf: str, id_lotes: List[int], pesos: Dict[str, floa
     ctx = _contexto(ex, uf, id_lotes)
     amostras, pessoas = ctx["amostras"], ctx["pessoas"]
     if not amostras:
-        raise ErroDados("nenhuma destas folhas tem amostras de CQ a distribuir", 400)
+        raise ErroDados("nenhum destes lotes tem amostras de CQ a distribuir", 400)
     lista = [(c, float(p)) for c, p in pesos.items() if p is not None and float(p) > 0]
     if not lista:
         raise ErroDados("escolha ao menos um avaliador com peso maior que zero", 400)
     for c, _ in lista:
         p = pessoas.get(c)
         if p is None:
-            raise ErroDados(f"{c} não está na equipe do projeto destas folhas", 400)
+            raise ErroDados(f"{c} não está na equipe do projeto destes lotes", 400)
         if p["motivo"]:
-            raise ErroDados(f"{p['nome'] or c} não pode avaliar estas folhas: {p['motivo']}", 400)
+            raise ErroDados(f"{p['nome'] or c} não pode avaliar estes lotes: {p['motivo']}", 400)
     lista.sort(key=lambda x: (pessoas[x[0]]["nome"] or "", x[0]))
     novo = repartir(amostras, lista, {c: pessoas[c]["bloqueadas"] for c, _ in lista})
     mudam = {a["id"]: novo[a["id"]] for a in amostras if a["id"] in novo and novo[a["id"]] != a["responsavel"]}

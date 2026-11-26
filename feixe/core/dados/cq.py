@@ -63,7 +63,7 @@ def sortear(geocodigos: Sequence[str], n: int, semente: int) -> List[str]:
 def calcular(N: int, nivel, lqa) -> am.Resultado:
     """`amostragem.calcular` com a recusa em português para o supervisor."""
     if N <= 0:
-        raise ErroDados("não sobrou célula para sortear: todas já saíram em planos anteriores desta folha", 409)
+        raise ErroDados("não sobrou célula para sortear: todas já saíram em planos anteriores deste lote", 409)
     try:
         return am.calcular(N, nivel, lqa)
     except am.ErroAmostragem as e:
@@ -377,7 +377,7 @@ def gerar_padrao(ex: Executor, passagens: List[Dict]) -> Tuple[List[Dict], List[
         ident = {"id_lote_etapa": le, "folha_revisao": p["folha_revisao"], "etapa": p["etapa"]}
         if p["nivel_inspecao"] is None or p["lqa"] is None:
             avisos.append({**ident, "aviso": "a etapa não tem nível de inspeção e LQA padrão: crie os planos de "
-                                             "amostragem na gaveta da folha", "cq_sem_padrao": True})  # fmt: skip
+                                             "amostragem na gaveta do lote", "cq_sem_padrao": True})  # fmt: skip
             continue
         try:
             nivel, lqa = am.normalizar_nivel(p["nivel_inspecao"]), am.normalizar_lqa(p["lqa"])
@@ -547,7 +547,7 @@ def ocorrencias_do_lote(ex: Executor, uf: str, id_lote: int) -> Dict:
         (id_lote,),
     )
     if not lote or lote["uf"] != uf:
-        raise ErroDados("folha não encontrada na sua unidade", 404)
+        raise ErroDados("lote não encontrado na sua unidade", 404)
     itens = ex.todos(
         "SELECT i.id, i.uuid::text AS uuid, i.id_lote_etapa, i.id_carga_trabalho, i.id_carga_avaliada, i.elemento, "
         "i.anotacao, i.responsavel, coalesce(ua.nom_usuario::text, i.responsavel) AS responsavel_nome, "

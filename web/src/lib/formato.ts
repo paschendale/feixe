@@ -78,3 +78,20 @@ export function lista(xs: string[]) {
 }
 
 export const pc = (feitas: number, total: number) => (total ? Math.round((100 * feitas) / total) : 0)
+
+// "folha" quando o lote é folha, "lote" quando é lote livre ou o tipo não é conhecido (D-156).
+export const termoLote = (tipo: string | undefined | null, plural = false) => (tipo === 'folha' ? (plural ? 'folhas' : 'folha') : plural ? 'lotes' : 'lote')
+
+// Com o artigo: "a folha" / "o lote".
+export const oLote = (tipo: string | undefined | null) => (tipo === 'folha' ? 'a folha' : 'o lote')
+
+// Todos são folha: a concordância do que vem depois vai para o feminino ("3 folhas marcadas", "2 lotes marcados").
+export const soFolhas = (ls: { tipo?: string | null }[]) => ls.length > 0 && ls.every((l) => l.tipo === 'folha')
+
+// "62 folhas e 3 lotes": a contagem separa folhas de lotes livres (D-156). Sem o tipo, conta como lote.
+export function contarLotes(ls: { tipo?: string | null }[], depois = '') {
+  const folhas = ls.filter((l) => l.tipo === 'folha').length
+  const livres = ls.length - folhas
+  const partes = [folhas && plural(folhas, 'folha', 'folhas'), livres && plural(livres, 'lote', 'lotes')].filter(Boolean)
+  return `${partes.join(' e ') || '0 lotes'}${depois}`
+}

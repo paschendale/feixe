@@ -138,8 +138,8 @@ def test_regras_de_editar_e_dar_ciencia_no_servidor():
 
 def test_rotulos_do_cq():
     p = _cq()
-    assert p._rotulo("cq_amostra", {"id_carga_trabalho": 4001}, {}) == "Amostra da carga 4001 da 2534-1"
-    assert p._rotulo("cq_inspecao", None, {"campos": {"id_lote_etapa": 12}}) == "Ocorrência na 2534-1"
+    assert p._rotulo("cq_amostra", {"id_carga_trabalho": 4001}, {}) == "Amostra da carga 4001 em 2534-1"
+    assert p._rotulo("cq_inspecao", None, {"campos": {"id_lote_etapa": 12}}) == "Ocorrência em 2534-1"
 
 
 def test_juntar_nao_junta_apagar_com_editar():

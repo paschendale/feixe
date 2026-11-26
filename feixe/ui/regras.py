@@ -47,7 +47,7 @@ STATUS = {1: "conforme", 0: "não conforme"}
 
 FIM_DAS_AMOSTRAS = (
     "Você avaliou todas as suas amostras. Agora é com o supervisor: ele vê o resultado do plano no Feixe e decide o "
-    "próximo passo da folha."
+    "próximo passo do lote."
 )
 
 
@@ -64,7 +64,7 @@ def mensagem_avaliada(r: Dict) -> str:
     proxima = r.get("proxima")
     if proxima and proxima.get("amostra"):
         prox = proxima["amostra"]
-        return f"{texto} Próxima: {prox.get('elemento') or 'amostra'} na {prox.get('folha_revisao')}."
+        return f"{texto} Próxima: {prox.get('elemento') or 'amostra'} em {prox.get('folha_revisao')}."
     if proxima:
         return f"{texto} Indo para a próxima amostra."
     return f"{texto} {FIM_DAS_AMOSTRAS}"
@@ -98,7 +98,7 @@ FORA_DAS_AMOSTRAS = (
 # --- correção de inspeção (D5) ----------------------------------------------------------------------------------------
 
 FIM_DA_CORRECAO = (
-    "Todas as ocorrências da folha estão tratadas: a sua parte na correção terminou. Agora é com o supervisor: a folha "
+    "Todas as ocorrências do lote estão tratadas: a sua parte na correção terminou. Agora é com o supervisor: o lote "
     "aparece para ele em Esperando você, e ele decide o próximo passo."
 )
 
@@ -114,12 +114,12 @@ def mensagem_tratada(r: Dict) -> str:
     texto = " · ".join(partes) + "."
     f = r.get("fila")
     if f:
-        texto += f" A próxima folha da sua fila é a {f['folha_revisao']} ({f['atribuidas']} cargas), já com você."
+        texto += f" O próximo lote da sua fila é o {f['folha_revisao']} ({f['atribuidas']} cargas), já com você."
     if p and not p.get("pendentes"):
         return f"{texto} {FIM_DA_CORRECAO}"
     prox = r.get("proxima")
     if prox:
-        return f"{texto} Próxima: {prox.get('elemento') or 'ocorrência'} na {prox.get('folha_revisao')}."
+        return f"{texto} Próxima: {prox.get('elemento') or 'ocorrência'} em {prox.get('folha_revisao')}."
     return texto
 
 

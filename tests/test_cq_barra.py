@@ -50,7 +50,7 @@ def _avaliada(status, proxima):
 def test_avaliar_leva_a_proxima_e_a_ultima_diz_o_que_vem_depois():
     prox = {"carga": {"id": 2}, "amostra": {"elemento": "Comissão", "folha_revisao": "2534-1"}}
     assert regras.mensagem_avaliada(_avaliada(0, prox)) == (
-        "Amostra não conforme · Omissão · 2534-1 8/20. Próxima: Comissão na 2534-1."
+        "Amostra não conforme · Omissão · 2534-1 8/20. Próxima: Comissão em 2534-1."
     )
     fim = regras.mensagem_avaliada(_avaliada(1, None))
     assert fim.startswith("Amostra conforme · Omissão · 2534-1 8/20. ") and "supervisor" in fim
@@ -98,11 +98,11 @@ def _tratada(tratadas, total, proxima, tratado=True, fila=None):
 def test_tratada_leva_a_proxima_e_a_ultima_diz_que_o_supervisor_decide():
     prox = {"elemento": "Comissão", "folha_revisao": "2534-2"}
     assert regras.mensagem_tratada(_tratada(12, 40, prox)) == (
-        "Tratada · Omissão · 2534-3 12/40. Próxima: Comissão na 2534-2."
+        "Tratada · Omissão · 2534-3 12/40. Próxima: Comissão em 2534-2."
     )
     fim = regras.mensagem_tratada(_tratada(40, 40, None))
     assert fim.startswith("Tratada · Omissão · 2534-3 40/40. ") and "supervisor" in fim and "Esperando" in fim
     desfeita = regras.mensagem_tratada(_tratada(39, 40, prox, tratado=False))
     assert desfeita.startswith("Tratamento desfeito · Omissão · 2534-3 39/40.")
     fila = regras.mensagem_tratada(_tratada(40, 40, None, fila={"folha_revisao": "2601-1", "atribuidas": 30}))
-    assert "A próxima folha da sua fila é a 2601-1 (30 cargas)" in fila
+    assert "O próximo lote da sua fila é o 2601-1 (30 cargas)" in fila

@@ -65,7 +65,7 @@ export function EditarFluxo({ fluxo, catalogo, fechar }: { fluxo: FluxoCompleto 
         <DialogHeader>
           <DialogTitle>Editar fluxo</DialogTitle>
           <DialogDescription>
-            {fluxo.projeto} · {fluxo.tema} · {fluxo.uf}. O supervisor anda com a folha por estas etapas; o Feixe só sugere a próxima.
+            {fluxo.projeto} · {fluxo.tema} · {fluxo.uf}. O supervisor anda com o lote por estas etapas; o Feixe só sugere a próxima.
           </DialogDescription>
         </DialogHeader>
         <Input value={nome} onChange={(e) => setNome(e.target.value)} aria-label="Nome do fluxo" />
@@ -145,8 +145,8 @@ export function EditarFluxo({ fluxo, catalogo, fechar }: { fluxo: FluxoCompleto 
                       </div>
                       <span className="text-rodape text-muted-foreground">
                         {e.nivel_inspecao && e.lqa != null
-                          ? 'Ao abrir a etapa, o Feixe sorteia as amostras de cada atividade e gera as cargas, com este padrão; o supervisor pode trocar os parâmetros na gaveta da folha enquanto nada foi avaliado.'
-                          : 'Sem nível e LQA, a etapa abre sem amostras e o supervisor cria os planos na gaveta de cada folha.'}{' '}
+                          ? 'Ao abrir a etapa, o Feixe sorteia as amostras de cada atividade e gera as cargas, com este padrão; o supervisor pode trocar os parâmetros na gaveta do lote enquanto nada foi avaliado.'
+                          : 'Sem nível e LQA, a etapa abre sem amostras e o supervisor cria os planos na gaveta de cada lote.'}{' '}
                         Fração crítica vazia: a de cada elemento.
                       </span>
                     </div>

@@ -535,16 +535,16 @@ class _Push:
             carga = self.cargas_cq.get(linha.get("id_carga_trabalho")) or {}
             folha = (self.etapas.get(carga.get("id_lote_etapa")) or {}).get("folha")
             ident = carga.get("id") or linha.get("id_carga_trabalho")
-            return f"Amostra da carga {ident} da {folha}" if folha else f"Amostra da carga {ident}"
+            return f"Amostra da carga {ident} em {folha}" if folha else f"Amostra da carga {ident}"
         le = linha.get("id_lote_etapa")
         folha = (self.etapas.get(le) or {}).get("folha")
         if tabela == "cq_inspecao":
-            return f"Ocorrência na {folha}" if folha else "Ocorrência"
+            return f"Ocorrência em {folha}" if folha else "Ocorrência"
         if tabela == "carga_trabalho":
             ident = (linha or {}).get("id")
-            return f"Carga {ident} da {folha}" if folha else f"Carga {ident or g['uuid'][:8]}"
+            return f"Carga {ident} em {folha}" if folha else f"Carga {ident or g['uuid'][:8]}"
         if tabela == "fila_folha":
-            return f"Folha {folha} da sua fila" if folha else "Folha da sua fila"
+            return f"Lote {folha} da sua fila" if folha else "Lote da sua fila"
         return tabela
 
     def regras_carga(self, g: Dict, srv: Dict, valores: Dict, hora: dt.datetime) -> Optional[str]:
@@ -553,7 +553,7 @@ class _Push:
         if "concluido" in valores and bool(valores["concluido"]) != bool(srv.get("concluido")):
             etapa = self.etapas.get(srv.get("id_lote_etapa")) or {}
             if etapa.get("situacao") not in ABERTAS:
-                return "a etapa desta folha foi encerrada pelo supervisor"
+                return "a etapa deste lote foi encerrada pelo supervisor"
             if etapa.get("fase") == "correcao_inspecao" and srv.get("id_atividade") in self.ativ_folha:
                 return lc.FOLHA_NA_CORRECAO
             if not valores["concluido"]:
@@ -572,7 +572,7 @@ class _Push:
         if carga.get("responsavel") != self.usuario:
             return "esta amostra não é mais de uma carga sua"
         if not self._aberta(carga.get("id_lote_etapa")):
-            return "a etapa de CQ desta folha foi encerrada pelo supervisor"
+            return "a etapa de CQ deste lote foi encerrada pelo supervisor"
         return None
 
     def regras_ocorrencia_nova(self, valores: Dict) -> Optional[str]:
@@ -584,7 +584,7 @@ class _Push:
         if carga.get("responsavel") != self.usuario:
             return "a carga de CQ desta ocorrência não está mais atribuída a você"
         if not self._aberta(carga.get("id_lote_etapa")):
-            return "a etapa de CQ desta folha foi encerrada pelo supervisor"
+            return "a etapa de CQ deste lote foi encerrada pelo supervisor"
         return None
 
     def regras_ocorrencia(self, srv: Dict, campos) -> Optional[str]:
@@ -595,14 +595,14 @@ class _Push:
                 return "só quem fez a carga apontada pela ocorrência dá ciência"
         if campos & TRATAR and srv.get("id_lote") not in self.correcao:
             return (
-                "a folha não está com você numa correção de inspeção aberta (o supervisor encerrou a etapa ou passou "
-                "a folha a outra pessoa)"
+                "o lote não está com você numa correção de inspeção aberta (o supervisor encerrou a etapa ou passou "
+                "o lote a outra pessoa)"
             )
         if campos - {"ciente_em", "ciente_por"} - TRATAR:
             if srv.get("responsavel") != self.usuario:
                 return "esta ocorrência foi registrada por outra pessoa"
             if not self._aberta(srv.get("id_lote_etapa")):
-                return "a etapa de CQ desta folha foi encerrada pelo supervisor"
+                return "a etapa de CQ deste lote foi encerrada pelo supervisor"
         return None
 
     def perfil(self, cod_projeto: Optional[int]) -> bool:
@@ -689,7 +689,7 @@ class _Push:
         elif srv.get("responsavel") != self.usuario:
             motivo = "esta ocorrência foi registrada por outra pessoa"
         elif not self._aberta(srv.get("id_lote_etapa")):
-            motivo = "a etapa de CQ desta folha foi encerrada pelo supervisor"
+            motivo = "a etapa de CQ deste lote foi encerrada pelo supervisor"
         else:
             motivo = None
         if motivo:
@@ -754,13 +754,13 @@ class _Push:
         rot = self._rotulo("fila_folha", fsrv, fila)
         motivo = None
         if fsrv is None:
-            motivo = "a folha saiu da sua fila"
+            motivo = "o lote saiu da sua fila"
         elif fsrv.get("responsavel") != self.usuario:
-            motivo = "a folha foi para a fila de outra pessoa"
+            motivo = "o lote foi para a fila de outra pessoa"
         elif fsrv.get("atribuida_em") is not None:
-            motivo = "a folha já tinha sido entregue pela fila"
+            motivo = "o lote já tinha sido entregue pela fila"
         elif etapa.get("situacao") not in ABERTAS:
-            motivo = "a etapa da folha foi encerrada pelo supervisor"
+            motivo = "a etapa do lote foi encerrada pelo supervisor"
         elif not self.perfil(etapa.get("cod_projeto")):
             motivo = f"você não tem mais o perfil de execução no projeto (SGBC, lotação {self.uf})"
         cargas = [g for g in grupos if g["tabela"] == "carga_trabalho"]
@@ -777,7 +777,7 @@ class _Push:
                 else:
                     outras.append(g)
             if not passam and not minhas:
-                motivo = "outra pessoa já pegou as cargas desta folha"
+                motivo = "outra pessoa já pegou as cargas deste lote"
         if motivo is not None:
             for g in grupos:
                 self.recusar_sem_aviso(g, hora, motivo)

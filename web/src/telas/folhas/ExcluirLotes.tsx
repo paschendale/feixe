@@ -3,7 +3,7 @@ import { Nota, RotuloEstavel } from '@/components/ds'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useAvisar } from '@/lib/avisos'
-import { lista, num, plural } from '@/lib/formato'
+import { contarLotes, lista, num, plural, soFolhas } from '@/lib/formato'
 import { enviar } from '@/lib/useApi'
 
 type Item = { id_lote: number; folha_revisao: string; tipo: string; cargas: number; com_alguem: number; erro: string | null }
@@ -43,7 +43,9 @@ export function ExcluirLotes({ lotes, fechar }: { lotes: number[]; fechar: (excl
     setOcupado(true)
     try {
       const r = await enviar<{ excluidos: { id_lote: number }[]; erros: { id_lote: number; erro: string }[] }>('/api/lotes/excluir', { lotes: saem.map((i) => i.id_lote), previa: false })
-      avisar(`${plural(r.excluidos.length, 'excluída', 'excluídas')}: ${nomes(saem.filter((i) => r.excluidos.some((x) => x.id_lote === i.id_lote)))}.`)
+      const foram = saem.filter((i) => r.excluidos.some((x) => x.id_lote === i.id_lote))
+      const um = r.excluidos.length === 1
+      avisar(`${contarLotes(foram)} ${soFolhas(foram) ? (um ? 'excluída' : 'excluídas') : um ? 'excluído' : 'excluídos'}: ${nomes(foram)}.`)
       if (r.erros.length) avisar(r.erros.map((e) => e.erro).join('; '), 'erro')
       fechar(r.excluidos.map((x) => x.id_lote))
     } catch (e) {
@@ -57,7 +59,7 @@ export function ExcluirLotes({ lotes, fechar }: { lotes: number[]; fechar: (excl
     <Dialog open={lotes.length > 0} onOpenChange={(v) => !v && fechar([])}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Excluir {saem.length === 1 ? saem[0].folha_revisao : plural(saem.length || lotes.length, 'folha', 'folhas')}</DialogTitle>
+          <DialogTitle>Excluir {saem.length === 1 ? saem[0].folha_revisao : saem.length ? contarLotes(saem) : plural(lotes.length, 'lote', 'lotes')}</DialogTitle>
           <DialogDescription>Para folhas e lotes criados por engano, antes de qualquer trabalho. Saem junto as passagens, as cargas, os planos de CQ, a fila e o histórico. Não dá para desfazer.</DialogDescription>
         </DialogHeader>
         {!itens && <p className="text-muted-foreground">Conferindo…</p>}
@@ -81,7 +83,7 @@ export function ExcluirLotes({ lotes, fechar }: { lotes: number[]; fechar: (excl
             Cancelar
           </Button>
           <Button variant="destructive" disabled={!saem.length || ocupado} onClick={excluir}>
-            <RotuloEstavel ocupado={ocupado} rotulo={saem.length === 1 ? `Excluir ${saem[0].folha_revisao}` : `Excluir ${plural(saem.length, 'folha', 'folhas')}`} rotuloOcupado="Excluindo…" />
+            <RotuloEstavel ocupado={ocupado} rotulo={saem.length === 1 ? `Excluir ${saem[0].folha_revisao}` : `Excluir ${contarLotes(saem)}`} rotuloOcupado="Excluindo…" />
           </Button>
         </DialogFooter>
       </DialogContent>

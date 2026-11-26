@@ -479,7 +479,7 @@ def d3c(amb, usuario, senha):
             ("Amostras - Comissão", True),
             ("Ocorrências - Omissão", False),
             ("Amostras - Omissão", False),
-            ("Minhas folhas", True),
+            ("Meus lotes", True),
         ], nomes
         ok(f"subgrupo {sub.name()}: {nomes} (só o primeiro elemento ligado)")  # fmt: skip
 
@@ -913,7 +913,7 @@ def d5(amb, usuario, senha):
         execucao = projeto.layerTreeRoot().findGroup("Feixe").findGroup("Execução")
         (sub,) = [g for g in execucao.children() if g.name() == f"Correção · verificar_d3a_{tag}"]
         nomes = [(n.name(), n.itemVisibilityChecked()) for n in sub.children()]
-        esperado = [("Ocorrências pendentes", True), ("Ocorrências tratadas", False), ("Minhas folhas", True)]
+        esperado = [("Ocorrências pendentes", True), ("Ocorrências tratadas", False), ("Meus lotes", True)]
         assert nomes == esperado, nomes
         pend = next(x for x in camadas.camadas_do_papel("correcao_pendentes"))
         trat = next(x for x in camadas.camadas_do_papel("correcao_tratadas"))

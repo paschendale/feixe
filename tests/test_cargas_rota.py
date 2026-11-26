@@ -219,7 +219,7 @@ def test_editar_pela_camada_passa_pelas_regras_e_pela_outbox(ws):
     r = rc.editar(_ctx_edicao(ws, eventos, acordar), {1001: True, 1002: False, 3001: True, 1009: True, 999: True})
     assert r["feitas"] == [{"id": 1001, "concluido": True, "folha_revisao": "2534-1"}]  # 1002 já estava pendente
     assert {x["id"]: x["motivo"] for x in r["recusadas"]} == {
-        3001: "a etapa desta folha já foi encerrada pelo supervisor",
+        3001: "a etapa deste lote já foi encerrada pelo supervisor",
         1009: "esta carga não está atribuída a você",
         999: "carga não encontrada",
     }
@@ -230,7 +230,7 @@ def test_editar_pela_camada_passa_pelas_regras_e_pela_outbox(ws):
     ok, avisos = rc.mensagens_edicao(r)
     assert ok == ["Carga concluída · 2534-1 · 1/3"]
     assert avisos[0] == (
-        "Carga 3001 da 2536-1: A etapa desta folha já foi encerrada pelo supervisor. A mudança foi desfeita."
+        "Carga 3001 em 2536-1: A etapa deste lote já foi encerrada pelo supervisor. A mudança foi desfeita."
     )
 
 

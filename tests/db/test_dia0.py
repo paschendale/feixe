@@ -121,6 +121,8 @@ def test_distribuir_cargas_inicia_a_etapa(amb):
 
 def test_uma_folha_por_pessoa_e_a_revisao_as_cegas(amb):
     cen, ex = amb
+    # A sugestão pesa a fila de cada pessoa; sem isto, as filas do dev (distribuições feitas à mão) mudam quem sai.
+    ex.executar("DELETE FROM mapcartacomp.fila_folha WHERE uf = 'DF' AND atribuida_em IS NULL")
     lotes = [_livre(cen, f"f{i}", -44.5) for i in range(4)]
     dc.preparar(ex, "DF", [le for _, le in lotes])
     s = dfi.sugestao(ex, "DF", [lt for lt, _ in lotes])

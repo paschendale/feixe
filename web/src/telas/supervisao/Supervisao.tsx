@@ -20,7 +20,7 @@ export default function Supervisao() {
   const nFim = (esperando?.grupos ?? []).filter((g) => g.id_proxima === null).reduce((s, g) => s + g.folhas.length, 0)
   const { dados: conflitos } = useContagemConflitos(supervisor)
   const abas: Aba[] = [
-    { id: 'folhas', rotulo: 'Folhas', href: href('supervisao/folhas') },
+    { id: 'folhas', rotulo: 'Lotes', href: href('supervisao/folhas') },
     ...(supervisor ? [{ id: 'esperando', rotulo: 'Esperando você', href: href('supervisao/esperando'), contagem: nEsperando + nFim }] : []),
     ...(supervisor ? [{ id: 'equipe', rotulo: 'Equipe', href: href('supervisao/equipe') }] : []),
     ...(supervisor ? [{ id: 'filas', rotulo: 'Filas', href: href('supervisao/filas') }] : []),

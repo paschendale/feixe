@@ -31,7 +31,7 @@ def montar(monkeypatch):
     def decidir_cq(ex, uf, id_lote, decisao, obs, forcar=False, expor=False):
         ch["chamadas"].append(("decidir", uf, id_lote, decisao, obs, forcar, expor))
         if id_lote == 2:
-            raise ErroDados("2534-1: reprovada no CQ; para aprovar assim mesmo, confirme o aviso")
+            raise ErroDados("2534-1: reprovado no CQ; para aprovar assim mesmo, confirme o aviso")
         nova = None if id_lote == 3 else 100 + id_lote
         return {"id_lote": id_lote, "folha_revisao": f"F{id_lote}", "resultado": "reprovado",
                 "id_lote_etapa_nova": nova, "proxima": "Revisão"}  # fmt: skip
@@ -81,7 +81,7 @@ def test_cada_folha_na_sua_transacao(montar):
     assert status == 200
     assert [d["id_lote"] for d in obj["decididas"]] == [1, 3]
     assert obj["erros"] == [
-        {"id_lote": 2, "erro": "2534-1: reprovada no CQ; para aprovar assim mesmo, confirme o aviso"}
+        {"id_lote": 2, "erro": "2534-1: reprovado no CQ; para aprovar assim mesmo, confirme o aviso"}
     ]
     # A folha 3 decidiu sem abrir etapa (fim do fluxo); a 1 abriu a revisão, e as cargas dela saem em seguida.
     assert obj["abertas"] == [{"id_lote": 1, "id_lote_etapa": 101, "etapa": "Revisão"}]

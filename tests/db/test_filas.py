@@ -124,7 +124,7 @@ def test_fila_passa_a_proxima_folha_ao_concluir(amb):
     ib = dfi.adicionar(ex, "DF", eu, b)["id"]
     assert "já está na fila" in _recusa(ex, dfi.adicionar, "DF", "t_apm_b", a)
     assert "não pode receber" in _recusa(ex, dfi.adicionar, "DF", "ninguem_no_sgbc", a)
-    assert "não encontrada" in _recusa(ex, dfi.adicionar, "GO", eu, a)
+    assert "não encontrado" in _recusa(ex, dfi.adicionar, "GO", eu, a)
     dfi.reordenar(ex, "DF", eu, [ib, ia])  # B passa na frente
     assert "mudou" in _recusa(ex, dfi.reordenar, "DF", eu, [ib])
 

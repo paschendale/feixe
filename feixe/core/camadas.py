@@ -464,9 +464,9 @@ _PAPEL = "feixe/papel"  # propriedade da camada (e do subgrupo) que diz o que el
 PAPEL_INFO = "minhas_cargas_info"  # a view juntada a Minhas cargas, no projeto e fora da árvore
 PAPEL_INFO_AMOSTRA, PAPEL_INFO_OCORRENCIA = "amostras_info", "ocorrencias_info"  # as views juntadas do CQ
 _INFOS = {
-    PAPEL_INFO: (VW_CARGA_INFO, "Feixe · minhas cargas (folha e progresso)"),
+    PAPEL_INFO: (VW_CARGA_INFO, "Feixe · minhas cargas (lote e progresso)"),
     PAPEL_INFO_AMOSTRA: (VW_AMOSTRA_INFO, "Feixe · amostras (status e plano)"),
-    PAPEL_INFO_OCORRENCIA: (VW_OCORRENCIA_INFO, "Feixe · ocorrências (folha e amostra)"),
+    PAPEL_INFO_OCORRENCIA: (VW_OCORRENCIA_INFO, "Feixe · ocorrências (lote e amostra)"),
 }
 MODOS = {"execucao": EXECUCAO, "cq": CONTROLE, "supervisao": SUPERVISAO}  # modo de trabalho -> subgrupo do Feixe
 _SEM_MODO = {
@@ -648,7 +648,7 @@ def montar(
                 formularios.minhas_cargas(minhas)
                 _esconder_colunas(minhas)
                 por(sub, minhas, "minhas_cargas")
-            folhas = _camada_gpkg(gpkg, VW_MINHAS_FOLHAS, "Minhas folhas", _filtro_minhas_folhas(atividades))
+            folhas = _camada_gpkg(gpkg, VW_MINHAS_FOLHAS, "Meus lotes", _filtro_minhas_folhas(atividades))
             _estilo_minhas_folhas(folhas)
             formularios.folhas_cq(folhas)
             por(sub, folhas, "minhas_folhas")
@@ -667,7 +667,7 @@ def montar(
                 _esconder_colunas(am)
                 am.setReadOnly(True)  # a avaliação vai pelas ações (camada e barra), nunca pelo buffer do QGIS
                 por(sub, am, "amostras", e["visivel"])
-            folhas = _camada_gpkg(gpkg, VW_MINHAS_FOLHAS, "Minhas folhas", _filtro_minhas_folhas(atividades))
+            folhas = _camada_gpkg(gpkg, VW_MINHAS_FOLHAS, "Meus lotes", _filtro_minhas_folhas(atividades))
             _estilo_minhas_folhas(folhas)
             formularios.folhas_cq(folhas)
             por(sub, folhas, "minhas_folhas")
@@ -682,7 +682,7 @@ def montar(
         formularios.minhas_cargas(minhas)
         _esconder_colunas(minhas)
         por(sub, minhas, "minhas_cargas")
-        folhas = _camada_gpkg(gpkg, VW_MINHAS_FOLHAS, "Minhas folhas", _filtro_minhas_folhas(atividades))
+        folhas = _camada_gpkg(gpkg, VW_MINHAS_FOLHAS, "Meus lotes", _filtro_minhas_folhas(atividades))
         _estilo_minhas_folhas(folhas)
         formularios.minhas_folhas(folhas, minhas.id())
         por(sub, folhas, "minhas_folhas")
@@ -700,7 +700,7 @@ def montar(
                 if r["id_atividade"] in g["atividades"]:
                     p = pessoas.setdefault(r["conta"], {"conta": r["conta"], "nome": r["nome"], "pendentes": 0})
                     p["pendentes"] += r["pendentes"]
-            f = _camada(amb, authcfg, "Folhas", "ctrl_lote", "id_lote", _folhas_do_grupo(uf, g["atividades"]),
+            f = _camada(amb, authcfg, "Lotes", "ctrl_lote", "id_lote", _folhas_do_grupo(uf, g["atividades"]),
                         "folhas.qml")  # fmt: skip
             formularios.folhas_supervisao(f)
             por(sub, f, "folhas")
