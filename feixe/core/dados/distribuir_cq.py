@@ -12,7 +12,7 @@ escolhe os avaliadores e o peso de cada um, e o Feixe reparte as amostras de tod
 - avaliadores: quem tem perfil V no projeto; sem ninguém com V, toda a equipe (como na sugestão de sempre);
 - regra fixa: ninguém avalia folha que executou (quem teve carga numa passagem de produção da folha não entra);
 - a equipe é lembrada: sem amostras distribuídas nas folhas escolhidas, o diálogo abre com a divisão da última passagem
-  de CQ distribuída da mesma etapa do fluxo; sem nenhuma, partes iguais entre os avaliadores (perfil V) aptos.
+  de CQ distribuída da mesma etapa do fluxo; sem nenhuma, o supervisor escolhe as pessoas.
 """
 
 from __future__ import annotations
@@ -166,7 +166,7 @@ def _elementos(amostras: List[Dict]) -> List[Dict]:
 def sugestao(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
     """O que o diálogo precisa: as folhas (e as que ficam de fora, com o motivo), os elementos, os avaliadores aptos e
     os que não podem (com o motivo) e o peso inicial de cada um, com a origem: `atual` (a divisão que as folhas já
-    têm), `ultima` (a última passagem de CQ distribuída da mesma etapa) ou `igual` (partes iguais entre os aptos)."""
+    têm), `ultima` (a última passagem de CQ distribuída da mesma etapa) ou `nenhuma` (ninguém marcado: o supervisor escolhe)."""
     ctx = _contexto(ex, uf, id_lotes)
     ps, amostras, pessoas = ctx["passagens"], ctx["amostras"], ctx["pessoas"]
     aptos = [c for c, p in pessoas.items() if not p["motivo"]]
@@ -174,7 +174,7 @@ def sugestao(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
     for a in amostras:
         if a["responsavel"]:
             atual[a["responsavel"]] = atual.get(a["responsavel"], 0) + 1
-    origem, de = "igual", None
+    origem, de = "nenhuma", None
     if atual:
         pesos, origem = atual, "atual"
     else:
@@ -183,7 +183,7 @@ def sugestao(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
         if pesos:
             origem = "ultima"
         else:
-            pesos, de = dict.fromkeys(aptos, 1), None
+            pesos, de = {}, None  # sem equipe a lembrar: o supervisor escolhe as pessoas
     # Os pesos vão em amostras (a unidade que o diálogo mostra ao lado da %): a proporção sobre o total.
     total = len(amostras)
     em_amostras = maiores_restos(total, list(pesos.items())) if origem != "atual" else pesos

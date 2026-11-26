@@ -48,13 +48,14 @@ export function Distribuir({ lotes, fechar }: { lotes: number[]; fechar: (feito:
       })
       .catch((e) => avisar((e as Error).message, 'erro'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lotes])
+  }, [lotes.join(',')])
 
   const pessoa = useMemo(() => new Map((dados?.pessoas ?? []).map((p) => [p.conta, p])), [dados])
   // CQ (D-147): as amostras se repartem por proporção entre avaliadores, num diálogo próprio (`DistribuirCQ`). Aqui
   // ficam só as folhas da produção; com as duas na seleção, o CQ abre à parte pelo aviso.
   const ehCq = (f: Folha) => f.fase === 'cq'
-  const lotesCq = [...new Set((dados?.folhas ?? []).filter(ehCq).map((f) => f.id_lote))]
+  // Memorizada: uma lista nova a cada render fazia o diálogo do CQ pedir a sugestão de novo, sem parar.
+  const lotesCq = useMemo(() => [...new Set((dados?.folhas ?? []).filter((f) => f.fase === 'cq').map((f) => f.id_lote))], [dados])
   const daProducao = (dados?.folhas ?? []).filter((f) => !ehCq(f))
   const distribuiveis = daProducao.filter((f) => f.a_atribuir > 0 || f.com.length > 0)
   const nada = daProducao.filter((f) => !f.a_atribuir && !f.com.length)

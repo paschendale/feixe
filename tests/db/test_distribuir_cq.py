@@ -77,11 +77,11 @@ def test_varias_pessoas_na_mesma_folha_por_proporcao(amb):
     le_b = _cq(cen, ex, b)
 
     s = dd.sugestao(ex, "DF", [a, b])
-    assert [f["folha_revisao"][:4] for f in s["folhas"]] == ["2534", "2535"] and s["origem"] == "igual"
+    assert [f["folha_revisao"][:4] for f in s["folhas"]] == ["2534", "2535"] and s["origem"] == "nenhuma"
     pessoas = {p["conta"]: p for p in s["pessoas"]}
     assert "executou 2534" in pessoas["t_caio"]["motivo"]
     assert "avaliador (V)" in pessoas["t_apm"]["motivo"]
-    assert pessoas["t_ana"]["motivo"] is None and pessoas["t_ana"]["peso"] + pessoas["t_bia"]["peso"] == s["total"]
+    assert pessoas["t_ana"]["motivo"] is None and not any(p["peso"] for p in s["pessoas"])  # ninguém marcado
     with pytest.raises(ErroDados, match="próprio trabalho"):
         dd.distribuir(ex, "DF", [a, b], {"t_caio": 1}, previa=True)
 
