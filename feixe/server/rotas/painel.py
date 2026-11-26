@@ -128,12 +128,14 @@ def registrar(r, ctx) -> None:
     @r.rota("POST", "/api/lotes/encerrar", exige=("supervisor",))
     def _encerrar(req):
         # Fim do fluxo (D-153): a folha passa a CONCLUIDA para a CCAR, por decisão do supervisor, em lote, com prévia.
+        # `antecipar` (D-161) encerra antes do fim do fluxo, pulando as etapas que faltam; exige o motivo.
         ids = campo(req, "lotes", lambda v: [int(x) for x in v])
         if not ids:
             raise ErroApi(400, "escolha pelo menos um lote")
         previa = campo(req, "previa", bool, padrao=True)
         with ctx.tx() as ex:
-            r = df.encerrar(ex, uf_de(ctx.eu()), ids, campo(req, "observacao", str, padrao=""), previa)
+            r = df.encerrar(ex, uf_de(ctx.eu()), ids, campo(req, "observacao", str, padrao=""), previa,
+                            campo(req, "antecipar", bool, padrao=False))  # fmt: skip
         if not previa and r["encerradas"]:
             ctx.publicar("lote", {"acao": "encerrar", "ids": [i["id_lote"] for i in r["encerradas"]]})
         return 200, r
