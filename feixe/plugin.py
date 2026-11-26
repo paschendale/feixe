@@ -586,11 +586,14 @@ class FeixePlugin:
         QDesktopServices.openUrl(QUrl(f"{self.servidor.url_abertura}#/supervisao/folhas/{int(id_lote)}"))
 
     def focar_carga(self, carga, progresso):
-        """Faz dela a carga atual (contorno magenta), o mapa vai até ela, na extensão dela (D-148), e pisca."""
-        if camadas.camada_com_amostra(carga["id"]) is not None:
-            # Uma carga de CQ (o painel pede "focar_carga" também para a amostra): vira a amostra atual.
+        """Faz dela a carga atual (contorno magenta), o mapa vai até ela, na extensão dela (D-148), e pisca. Vindo do
+        painel ("Continuar no QGIS", "Trabalhar nesta"), garante antes o grupo Feixe e o modo Executar (D-151)."""
+        if self._ler(lq.amostra_da_carga, None, carga["id"]) is not None:
+            # Uma carga de CQ (o painel pede "focar_carga" também para a amostra): vira a amostra atual. Pelo
+            # workspace, e não pela camada: sem o grupo carregado, a camada ainda não existe.
             self.focar_amostra(carga, progresso)
             return
+        self._para_execucao()
         camadas.definir_atual(carga["id"])
         self._passagem_atual = (carga.get("id_lote_etapa"), carga.get("id_lote"))
         self._enquadrar(carga, camadas.camada_com_carga(carga["id"]))
@@ -719,7 +722,9 @@ class FeixePlugin:
         return r
 
     def focar_amostra(self, carga, progresso):
-        """Faz dela a amostra atual (contorno magenta em Amostras, com o elemento no rótulo), zoom nela e pisca."""
+        """Faz dela a amostra atual (contorno magenta em Amostras, com o elemento no rótulo), zoom nela e pisca. Vindo
+        do painel, garante antes o grupo Feixe e o modo Avaliar (D-151)."""
+        self._para_cq()
         camadas.definir_amostra_atual(carga["id"])
         camada = camadas.camada_com_amostra(carga["id"])
         camadas.ligar_elemento(camada)
@@ -891,7 +896,8 @@ class FeixePlugin:
 
     def focar_ocorrencia(self, o, progresso, avisar=True):
         """Faz dela a ocorrência atual (pino maior em Ocorrências pendentes), sem mudar a escala, pisca e diz o que
-        corrigir ali."""
+        corrigir ali. Vindo do painel, garante antes o grupo Feixe e o modo Executar (D-151)."""
+        self._para_correcao()
         camadas.definir_ocorrencia_atual(o["uuid"])
         x, y = o["x"], o["y"]
         self._enquadrar({"id": 0, "xmin": x, "ymin": y, "xmax": x, "ymax": y}, None)
@@ -1138,7 +1144,8 @@ class FeixePlugin:
             log.erro(f"montar camadas: {e}")
             self.iface.messageBar().pushMessage("Feixe", f"Não foi possível montar as camadas: {e}", Qgis.Critical, 8)
             return
-        self.barra.mostrar_modo(r.get("modo"))
+        if self.barra:
+            self.barra.mostrar_modo(r.get("modo"))
         for aviso in r.get("avisos") or []:
             self.iface.messageBar().pushMessage("Feixe", aviso, Qgis.Warning, 10)
         dicas = getattr(self.iface, "actionMapTips", lambda: None)()

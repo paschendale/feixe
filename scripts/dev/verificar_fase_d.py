@@ -575,6 +575,15 @@ def d3c(amb, usuario, senha):
         assert anot == "drenagem omitida no trecho norte", anot
         ok("anotação editada no formulário da camada: gravada pelo caminho do plugin (outbox), não pelo OGR")
 
+        # D-151: "Continuar no QGIS" do painel sem o grupo Feixe no projeto: o QGIS monta o grupo e liga o modo Avaliar.
+        from feixe.server.rotas import cq as rotas_cq
+
+        projeto.layerTreeRoot().removeChildNode(projeto.layerTreeRoot().findGroup("Feixe"))
+        assert camadas.modo_atual() is None
+        r_painel = rotas_cq.proxima_amostra(plugin.ctx)
+        assert camadas.modo_atual() == "cq" and camadas.amostra_atual() == r_painel["carga"]["id"], r_painel
+        ok("Continuar no QGIS sem o grupo Feixe: o grupo foi montado, no modo Avaliar, com zoom na amostra")
+
         # --- até a última: o Feixe diz que acabou e o que vem depois --------------------------------------------
         # A ocorrência fez da amostra dela a atual (pode ser a não conforme): segue da próxima pendente.
         plugin.proxima_amostra()
