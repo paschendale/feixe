@@ -3,7 +3,7 @@
 A conversão roda duas vezes dentro de uma transação da CCAR que é desfeita no fim (leva alguns minutos: lê ~45 mil
 cargas pela rede). Confere que nada se perde sem registro, que rodar de novo não duplica, que ctrl_lote_etapa
 reproduz o ctrl_folha_revisao do sistema atual nas folhas de hidrografia concluídas e que as passagens em andamento
-vão para a grade estatística com o andamento próximo do original (D-158).
+vão para a grade estatística (D-158, D-160), as em andamento com o andamento próximo do original.
 """
 
 from __future__ import annotations
@@ -130,8 +130,12 @@ def test_ctrl_lote_reproduz_ctrl_folha_revisao(convertido):
             "SELECT DISTINCT folha_revisao FROM bc100ggcdf_apoio.carga_trabalho WHERE id_carga_trabalho = ANY(%s)",
             (ignoradas,),
         )
-        # Passagens levadas para a grade (D-158) mudam de células: comparadas no teste da grade.
-        na_grade = {g["rotulo"].split(" ")[-1] for g in convertido["rel"].grade if g["rotulo"].startswith("Hidro")}
+        # Passagens em andamento levadas para a grade (D-158) mudam de andamento: comparadas no teste da grade.
+        na_grade = {
+            g["rotulo"].split(" ")[-1]
+            for g in convertido["rel"].grade
+            if g["rotulo"].startswith("Hidro") and not g["concluida"]
+        }
         excluir = {r[0] for r in cur.fetchall()} | ROTULOS_CORRIGIDOS | na_grade
         cur.execute(
             """
@@ -230,14 +234,17 @@ def test_cq_do_df_tem_o_padrao_dos_planos(convertido):
     assert {(n, lqa, fc) for cq, n, lqa, fc in linhas if not cq} == {(None, None, None)}
 
 
-def test_passagens_em_andamento_vao_para_a_grade(convertido):
-    """D-158: cada passagem em andamento de atividade pela grade vira células inteiras da grade no nível da
-    atividade, uma vez cada, sem sobrar carga antiga, com o andamento perto do original."""
+def test_passagens_vao_para_a_grade(convertido):
+    """D-158 e D-160: cada passagem de atividade pela grade vira células inteiras da grade no nível da atividade, uma
+    vez cada, sem sobrar carga antiga; concluída continua toda concluída, em andamento fica perto do original."""
     grade = convertido["rel"].grade
-    assert grade, "o dump do dev tem passagens de LML em andamento"
+    assert any(g["concluida"] for g in grade) and any(not g["concluida"] for g in grade)
     for g in grade:
         assert g["celulas"] > 0, g["rotulo"]
-        assert abs(g["perc"] - g["perc_antes"]) <= 5, g
+        if g["concluida"]:
+            assert g["concluidas"] == g["celulas"], g["rotulo"]
+        else:
+            assert abs(g["perc"] - g["perc_antes"]) <= 5, g
     with convertido["ccar"].cursor() as cur:
         cur.execute(
             """
@@ -247,8 +254,7 @@ def test_passagens_em_andamento_vao_para_a_grade(convertido):
               FROM mapcartacomp.carga_trabalho c
               JOIN mapcartacomp.lote_etapa le ON le.id = c.id_lote_etapa
               JOIN mapcartacomp.atividade a ON a.id = c.id_atividade
-             WHERE le.uf = 'DF' AND le.situacao = 'em_andamento' AND c.criado_por = current_user
-               AND a.geracao = 'grade'
+             WHERE le.uf = 'DF' AND c.criado_por = current_user AND a.geracao = 'grade'
              GROUP BY le.id
             """
         )

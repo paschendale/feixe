@@ -21,13 +21,13 @@ Mapeamento (decisões no build log do projeto):
   atividade da carga. Na ADE, omissão e acurácia temporal foram sorteadas na grade completa e comissão e consistência
   topológica nas células com ADE. A letra-código é a do tamanho de amostra tabelado mais próximo do n observado; LQA e
   Ac ficam abertos;
-- passagens em andamento das atividades pela grade (aquisição e revisões de hidrografia, ADE e LML) passam para a
-  grade estatística no nível da atividade (D-158): entram as células com centroide dentro das cargas antigas da
-  passagem (uma revisão parcial fica parcial); a célula fica concluída quando as cargas antigas concluídas cobrem ao
-  menos o limiar da área dela (padrão 50%), com a conclusão mais recente entre elas e quem tem mais área concluída
-  nela; a pendente fica com quem tem mais área pendente nela (ou sem responsável). Passagens concluídas, o CQ e as
-  etapas que não são pela grade ficam com as cargas antigas, como histórico. --sem-grade desliga a passagem para a
-  grade;
+- as passagens das atividades pela grade (aquisição e revisões de hidrografia, ADE e LML), concluídas e em
+  andamento, passam para a grade estatística no nível da atividade (D-158, D-160): entram as células com centroide
+  dentro das cargas antigas da passagem (uma revisão parcial fica parcial); a célula fica concluída quando as cargas
+  antigas concluídas cobrem ao menos o limiar da área dela (padrão 50%) ou quando a passagem toda já está concluída,
+  com a conclusão mais recente entre elas e quem tem mais área concluída nela; a pendente fica com quem tem mais área
+  pendente nela (ou sem responsável). O CQ (amostras avaliadas nas células antigas) e as etapas que não são pela grade
+  ficam com as cargas antigas. --sem-grade desliga a passagem para a grade;
 - ignorados (e listados no relatório): atividade nula, massa d'água (não executado), "NNNN-X", "SHOW",
   rótulos que são uma conta de usuário ("u_<número>", lotes de teste), CQ sem amostras e cargas com mais da metade
   da área fora da folha (exceto grupos de CQ inteiros fora da folha do rótulo, que são erro de digitação do rótulo e
@@ -154,16 +154,17 @@ LIMIAR_PADRAO = 0.5
 LIMIARES_RELATORIO = (0.25, 0.4, 0.5, 0.6, 0.75)
 
 
-def transferir(area: float, pedacos: List[dict], limiar: float = LIMIAR_PADRAO) -> dict:
+def transferir(area: float, pedacos: List[dict], limiar: float = LIMIAR_PADRAO, concluida: bool = False) -> dict:
     """Andamento de uma célula da grade a partir das cargas antigas que a cobrem.
 
     `pedacos`: a interseção da célula com cada carga antiga ({area, concluido, concluido_em, responsavel}). Concluída
-    quando as concluídas cobrem ao menos `limiar` da área; então vale a conclusão mais recente e o responsável com
-    mais área concluída na célula. Pendente: o responsável com mais área pendente, ou ninguém.
+    quando as concluídas cobrem ao menos `limiar` da área, ou sempre que a passagem toda já está concluída
+    (`concluida`); então vale a conclusão mais recente e o responsável com mais área concluída na célula. Pendente: o
+    responsável com mais área pendente, ou ninguém.
     """
     feitos = [q for q in pedacos if q["concluido"] and q["area"] > 0]
     cobertura = min(1.0, sum(q["area"] for q in feitos) / area) if area > 0 else 0.0
-    concluido = cobertura >= limiar and bool(feitos)
+    concluido = (concluida or cobertura >= limiar) and bool(feitos)
 
     def maior(qs):
         por: Dict[str, float] = collections.defaultdict(float)
@@ -280,17 +281,27 @@ class Relatorio:
         for motivo, n in sorted(self.amostras_ignoradas.items()):
             linhas.append(f"  {n:6d}  {motivo}")
         if self.grade:
-            linhas += ["", f"Passagens em andamento levadas para a grade estatística (limiar {self.limiar:.0%}):"]
-            linhas.append(f"  {'passagem':24s} {'nível':>6s} {'antes':>15s} {'na grade':>15s} {'no limite':>9s}")
-            for g in sorted(self.grade, key=lambda g: g["rotulo"]):
-                antes = f"{g['concluidas_antes']}/{g['cargas_antes']} ({g['perc_antes']:.0f}%)"
-                depois = f"{g['concluidas']}/{g['celulas']} ({g['perc']:.0f}%)"
-                linhas.append(f"  {g['rotulo']:24s} {g['nivel']:>6d} {antes:>15s} {depois:>15s} {g['no_limite']:>9d}")
-            total = sum(g["celulas"] for g in self.grade)
-            linhas += ["", "  Células concluídas na grade conforme o limiar (cobertura das cargas antigas concluídas):"]
-            for lim in LIMIARES_RELATORIO:
-                n = sum(1 for g in self.grade for c in g["coberturas"] if c >= lim and c > 0)
-                linhas.append(f"    {lim:.0%}: {n} de {total}")
+            abertas = [g for g in self.grade if not g["concluida"]]
+            fechadas = [g for g in self.grade if g["concluida"]]
+            linhas += ["", "Grade estatística (D-158, D-160):"]
+            linhas.append(
+                f"  {len(fechadas)} passagens concluídas: {sum(g['cargas_antes'] for g in fechadas)} cargas antigas "
+                f"viraram {sum(g['celulas'] for g in fechadas)} células, todas concluídas"
+            )
+            if abertas:
+                linhas += ["", f"  Passagens em andamento (limiar {self.limiar:.0%}):"]
+                linhas.append(f"  {'passagem':24s} {'nível':>6s} {'antes':>15s} {'na grade':>15s} {'no limite':>9s}")
+                for g in sorted(abertas, key=lambda g: g["rotulo"]):
+                    antes = f"{g['concluidas_antes']}/{g['cargas_antes']} ({g['perc_antes']:.0f}%)"
+                    depois = f"{g['concluidas']}/{g['celulas']} ({g['perc']:.0f}%)"
+                    linhas.append(
+                        f"  {g['rotulo']:24s} {g['nivel']:>6d} {antes:>15s} {depois:>15s} {g['no_limite']:>9d}"
+                    )
+                total = sum(g["celulas"] for g in abertas)
+                linhas += ["", "  Células concluídas nas passagens em andamento conforme o limiar:"]
+                for lim in LIMIARES_RELATORIO:
+                    n = sum(1 for g in abertas for c in g["coberturas"] if c >= lim and c > 0)
+                    linhas.append(f"    {lim:.0%}: {n} de {total}")
         linhas += ["", "Avisos:"] + [f"  - {a}" for a in self.avisos]
         return "\n".join(linhas) + "\n"
 
@@ -600,7 +611,7 @@ def _para_grade(cur, itens: List[dict], rel: Relatorio, limiar: float) -> List[t
     resumo: Dict[int, dict] = {}
     for (id_le, geocodigo), c in celulas.items():
         i = por_le[id_le]
-        t = transferir(c["area"], c["pedacos"], limiar)
+        t = transferir(c["area"], c["pedacos"], limiar, i["concluida"])
         linhas.append((uid("carga_trabalho", "grade", i["le_uuid"], geocodigo), id_le, i["id_atividade"], None, UF,
                        t["responsavel"], c["geom"], t["concluido"], t["concluido_em"], i["passagem"].inicio,
                        geocodigo))  # fmt: skip
@@ -616,6 +627,7 @@ def _para_grade(cur, itens: List[dict], rel: Relatorio, limiar: float) -> List[t
         antes = sum(1 for c in p.cargas if c["concluido"])
         rel.grade.append({
             "rotulo": f"{TEMAS[p.tema]} {p.rotulo}",
+            "concluida": i["concluida"],
             "nivel": i["nivel"],
             "cargas_antes": len(p.cargas),
             "concluidas_antes": antes,
@@ -725,10 +737,11 @@ def carregar(
 
             if p.etapa != "cq":
                 id_ativ = ref["etapa_ativ"][(p.tema, p.etapa)]
-                if grade and situacao == "em_andamento" and ref["nivel"].get(id_ativ):
+                if grade and ref["nivel"].get(id_ativ):
                     para_grade.append({
                         "passagem": p, "le_uuid": le_uuid, "id_le": id_le, "id_atividade": id_ativ,
                         "nivel": ref["nivel"][id_ativ], "id_articulacao_scn": ref["folhas"][p.folha],
+                        "concluida": situacao == "concluida",
                     })  # fmt: skip
                     convertidas.update(c["id_carga_trabalho"] for c in p.cargas)
                     continue

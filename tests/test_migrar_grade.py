@@ -59,3 +59,8 @@ def test_cobertura_nao_passa_de_um_com_sobreposicao():
 def test_concluida_sem_data_de_origem():
     t = transferir(100, [p(100, True, "u_a", None)])
     assert t["concluido"] and t["concluido_em"] is None
+
+
+def test_passagem_concluida_conclui_toda_celula_com_pedaco_concluido():
+    t = transferir(100, [p(20, True, "u_a", D1), p(5, True, "u_b", D2)], 0.5, concluida=True)
+    assert t["concluido"] and t["concluido_em"] == D2 and t["responsavel"] == "u_a"
