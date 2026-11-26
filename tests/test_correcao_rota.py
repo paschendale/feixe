@@ -7,7 +7,7 @@ from tests.test_cq_execucao_rota import montar, ws  # noqa: F401 - fixtures
 
 
 def test_tratar_desmarcar_e_recusas(montar, corr):  # noqa: F811
-    r, ch = montar(["apm"])
+    r, ch = montar(["operador"])
     status, obj = r.despachar("POST", f"/api/inspecoes/{corr['r2']}/tratar", {}, {"tratado": True})
     assert status == 200 and obj["ocorrencia"]["tratado"] is True and obj["proxima"]["uuid"] == corr["r1"]
     assert obj["progresso"]["tratadas"] == 2 and ch["acordar"] == [None]
@@ -24,7 +24,7 @@ def test_tratar_desmarcar_e_recusas(montar, corr):  # noqa: F811
 
 
 def test_proxima_ocorrencia_painel_e_proxima_carga(montar, corr):  # noqa: F811
-    r, ch = montar(["apm"])
+    r, ch = montar(["operador"])
     status, obj = r.despachar("POST", "/api/inspecoes/proxima", {}, {"id_lote": 1})
     assert status == 200 and obj["ocorrencia"]["uuid"] in (corr["r1"], corr["r2"])
     assert obj["progresso"]["folha_revisao"] == "2534-2" and ch["qgis"] == ["focar_ocorrencia"]

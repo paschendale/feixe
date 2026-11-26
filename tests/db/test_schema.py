@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 
 import pytest
 
 from tests.db.conftest import RAIZ, url
 from tests.db.migracoes import aplicar, arquivos
 
-APLICAR = os.path.join(RAIZ, "scripts", "db", "aplicar.sh")
+APLICAR = os.path.join(RAIZ, "scripts", "db", "aplicar.py")
 VERSAO_ESPERADA = int(os.path.basename(arquivos()[-1])[:3])
 
 TABELAS = {
@@ -30,7 +31,7 @@ AUDITORIA = {"criado_em": "timestamp with time zone", "criado_por": "text",
 
 
 def _rodar(*args) -> str:
-    r = subprocess.run([APLICAR, *args], capture_output=True, text=True, check=False)
+    r = subprocess.run([sys.executable, APLICAR, *args], capture_output=True, text=True, check=False)
     assert r.returncode == 0, r.stderr
     return r.stdout
 
@@ -65,7 +66,7 @@ def _catalogo(cur) -> list:
 
 
 @pytest.mark.db
-def test_aplicar_sh_na_ccar_e_idempotente(psycopg2):
+def test_aplicar_na_ccar_e_idempotente(psycopg2):
     ccar = url("FEIXE_CCAR")
     _rodar(ccar)
     assert _rodar(ccar).startswith("nada a aplicar")
@@ -79,7 +80,7 @@ def test_aplicar_sh_na_ccar_e_idempotente(psycopg2):
 
 
 @pytest.mark.db
-def test_aplicar_sh_ensaio_no_96(psycopg2):
+def test_aplicar_ensaio_no_96(psycopg2):
     """O ensaio aplica tudo no 9.6 e desfaz: o banco da GGC termina sem nada do Feixe."""
     ggc = url("FEIXE_GGC")
     sql_objetos = (

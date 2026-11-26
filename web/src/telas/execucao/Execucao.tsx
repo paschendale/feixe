@@ -150,7 +150,7 @@ export default function Execucao() {
   const { dados: painel, erro: erroPainel } = usePainelExecucao()
   const nCiencia = painel?.ciencia.pendentes.length ?? 0
   const temCQ = tem('avaliador') || !!painel?.cq.length
-  const temCiencia = tem('apm') || nCiencia > 0 || !!painel?.ciencia.cientes.length
+  const temCiencia = tem('operador') || nCiencia > 0 || !!painel?.ciencia.cientes.length
   // Passagens de CQ e as de correção de inspeção em que a minha parte é só a varredura (a carga da folha, D5) ficam
   // nas abas delas.
   const fora = painel ? new Set([...painel.cq.map((c) => c.id_lote_etapa), ...painel.correcao.filter((c) => c.so_folha).map((c) => c.id_lote_etapa)]) : null

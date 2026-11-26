@@ -7,10 +7,10 @@ workspace, `core/dados/local/filas.py`). CQ, coerente com a fase D (a amostra é
 avaliador): os planos e as amostras das cargas do escopo. Ocorrências, com a visibilidade do D-66 (o que vai para o
 workspace fica no disco, então a regra vale já aqui, e de novo nas rotas, `core/dados/local/cq.py`): as que a pessoa
 registrou ou que caem numa carga de CQ do escopo (o avaliador); as que apontam uma carga dela (`id_carga_avaliada`:
-o APM autor, que dá ciência); e, só quando a pessoa tem carga numa passagem aberta com `expor_ocorrencias` ("incluir
-correções a serem feitas"), as ainda não tratadas da folha, como lista de correção. Quem faz a revisão seguinte sem
-isso não recebe as das passagens anteriores: a revisão é às cegas. Na correção de inspeção (D5), quem tem carga na
-passagem de correção aberta recebe todas as ocorrências da folha, de todas as revisões, tratadas ou não.
+o operador autor, que dá ciência); e, só quando a pessoa tem carga numa passagem aberta com `expor_ocorrencias`
+("incluir correções a serem feitas"), as ainda não tratadas da folha, como lista de correção. Quem faz a revisão
+seguinte sem isso não recebe as das passagens anteriores: a revisão é às cegas. Na correção de inspeção (D5), quem tem
+carga na passagem de correção aberta recebe todas as ocorrências da folha, de todas as revisões, tratadas ou não.
 `lote_etapa_hist` não é puxada: no workspace ela só guarda o que a execução grava para o push.
 
 Como se acha o que mudou: comparação de versões, não marca d'água. Cada linha do espelho guarda em `versao_base` o
@@ -88,7 +88,7 @@ def escopos(cargas: Callable[[str], str] = escopo_cargas_pessoa) -> Dict[str, st
         "cq_inspecao": (
             f"t.uf = %(uf)s AND (t.responsavel = %(usuario)s OR t.id_carga_trabalho IN (SELECT c.id FROM "
             f"{S}.carga_trabalho c WHERE c.id_cq_plano IS NOT NULL AND {cargas('c')}) "
-            # O APM autor da carga apontada (dá ciência).
+            # O operador autor da carga apontada (dá ciência).
             f"OR t.id_carga_avaliada IN (SELECT c.id FROM {S}.carga_trabalho c WHERE c.uf = %(uf)s "
             "AND c.responsavel = %(usuario)s) "
             # Lista de correção (D-66): só com "incluir correções a serem feitas" na passagem aberta da pessoa.

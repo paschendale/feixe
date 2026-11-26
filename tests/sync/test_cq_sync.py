@@ -1,12 +1,12 @@
 """D3a: o CQ da execução de ponta a ponta contra os bancos de dev (marcador `db`), nos dois (GGC 9.6 e CCAR 17), com as
 migrações aplicadas numa transação que é desfeita no fim: pull com a visibilidade do D-66, avaliar e registrar
-offline, push (INSERT, UPDATE e DELETE), ciência do APM autor, recusas e última escrita.
+offline, push (INSERT, UPDATE e DELETE), ciência do operador autor, recusas e última escrita.
 
-Pessoas (só nomes: o push e o pull recebem a conta como parâmetro; ninguém precisa logar): o avaliador, o APM que fez
-a carga avaliada, outro APM e quem faz a revisão seguinte. Cenário de tests/db/test_regras.py (folha 2534, fluxo com
-aquisição, CQ, correção de inspeção e envio): aquisição da revisão 1 concluída, com uma carga de cada APM; a passagem
-de CQ da revisão 1 em andamento, com duas cargas de CQ do avaliador; a aquisição da revisão 2 (a revisão seguinte)
-em andamento, com uma carga do revisor.
+Pessoas (só nomes: o push e o pull recebem a conta como parâmetro; ninguém precisa logar): o avaliador, o operador que
+fez a carga avaliada, outro operador e quem faz a revisão seguinte. Cenário de tests/db/test_regras.py (folha 2534,
+fluxo com aquisição, CQ, correção de inspeção e envio): aquisição da revisão 1 concluída, com uma carga de cada
+operador; a passagem de CQ da revisão 1 em andamento, com duas cargas de CQ do avaliador; a aquisição da revisão 2 (a
+revisão seguinte) em andamento, com uma carga do revisor.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.db
 psycopg2 = pytest.importorskip("psycopg2")
 extras = pytest.importorskip("psycopg2.extras")
 
-AVAL, APM, OUTRO, REV = "t_d3_aval", "t_d3_apm", "t_d3_outro", "t_d3_rev"
+AVAL, operador, OUTRO, REV = "t_d3_aval", "t_d3_apm", "t_d3_outro", "t_d3_rev"
 S = "mapcartacomp"
 UTC = dt.timezone.utc
 
@@ -43,7 +43,7 @@ class Cena:
         self.tmp = tmp_path
         c = self.c = Cenario(self.cur)
         self.le_aq = c.passagem("aquisicao", "concluida")
-        self.carga_apm = c.carga(self.le_aq, APM, concluido=True, concluido_em="2026-11-20 10:00+00", x=-44.5)
+        self.carga_apm = c.carga(self.le_aq, operador, concluido=True, concluido_em="2026-11-20 10:00+00", x=-44.5)
         self.carga_outro = c.carga(self.le_aq, OUTRO, concluido=True, concluido_em="2026-11-20 10:00+00", x=-44.4)
         self.le_cq = c.passagem("cq", "em_andamento")
         self.plano = c.plano(self.le_cq, "Omissão", 0)
@@ -105,8 +105,8 @@ def cena(request, tmp_path):
 
 
 def _avaliar_e_registrar(cena):
-    """O avaliador, offline: avalia a primeira amostra não conforme e registra duas ocorrências (uma na carga do APM,
-    outra na do outro APM)."""
+    """O avaliador, offline: avalia a primeira amostra não conforme e registra duas ocorrências (uma na carga do
+    operador, outra na do outro operador)."""
     cena.puxar(AVAL)
     hora = dt.datetime.now(UTC) - dt.timedelta(minutes=30)
     ws = cena.workspace(AVAL)
@@ -146,15 +146,15 @@ def test_avaliar_e_registrar_offline_e_enviar(cena):
 def test_apm_autor_recebe_e_da_ciencia_e_a_revisao_seguinte_e_as_cegas(cena):
     _, o1, o2 = _avaliar_e_registrar(cena)
     cena.enviar(AVAL)
-    cena.puxar(APM)
-    assert cena.uuids(APM) == {o1}  # só a que aponta a carga dele
-    with cena.workspace(APM).transacao() as ex:
+    cena.puxar(operador)
+    assert cena.uuids(operador) == {o1}  # só a que aponta a carga dele
+    with cena.workspace(operador).transacao() as ex:
         assert lq.ocorrencia(ex, o1)["pode_ciente"]
         lq.ciente(ex, o1)
-    r = cena.enviar(APM)
+    r = cena.enviar(operador)
     assert r["resultados"]["aplicado"] == 1, r
     oc = cena.linha("cq_inspecao", "uuid = %s", (o1,))
-    assert oc["ciente_por"] == APM and oc["ciente_em"] is not None
+    assert oc["ciente_por"] == operador and oc["ciente_em"] is not None
     # A revisão seguinte é às cegas.
     cena.puxar(REV)
     assert cena.uuids(REV) == set()
@@ -175,18 +175,18 @@ def test_apm_autor_recebe_e_da_ciencia_e_a_revisao_seguinte_e_as_cegas(cena):
 def test_recusas_no_servidor(cena):
     _, o1, o2 = _avaliar_e_registrar(cena)
     cena.enviar(AVAL)
-    # Ciência por quem não é o autor: o workspace do APM tem a ocorrência da carga do outro apontando a dele (dado
+    # Ciência por quem não é o autor: o workspace do operador tem a ocorrência da carga do outro apontando a dele (dado
     # velho); o servidor confere o autor de verdade.
-    cena.puxar(APM)
+    cena.puxar(operador)
     oc2 = cena.linha("cq_inspecao", "uuid = %s", (o2,))
-    with cena.workspace(APM).transacao() as ex:
+    with cena.workspace(operador).transacao() as ex:
         linha = {k: oc2[k] for k in ("id", "id_lote", "id_lote_etapa", "id_carga_trabalho", "uf", "elemento",
                                       "anotacao", "responsavel", "tratado", "criado_em", "criado_por", "atualizado_em",
                                       "atualizado_por")}  # fmt: skip
         linha.update(uuid=o2, id_carga_avaliada=cena.carga_apm, geom=bytes.fromhex("0101000000" + "00" * 16))
         ex.gravar_remoto("cq_inspecao", linha)
         lq.ciente(ex, o2)
-    r = cena.enviar(APM)
+    r = cena.enviar(operador)
     assert r["resultados"]["recusado"] == 1 and "só quem fez a carga" in r["avisos"][0], r
     assert cena.linha("cq_inspecao", "uuid = %s", (o2,))["ciente_em"] is None
     # Com a passagem de CQ encerrada pelo supervisor: avaliar, editar e registrar são recusados e voltam ao da CCAR.

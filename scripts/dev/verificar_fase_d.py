@@ -128,8 +128,8 @@ class Folha:
 
 @secao("d3a")
 def d3a(amb, usuario, senha):
-    """Avaliar amostra e registrar ocorrência offline, sincronizar, ciência do APM autor e a revisão seguinte às cegas
-    (e com "incluir correções a serem feitas")."""
+    """Avaliar amostra e registrar ocorrência offline, sincronizar, ciência do operador autor e a revisão seguinte às
+    cegas (e com "incluir correções a serem feitas")."""
     from feixe.core.dados import cargas as dc
     from feixe.core.dados.local import cq as lq
     from feixe.server.api import Contexto, criar_roteador
@@ -165,7 +165,7 @@ def d3a(amb, usuario, senha):
             f"n={plano['tamanho_amostra_n']}, Ac={plano['numero_aceitacao_ac']} ({g['gravadas']} amostras)"
         )
         a1, a2 = amostras
-        # As cargas da aquisição que o CQ avalia: as mesmas células, do APM autor (feitas na revisão 1).
+        # As cargas da aquisição que o CQ avalia: as mesmas células, do operador autor (feitas na revisão 1).
         with tx() as ex:
             for a in amostras:
                 ex.executar(
@@ -236,12 +236,12 @@ def d3a(amb, usuario, senha):
         assert linha["id_lote_etapa"] == le_cq and linha["id_carga_avaliada"] == producao[a1["x"]], linha
         ok(f"CCAR de volta: na CCAR, carga de CQ concluída na hora da avaliação e a ocorrência aponta a carga {apm}")
 
-        # --- o APM autor recebe e dá ciência ---------------------------------------------------------------------
+        # --- o operador autor recebe e dá ciência ---------------------------------------------------------------------
         def puxar(w, conta):
             with tx() as ex:
                 return pull.puxar(w, ex, usuario=conta)
 
-        w_apm = Workspace.abrir(amb.nome, apm, "DF", raiz=os.path.join(TEMP, "apm"))
+        w_apm = Workspace.abrir(amb.nome, apm, "DF", raiz=os.path.join(TEMP, "operador"))
         workspaces.append(w_apm)
         puxar(w_apm, apm)
         with w_apm.transacao() as ex:
@@ -252,7 +252,7 @@ def d3a(amb, usuario, senha):
         assert r["resultados"]["aplicado"] == 1, r
         with tx() as ex:
             assert ex.um(f"SELECT ciente_por FROM {S}.cq_inspecao WHERE uuid = %s", (oc,))["ciente_por"] == apm
-        ok("o APM autor recebeu a ocorrência e deu ciência; a ciência chegou à CCAR")
+        ok("o operador autor recebeu a ocorrência e deu ciência; a ciência chegou à CCAR")
 
         # --- a revisão seguinte -----------------------------------------------------------------------------------
         w_rev = Workspace.abrir(amb.nome, rev, "DF", raiz=os.path.join(TEMP, "rev"))
@@ -365,7 +365,7 @@ class _Rotulo:
 @secao("d3c")
 def d3c(amb, usuario, senha):
     """Camadas, formulários e barra do CQ no QGIS: o grupo do avaliador (amostras e ocorrências por elemento) e o do
-    APM (para ciência e correções), avaliar e registrar pela barra com a camada relendo, e o Ciente."""
+    operador (para ciência e correções), avaliar e registrar pela barra com a camada relendo, e o Ciente."""
     from feixe.core import camadas, config
     from feixe.core.dados import cargas as dc
     from feixe.core.dados.local import grupos as lg
@@ -415,8 +415,8 @@ def d3c(amb, usuario, senha):
             ex.executar(f"UPDATE {S}.carga_trabalho SET responsavel = %s WHERE id = ANY(%s)", (usuario, ids))
             ex.executar(f"UPDATE {S}.lote_etapa SET situacao = 'em_andamento', iniciada_em = now() WHERE id = %s",
                         (le_cq,))  # fmt: skip
-            # As cargas do APM autor (revisão 1, concluídas) nas células das amostras, e a revisão 2 dele, planejada
-            # com "incluir correções a serem feitas".
+            # As cargas do operador autor (revisão 1, concluídas) nas células das amostras, e a revisão 2 dele,
+            # planejada com "incluir correções a serem feitas".
             for a in minhas:
                 ex.executar(
                     f"INSERT INTO {S}.carga_trabalho (uuid, id_lote_etapa, id_atividade, responsavel, geom, concluido) "
@@ -432,7 +432,7 @@ def d3c(amb, usuario, senha):
             )
         a1, a2, a3 = omissao
         ok(f"passagem de CQ aberta com dois elementos; {len(omissao)} amostras de Omissão e {len(comissao)} de "
-           f"Comissão com o avaliador ({usuario}); revisão 2 do APM com correções expostas")  # fmt: skip
+           f"Comissão com o avaliador ({usuario}); revisão 2 do operador com correções expostas")  # fmt: skip
 
         # --- o avaliador no QGIS --------------------------------------------------------------------------------
         ws = Workspace.abrir(amb.nome, usuario, "DF", raiz=os.path.join(TEMP, "aval"))
@@ -601,21 +601,21 @@ def d3c(amb, usuario, senha):
             oc_ccar = ex.um(f"SELECT anotacao, id_carga_avaliada FROM {S}.cq_inspecao WHERE uuid = %s",
                             (r_uuid := po["uuid"],))  # fmt: skip
         assert sorted(x["status"] for x in na_ccar) == [0, 1, 1, 1] and oc_ccar["id_carga_avaliada"], (na_ccar, oc_ccar)
-        ok("sincronizado: as quatro avaliações e a ocorrência (com a carga do APM derivada) estão na CCAR")
+        ok("sincronizado: as quatro avaliações e a ocorrência (com a carga do operador derivada) estão na CCAR")
 
-        # --- o APM: para ciência e correções ---------------------------------------------------------------------
+        # --- o operador: para ciência e correções ---------------------------------------------------------------------
         projeto.clear()
-        w_apm = Workspace.abrir(amb.nome, apm, "DF", raiz=os.path.join(TEMP, "apm"))
+        w_apm = Workspace.abrir(amb.nome, apm, "DF", raiz=os.path.join(TEMP, "operador"))
         workspaces.append(w_apm)
         with tx() as ex:
             pull.puxar(w_apm, ex, usuario=apm)
-        p2 = plugin_de(w_apm, {"conta": apm, "uf": "DF", "papeis": ["apm"], "perfis": []})
+        p2 = plugin_de(w_apm, {"conta": apm, "uf": "DF", "papeis": ["operador"], "perfis": []})
         rotas_camadas.montar(p2.ctx)
         p2._atualizar_cq()
         execucao = projeto.layerTreeRoot().findGroup("Feixe").findGroup("Execução")
         nomes = [(n.name(), n.itemVisibilityChecked()) for n in execucao.children()]
         assert nomes[0] == ("Ocorrências para ciência", True) and ("Correções a fazer", True) in nomes, nomes
-        ok(f"APM: {nomes}")
+        ok(f"operador: {nomes}")
         ciencia = camadas.camada_ciencia()
         (fc,) = list(ciencia.getFeatures())
         assert ciencia.readOnly() and fc["uuid"] == r_uuid and fc["anotacao"] == "drenagem omitida no trecho norte"
@@ -892,7 +892,7 @@ def d5(amb, usuario, senha):
 
         p = FeixePlugin(_Iface())
         p.amb, p.servidor, p._ws, p.rotulo_status = amb, True, ws, _Rotulo()
-        eu = {"conta": usuario, "uf": "DF", "papeis": ["apm"], "perfis": []}
+        eu = {"conta": usuario, "uf": "DF", "papeis": ["operador"], "perfis": []}
         c = Contexto(
             transacao=tx, workspace=lambda: ws, online=lambda: sinc.online, eu_guardado=lambda: eu,
             publicar=lambda e, dd: None,

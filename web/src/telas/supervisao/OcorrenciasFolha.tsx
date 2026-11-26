@@ -11,7 +11,7 @@ import { enviar, useApi } from '@/lib/useApi'
 const primeiro = (n: string | null) => (n ?? '').split(' ').slice(0, 2).join(' ')
 const MOSTRAR = 8
 
-// Ciência do APM e tratamento (correção de inspeção, D5): o que já aconteceu com a ocorrência.
+// Ciência do operador e tratamento (correção de inspeção, D5): o que já aconteceu com a ocorrência.
 function Estado({ o }: { o: OcorrenciaDaFolha }) {
   const partes = []
   if (o.tratado) partes.push(<span key="t">tratada {diaMes(o.tratado_em)}</span>)

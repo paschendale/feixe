@@ -149,7 +149,7 @@ def c4(amb, usuario, senha):
         plugin = FeixePlugin(_Iface())
         plugin.amb = amb
         plugin.servidor = True  # as rotas são chamadas direto, sem o servidor HTTP
-        guardado = {"conta": usuario, "uf": "DF", "papeis": ["supervisor", "apm"], "perfis": []}
+        guardado = {"conta": usuario, "uf": "DF", "papeis": ["supervisor", "operador"], "perfis": []}
         ctx = Contexto(
             transacao=lambda: db.transacao(amb, usuario, senha),
             consultar=lambda sql, p=None: db.consultar(amb, sql, p),

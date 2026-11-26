@@ -1,7 +1,7 @@
 """Esquema do workspace local: tabelas espelho, referências, controle e o mínimo do GeoPackage.
 
-Espelho = subconjunto de `mapcartacomp` que a execução (APM e avaliador, D-111) precisa offline, com as mesmas colunas
-de domínio da CCAR. Diferenças, todas de propósito:
+Espelho = subconjunto de `mapcartacomp` que a execução (operador e avaliador, D-111) precisa offline, com as mesmas
+colunas de domínio da CCAR. Diferenças, todas de propósito:
 
 - `fid` é a chave técnica (o GeoPackage exige INTEGER PRIMARY KEY nas tabelas de feições); a chave de verdade é o
   `uuid` (único), e o `id` serial da CCAR fica nulo numa linha criada offline até o primeiro push (C3);

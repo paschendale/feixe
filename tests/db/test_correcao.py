@@ -30,7 +30,7 @@ from tests.db.test_regras import Cenario
 
 pytestmark = pytest.mark.db
 UTC = dt.timezone.utc
-APM, OUTRO = "t_apm_a", "t_apm_b"
+OPERADOR, OUTRO = "t_apm_a", "t_apm_b"
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ def amb(banco, tmp_path):
     aplicar(banco)
     with banco.cursor() as cur, banco.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as dcur:
         cen = Cenario(cur)
-        _conta(cur, APM)
+        _conta(cur, OPERADOR)
         _conta(cur, OUTRO)
         ex = ExecutorPg(dcur)
         abertos = []
@@ -108,7 +108,7 @@ def test_abrir_distribuir_e_a_ultima_tratada_poe_a_folha_em_esperando(amb):
     sug = dfi.sugestao(ex, "DF", [cen.lote])
     (f,) = sug["folhas"]
     assert f["a_atribuir"] == 1 and f["sugerida"] is not None
-    d = dfi.distribuir_uma(ex, "DF", le, APM)
+    d = dfi.distribuir_uma(ex, "DF", le, OPERADOR)
     assert d["atribuida"]["atribuidas"] == 1
     assert ex.um("SELECT situacao FROM mapcartacomp.lote_etapa WHERE id = %s", (le,))["situacao"] == "em_andamento"
     assert _esperando(ex, cen) == []
@@ -161,14 +161,14 @@ def test_pull_traz_todas_da_folha_e_o_push_leva_e_recusa_fora_da_passagem(amb):
     cen, ex, workspace = amb
     oc = _ocorrencias(cen, ex, tratadas=1)
     le, _ = _correcao(cen, ex)
-    dfi.distribuir_uma(ex, "DF", le, APM)
+    dfi.distribuir_uma(ex, "DF", le, OPERADOR)
 
     @contextlib.contextmanager
     def remota():
         yield ex  # a transação de fora é desfeita no fim
 
-    w, w_outro = workspace(APM), workspace(OUTRO)
-    pull.puxar(w, ex, usuario=APM)
+    w, w_outro = workspace(OPERADOR), workspace(OUTRO)
+    pull.puxar(w, ex, usuario=OPERADOR)
     pull.puxar(w_outro, ex, usuario=OUTRO)
     with w.leitura() as lx:
         assert {o["uuid"] for o in lq.ocorrencias(lx, id_lote=cen.lote)} == set(oc)  # todas, de todas as revisões
@@ -181,10 +181,10 @@ def test_pull_traz_todas_da_folha_e_o_push_leva_e_recusa_fora_da_passagem(amb):
         lq.tratar(lx, oc[1])
         r = lq.tratar(lx, oc[2])
     assert r["progresso"]["pendentes"] == 0
-    res = push.enviar(w, remota, usuario=APM)
+    res = push.enviar(w, remota, usuario=OPERADOR)
     assert res["resultados"]["aplicado"] == 2, res
     srv = ex.um("SELECT tratado, tratado_por, tratado_em FROM mapcartacomp.cq_inspecao WHERE uuid = %s", (oc[2],))
-    assert srv["tratado"] and srv["tratado_por"] == APM
+    assert srv["tratado"] and srv["tratado_por"] == OPERADOR
     assert abs((srv["tratado_em"] - hora).total_seconds()) < 5  # a hora da ação (corrigida pelo relógio)
     (carga,) = _carga_da_folha(ex, le)
     assert carga["concluido"]
@@ -197,7 +197,7 @@ def test_pull_traz_todas_da_folha_e_o_push_leva_e_recusa_fora_da_passagem(amb):
     with w.transacao() as lx:
         lq.tratar(lx, oc[2], False)
     ex.executar("UPDATE mapcartacomp.lote_etapa SET situacao = 'concluida', concluida_em = now() WHERE id = %s", (le,))
-    res = push.enviar(w, remota, usuario=APM)
+    res = push.enviar(w, remota, usuario=OPERADOR)
     assert res["resultados"]["recusado"] == 1 and "correção de inspeção aberta" in res["avisos"][0], res
     assert ex.um("SELECT tratado FROM mapcartacomp.cq_inspecao WHERE uuid = %s", (oc[2],))["tratado"]
     with w.leitura() as lx:
@@ -211,18 +211,18 @@ def test_push_recusa_quem_nao_esta_com_a_folha(amb):
     cen, ex, workspace = amb
     oc = _ocorrencias(cen, ex)
     le, _ = _correcao(cen, ex)
-    dfi.distribuir_uma(ex, "DF", le, APM)
+    dfi.distribuir_uma(ex, "DF", le, OPERADOR)
 
     @contextlib.contextmanager
     def remota():
         yield ex
 
-    w = workspace(APM)
-    pull.puxar(w, ex, usuario=APM)
+    w = workspace(OPERADOR)
+    pull.puxar(w, ex, usuario=OPERADOR)
     with w.transacao() as lx:
         lq.tratar(lx, oc[0])
     # O supervisor passou a folha a outra pessoa antes do push.
     dfi.distribuir_uma(ex, "DF", le, OUTRO)
-    res = push.enviar(w, remota, usuario=APM)
+    res = push.enviar(w, remota, usuario=OPERADOR)
     assert res["resultados"]["recusado"] == 1, res
     assert not ex.um("SELECT tratado FROM mapcartacomp.cq_inspecao WHERE uuid = %s", (oc[0],))["tratado"]

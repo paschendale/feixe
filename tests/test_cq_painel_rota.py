@@ -44,7 +44,7 @@ def montar(ws, monkeypatch):  # noqa: F811
 def test_painel_execucao_com_cq_e_ciencia(montar, cq, monkeypatch):  # noqa: F811
     pedidos = []
     monkeypatch.setattr(dp, "nomes", lambda ex, contas: pedidos.append(contas) or {"u_aval": "Ana Avaliadora"})
-    r, ch = montar(["apm", "avaliador"])
+    r, ch = montar(["operador", "avaliador"])
     status, obj = r.despachar("GET", "/api/painel/execucao", {"fuso": "America/Sao_Paulo"}, None)
     assert status == 200 and "por_dia" in obj
     assert [(x["id_lote_etapa"], x["minhas"], x["total"]) for x in obj["cq"]] == [(12, 2, 3), (14, 1, 3)]
@@ -56,7 +56,7 @@ def test_painel_execucao_com_cq_e_ciencia(montar, cq, monkeypatch):  # noqa: F81
 
 
 def test_sem_a_ccar_fica_a_conta(montar, cq):  # noqa: F811
-    r, ch = montar(["apm"], online=False)
+    r, ch = montar(["operador"], online=False)
     status, obj = r.despachar("GET", "/api/painel/execucao", {}, None)
     assert status == 200 and obj["ciencia"]["pendentes"][0]["avaliador"] == "u_aval" and ch["tx"] == 0
 
@@ -73,7 +73,7 @@ def test_proxima_amostra_da_folha(montar, cq):  # noqa: F811
 
 
 def test_ciente_em_todas_da_folha(montar, cq):  # noqa: F811
-    r, ch = montar(["apm"])
+    r, ch = montar(["operador"])
     status, obj = r.despachar("POST", "/api/inspecoes/ciente", {}, {"id_lote": 1})
     assert status == 200 and obj["cientes"] == 1 and [e for e, _ in ch["eventos"]] == ["cq"]
     status, obj = r.despachar("POST", "/api/inspecoes/ciente", {}, {"id_lote": 1})
@@ -84,7 +84,7 @@ def test_ciente_em_todas_da_folha(montar, cq):  # noqa: F811
 
 
 def test_ver_ocorrencia_no_qgis(montar, cq, monkeypatch):  # noqa: F811
-    r, ch = montar(["apm"])
+    r, ch = montar(["operador"])
     status, _ = r.despachar("POST", f"/api/inspecoes/{cq['autor']}/zoom", {}, None)
     assert status == 200
     ((xmin, ymin, xmax, ymax, srid),) = ch["zoom"]
@@ -99,12 +99,12 @@ def test_ver_ocorrencia_no_qgis(montar, cq, monkeypatch):  # noqa: F811
     assert len(ch["zoom"]) == 1
     outro = "0f0e0d0c-0b0a-4000-8000-000000000002"
     assert r.despachar("POST", f"/api/lotes/5/ocorrencias/{outro}/zoom", {}, None)[0] == 404
-    r, _ = montar(["apm"])
+    r, _ = montar(["operador"])
     assert r.despachar("POST", f"/api/lotes/5/ocorrencias/{item['uuid']}/zoom", {}, None)[0] == 403
 
 
 def test_trabalhar_na_amostra_e_proxima_carga_sem_amostras(montar, cq):  # noqa: F811
-    r, ch = montar(["avaliador", "apm"])
+    r, ch = montar(["avaliador", "operador"])
     status, obj = r.despachar("POST", "/api/amostras/9001/zoom", {}, None)
     assert status == 200 and obj["carga"]["id"] == 4001 and ch["qgis"] == ["focar_amostra"]
     assert r.despachar("POST", "/api/amostras/9003/zoom", {}, None)[0] == 404  # de outro avaliador

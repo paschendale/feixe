@@ -1,14 +1,18 @@
 """Identidade e papéis do usuário no Feixe, só a partir do SGBC (mapcartctrl) e de mapcartacomp.usuario_feixe.
 
-Nenhuma role do banco é consultada (D-57): quem é APM, avaliador, supervisor ou consulta sai do perfil do usuário
+Nenhuma role do banco é consultada (D-57): quem é operador, avaliador, supervisor ou consulta sai do perfil do usuário
 no projeto em `mapcartctrl.t_prd_perfil_usuarioprojeto`, gravado pelo SGBC; gerente e equipe são do Feixe.
 
-- Perfis do SGBC: S = supervisor, O = APM, V = avaliador, C = consulta. O perfil I (iniciador) não tem papel no
+- Perfis do SGBC: S = supervisor, O = operador, V = avaliador, C = consulta. O perfil I (iniciador) não tem papel no
   Feixe e aparece só como perfil bruto.
+- Os perfis são uma hierarquia (quem pode mais pode menos, confirmado com a DBA em 2026-11-26): S inclui V e O, V
+  inclui O. Quem tem S num projeto tem os papéis de supervisor, avaliador e operador; quem tem V, os de avaliador e
+  operador.
 - UF (unidade) = `t_usuario.dsc_lotacao`, quando é uma sigla de duas letras. A lotação RJ é a unidade da GBC e é
   tratada como qualquer outra (D-76). Lotação vazia ou fora do padrão dá UF nula, e o usuário continua sendo
   identificado.
-- Elegibilidade da conta (P-16): ativa, que não é conta de sistema nem super. É a única regra; quem precisar saber se
+- Elegibilidade da conta (P-16): ativa e que não é conta de sistema. Conta super só dá permissões a mais dentro do
+  SGBC e não impede ninguém de usar o Feixe (DBA, 2026-11-26). É a única regra; quem precisar saber se
   alguém pode ser responsável por carga usa `elegivel`. Conta inelegível não recebe papel no Feixe.
 
 Sem QGIS e sem banco: as consultas chegam por uma função `consultar(sql, params) -> [dict]`, como na API.
@@ -17,18 +21,21 @@ Sem QGIS e sem banco: as consultas chegam por uma função `consultar(sql, param
 from __future__ import annotations
 
 import re
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
-PAPEL_DO_PERFIL = {"S": "supervisor", "O": "apm", "V": "avaliador", "C": "consulta"}
+PAPEL_DO_PERFIL = {"S": "supervisor", "O": "operador", "V": "avaliador", "C": "consulta"}
+
+# Hierarquia dos perfis: cada perfil inclui os que vêm depois dele na lista.
+HIERARQUIA = ("S", "V", "O")
 
 # Do papel mais amplo ao mais restrito: o primeiro que a pessoa tem é o que o cabeçalho mostra.
-PRECEDENCIA = ("gerente", "supervisor", "avaliador", "apm", "consulta")
+PRECEDENCIA = ("gerente", "supervisor", "avaliador", "operador", "consulta")
 
 ROTULO = {
     "gerente": "Gerente",
     "supervisor": "Supervisor",
     "avaliador": "Avaliador",
-    "apm": "APM",
+    "operador": "Operador",
     "consulta": "Consulta",
 }
 
@@ -52,10 +59,10 @@ SQL_FEIXE = "SELECT equipe, gerente, ativo FROM mapcartacomp.usuario_feixe WHERE
 
 
 def elegivel(conta: Optional[Dict]) -> bool:
-    """Regra única de elegibilidade (P-16): conta ativa, que não é de sistema nem super. Nulo conta como não."""
+    """Regra única de elegibilidade (P-16): conta ativa, que não é de sistema. Nulo conta como não."""
     if not conta:
         return False
-    return conta.get("ind_contaativa") is True and not conta.get("ind_contasistema") and not conta.get("ind_contasuper")
+    return conta.get("ind_contaativa") is True and not conta.get("ind_contasistema")
 
 
 def uf_da_lotacao(dsc_lotacao: Optional[str]) -> Optional[str]:
@@ -68,6 +75,27 @@ def uf_da_lotacao(dsc_lotacao: Optional[str]) -> Optional[str]:
 
 def papel_do_perfil(perfil: Optional[str]) -> Optional[str]:
     return PAPEL_DO_PERFIL.get((perfil or "").strip().upper())
+
+
+def perfis_incluidos(perfil: Optional[str]) -> Tuple[str, ...]:
+    """'S' -> ('S', 'V', 'O'), 'V' -> ('V', 'O'), 'O' -> ('O',), 'C' -> ('C',), sem perfil -> ()."""
+    p = (perfil or "").strip().upper()
+    if p in HIERARQUIA:
+        return HIERARQUIA[HIERARQUIA.index(p) :]
+    return (p,) if p else ()
+
+
+def perfis_que_cobrem(perfil: str) -> Tuple[str, ...]:
+    """Perfis que dão o papel de `perfil`: 'O' -> ('O', 'V', 'S'), 'V' -> ('V', 'S'), 'S' -> ('S',)."""
+    p = perfil.strip().upper()
+    if p in HIERARQUIA:
+        return tuple(reversed(HIERARQUIA[: HIERARQUIA.index(p) + 1]))
+    return (p,)
+
+
+def papeis_do_perfil(perfil: Optional[str]) -> List[str]:
+    """Papéis que um perfil dá, pela hierarquia: 'S' -> ['supervisor', 'avaliador', 'operador']."""
+    return [PAPEL_DO_PERFIL[x] for x in perfis_incluidos(perfil) if x in PAPEL_DO_PERFIL]
 
 
 def principal(papeis) -> Optional[str]:
@@ -94,8 +122,8 @@ def montar(conta: str, usuario: Optional[Dict], perfis: List[Dict], feixe: Optio
                 "papel": papel,
             }
         )
-        if papel and pode:
-            papeis.add(papel)
+        if pode:
+            papeis.update(papeis_do_perfil(p.get("perfil")))
     if gerente:
         papeis.add("gerente")
     lista = [p for p in PRECEDENCIA if p in papeis]

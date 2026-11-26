@@ -27,7 +27,7 @@ def montar(monkeypatch):
 
 
 def test_so_gerente_cria_e_altera(montar):
-    for papel in ("supervisor", "apm"):
+    for papel in ("supervisor", "operador"):
         r, _ = montar([papel])
         assert r.despachar("GET", "/api/atividades", {}, None)[0] == 200
         assert r.despachar("POST", "/api/atividades", {}, {"nome": "x"})[0] == 403

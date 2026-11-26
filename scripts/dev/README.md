@@ -44,7 +44,7 @@ scp apoio/<dump> $O/pre.sql $O/post.sql scripts/dev/restaurar_recorte.sh <host-d
 
 2. No host de dev, `FEIXE_DB_PASSWORD=... bash restaurar_recorte.sh <feixe-ggc|feixe-ccar> <dump> pre.sql post.sql <schema,...>`. Os schemas listados são removidos antes (inclua `mapcartacomp`, porque as FKs dele para `mapcartctrl` caem junto). Restaurar pela própria máquina pela rede funciona, mas o link é lento e já caiu no meio da carga; pelo host de dev é mais seguro.
 
-3. Depois: `scripts/db/aplicar.sh` na CCAR de dev, `scripts/db/testar_espelho.sh` no GGC de dev e, como a CCAR de dev não é a de produção e não tem as contas do DF, `scripts/dev/copiar_usuarios_df.sh "$FEIXE_GGC" "$FEIXE_CCAR"` (copia as contas lotadas no DF e as citadas em `bc100ggcdf_apoio`, sem senha e sem disparar os triggers de sincronização).
+3. Depois: `python3 scripts/db/aplicar.py "$FEIXE_CCAR"` na CCAR de dev, `scripts/db/testar_espelho.sh` no GGC de dev e, como a CCAR de dev não é a de produção e não tem as contas do DF, `scripts/dev/copiar_usuarios_df.sh "$FEIXE_GGC" "$FEIXE_CCAR"` (copia as contas lotadas no DF e as citadas em `bc100ggcdf_apoio`, sem senha e sem disparar os triggers de sincronização).
 
 Resultado em 2026-10-14: GGC com 45.009 cargas, 10.974 amostras e 19 ocorrências em `bc100ggcdf_apoio`, 456 contas em `mapcartctrl` e `dominios` com 183 tabelas; CCAR com 548 contas (mais 116 copiadas do DF), 64.831 folhas e `dominios` com 179 tabelas.
 

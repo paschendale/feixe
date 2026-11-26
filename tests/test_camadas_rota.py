@@ -75,7 +75,7 @@ def test_supervisor_recebe_subgrupos_e_responsaveis_da_uf(ctx_de, ws):
 
 
 def test_apm_so_tem_execucao_do_workspace_e_sem_papel_recebe_403(ctx_de):
-    ctx, ex, chamadas, _ = ctx_de(["apm"])
+    ctx, ex, chamadas, _ = ctx_de(["operador"])
     assert criar_roteador(ctx).despachar("POST", "/api/camadas/montar", {}, None)[0] == 200
     assert ex.sqls == [] and chamadas[0][1][1] == [] and chamadas[0][1][2] is None and chamadas[0][1][3] == EXECUCAO
     ctx, _, _, _ = ctx_de([])

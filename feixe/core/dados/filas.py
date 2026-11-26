@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
+from .. import papeis
 from . import ErroDados, Executor, novo_uuid
 from . import cargas as dc
 
@@ -171,15 +172,16 @@ def puxar(ex: Executor, responsavel: str) -> Optional[Dict]:
 # cada folha na fila de alguém (`adicionar`), e a fila de quem está sem carga anda na hora.
 
 
-def _perfil_da_fase(fase: Optional[str]) -> str:
-    return "V" if fase == "cq" else "O"
+def _perfis_da_fase(fase: Optional[str]) -> tuple:
+    """Perfis que fazem a fase, pela hierarquia (S inclui V e O; V inclui O): V ou S no CQ, O, V ou S na produção."""
+    return papeis.perfis_que_cobrem("V" if fase == "cq" else "O")
 
 
 def sugestao(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
     """Para cada folha, a passagem aberta com cargas a atribuir e a pessoa sugerida: entre as de perfil da fase no
-    projeto (O na produção, V no CQ; sem ninguém com esse perfil, toda a equipe), quem tem menos nas mãos (sem carga
-    primeiro, depois a fila mais curta), uma folha por pessoa neste lote antes de repetir alguém, e nunca quem já
-    trabalhou numa passagem anterior da folha, se houver outra pessoa (a revisão é às cegas)."""
+    projeto (pela hierarquia, O, V ou S na produção e V ou S no CQ; sem ninguém com esse perfil, toda a equipe), quem
+    tem menos nas mãos (sem carga primeiro, depois a fila mais curta), uma folha por pessoa neste lote antes de repetir
+    alguém, e nunca quem já trabalhou numa passagem anterior da folha, se houver outra pessoa (a revisão é às cegas)."""
     folhas = ex.todos(
         "SELECT l.id AS id_lote, l.tipo, l.cod_projeto, le.id AS id_lote_etapa, "
         "mapcartacomp.f_rotulo(l.tipo, l.nome, le.revisao) AS folha_revisao, t.nome AS tema, fe.nome AS etapa, "
@@ -236,8 +238,8 @@ def sugestao(ex: Executor, uf: str, id_lotes: List[int]) -> Dict:
             f["sugerida"] = f["na_fila_de"]
             continue
         equipe = equipes[f["cod_projeto"]]
-        perfil = _perfil_da_fase(f["fase"])
-        pool = [p for p in equipe if f":{perfil}" in (p["perfis"] or "")] or equipe
+        perfis = _perfis_da_fase(f["fase"])
+        pool = [p for p in equipe if any(f":{x}" in (p["perfis"] or "") for x in perfis)] or equipe
         livres = [p for p in pool if p["conta"] not in f["anteriores"]] or pool
         if not livres:
             continue

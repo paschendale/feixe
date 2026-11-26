@@ -13,9 +13,9 @@ import { cn } from '@/lib/utils'
 import { unidadeDe } from '../inicio/Inicio'
 import { rotuloCurto, usePainel } from '../inicio/ResumoSupervisao'
 
-const PERFIL: Record<string, string> = { O: 'APM', V: 'Avaliador', S: 'Supervisor', C: 'Consulta', I: 'Consulta' }
+const PERFIL: Record<string, string> = { O: 'Operador', V: 'Avaliador', S: 'Supervisor', C: 'Consulta', I: 'Consulta' }
 
-// "BC100:O, BC250:S" -> "APM, Supervisor"
+// "BC100:O, BC250:S" -> "Operador, Supervisor"
 const perfis = (s: string) => [...new Set(s.split(',').map((x) => PERFIL[x.trim().split(':').pop() ?? ''] ?? x.trim()))].join(', ')
 
 // Supervisão › Equipe: quem pode receber cargas, onde está e há quanto tempo não conclui. Quem está sem carga vem

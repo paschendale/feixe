@@ -113,7 +113,7 @@ def test_ocorrencia_sabe_a_passagem_e_a_carga_avaliada(cen):
     # A carga avaliada informada é mantida (o plugin decide quando sabe).
     assert _ocorrencia(cur, cen.lote, -44.475, -19.975, lote_etapa=cq1, id_carga_avaliada=outra)[2] == outra
 
-    # Revisão 2 (nova aquisição, outro APM) e CQ 2: a ocorrência aponta a carga da revisão 2, não a da 1.
+    # Revisão 2 (nova aquisição, outro operador) e CQ 2: a ocorrência aponta a carga da revisão 2, não a da 1.
     aq2 = cen.passagem("aquisicao", "concluida", instancia=2)
     autor2 = cen.carga(aq2, responsavel="apm_2", concluido=True)
     cq2 = cen.passagem("cq", "em_andamento", instancia=2)
@@ -165,7 +165,7 @@ def test_tratado_em_e_por(cen):
 
 
 def test_avaliador_e_apm_gravam_o_cq_com_os_grants(mundo):  # noqa: F811
-    """Com os GRANTs gerados: o supervisor configura o padrão da etapa, o avaliador registra a ocorrência, o APM dá
+    """Com os GRANTs gerados: o supervisor configura o padrão da etapa, o avaliador registra a ocorrência, o operador dá
     ciência e a correção de inspeção marca tratada."""
     cur, d = mundo
     # A passagem, o plano e a carga de CQ vêm da supervisão (online); aqui, prontos.

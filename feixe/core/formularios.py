@@ -1,9 +1,9 @@
 """Formulário, dica do mapa, título no identificar e ações de cada camada do Feixe no QGIS, por usuário (D-102).
 
-Cada pessoa vê só o que usa: o APM (Minhas cargas, Minhas folhas) vê situação, folha e progresso; o supervisor (cargas
-e folhas da unidade) vê responsável, situação, andamento e CQ. Ids, uuid e datas cruas ficam fora do formulário. Tudo
-com recursos nativos do QGIS (formulário em arrastar e soltar, campos de expressão, dicas de mapa e ações Python que
-chamam o plugin), configurados ao montar as camadas. Roda na thread principal.
+Cada pessoa vê só o que usa: o operador (Minhas cargas, Minhas folhas) vê situação, folha e progresso; o supervisor
+(cargas e folhas da unidade) vê responsável, situação, andamento e CQ. Ids, uuid e datas cruas ficam fora do
+formulário. Tudo com recursos nativos do QGIS (formulário em arrastar e soltar, campos de expressão, dicas de mapa e
+ações Python que chamam o plugin), configurados ao montar as camadas. Roda na thread principal.
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ def _acao(camada: QgsVectorLayer, titulo: str, chamada: str) -> QgsAction:
     return acao
 
 
-# --- APM: Minhas cargas -----------------------------------------------------------------------------------------------
+# --- operador: Minhas cargas ------------------------------------------------------------------------------------------
 # Do workspace (C4): `id` é o id da carga na CCAR; folha, tema, etapa, atividade e as contagens vêm da view juntada
 # (`vw_minhas_cargas_info`), com as contagens em texto (a view não tipa expressão: daí o `to_int`).
 def minhas_cargas(camada: QgsVectorLayer) -> None:
@@ -135,7 +135,7 @@ def minhas_cargas(camada: QgsVectorLayer) -> None:
     _acao(camada, "Pular esta carga", 'pular_carga([% "id" %])')
 
 
-# --- APM: Minhas folhas -----------------------------------------------------------------------------------------------
+# --- operador: Minhas folhas ------------------------------------------------------------------------------------------
 def minhas_folhas(camada: QgsVectorLayer, id_camada_minhas: str) -> None:
     """`id_camada_minhas`: a camada Minhas cargas do mesmo subgrupo, para contar as cargas da pessoa na folha. Do
     workspace (C4), que só tem as cargas da pessoa: a folha toda (todas as cargas, o responsável principal) fica na
@@ -302,8 +302,8 @@ def folhas_cq(camada: QgsVectorLayer) -> None:
 # --- CQ: ocorrências (D3c) --------------------------------------------------------------------------------------------
 # A camada é a `cq_inspecao` do workspace, com a view `vw_ocorrencias_info` juntada pelo `uuid` (a registrada offline
 # ainda não tem id da CCAR). Do avaliador (`ocorrencias`): só a anotação edita, e a gravação sai do buffer do QGIS e
-# vai pela outbox (`core/edicao.py`). Para ciência (o APM autor) e correção (a revisão com "incluir correções"): tudo só
-# leitura; o Ciente é ação.
+# vai pela outbox (`core/edicao.py`). Para ciência (o operador autor) e correção (a revisão com "incluir correções"):
+# tudo só leitura; o Ciente é ação.
 def ocorrencias(camada: QgsVectorLayer, papel: str) -> None:
     _campo_expressao(camada, "folha_txt", "Lote", "\"folha_revisao\" || coalesce(' · ' || \"tema\", '')")
     _campo_expressao(
@@ -331,7 +331,7 @@ def ocorrencias(camada: QgsVectorLayer, papel: str) -> None:
         ]
         editaveis: Tuple[str, ...] = ("anotacao",)
     elif papel in ("correcao_pendentes", "correcao_tratadas"):
-        # Correção de inspeção (D5): o que corrigir, de que revisão veio, quem avaliou, se o APM deu ciência e, na
+        # Correção de inspeção (D5): o que corrigir, de que revisão veio, quem avaliou, se o operador deu ciência e, na
         # tratada, quando. Marcar e desmarcar são ações (camada e barra), nunca o buffer do QGIS.
         camada.setFieldAlias(camada.fields().indexOf("folha_revisao"), "Revisão avaliada")
         _campo_expressao(

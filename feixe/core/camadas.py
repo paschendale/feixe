@@ -17,7 +17,7 @@ Execução (todos), do workspace:
   passa pelas regras da execução e pela outbox (`core/edicao.py`).
 - Minhas folhas: a view `vw_minhas_folhas` (só leitura), moldura e rótulo das folhas em que a pessoa tem cargas de
   passagens abertas.
-- Ocorrências para ciência (o APM): as que apontam uma carga minha, ainda sem ciência; só quando houver alguma.
+- Ocorrências para ciência (o operador): as que apontam uma carga minha, ainda sem ciência; só quando houver alguma.
   Correções a fazer: na revisão planejada com "incluir correções a serem feitas", as não tratadas da folha.
 - Correção de inspeção (D5), num subgrupo "Correção · tema": Ocorrências pendentes (as não tratadas da folha, de
   todas as revisões; a ocorrência atual com o pino maior em magenta), Ocorrências tratadas (desligada) e Minhas
@@ -778,7 +778,8 @@ def _camada_ocorrencias(gpkg: str, infos: _Infos, nome: str, papel_: str, filtro
 
 
 def camada_ciencia_nova(gpkg: str, infos: Optional[_Infos] = None) -> Optional[QgsVectorLayer]:
-    """Ocorrências para ciência, só se houver alguma (o APM que nunca recebeu ocorrência não ganha camada vazia)."""
+    """Ocorrências para ciência, só se houver alguma (o operador que nunca recebeu ocorrência não ganha camada
+    vazia)."""
     teste = _camada_gpkg(gpkg, "cq_inspecao", NOME_CIENCIA, lgrupos.FILTRO_CIENCIA)
     if _contar(teste) == 0:
         return None

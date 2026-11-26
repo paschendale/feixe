@@ -213,7 +213,7 @@ export default function Catalogo() {
           <>
             <div className="flex flex-wrap items-center justify-between gap-4">
               <p className="max-w-[820px] text-nota text-muted-foreground">
-                As unidades montam os fluxos com estas atividades: cada uma é projeto + tema + fase, com o jeito de gerar as cargas. Supervisores e APMs veem o catálogo; só o gerente cria e altera. Atividade em uso não muda de nível da grade, e não se desativa enquanto estiver num fluxo ativo.
+                As unidades montam os fluxos com estas atividades: cada uma é projeto + tema + fase, com o jeito de gerar as cargas. Supervisores e operadores veem o catálogo; só o gerente cria e altera. Atividade em uso não muda de nível da grade, e não se desativa enquanto estiver num fluxo ativo.
               </p>
               {gerente && (
                 <Button onClick={() => setForm({ atividade: null })}>
