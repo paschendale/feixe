@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Bloco, Carregando, Conteudo, COR, RotuloEstavel } from '@/components/painel'
+import { Bloco, Campo, Carregando, Conteudo, Nota, RotuloEstavel, Selo, TituloBloco, Vazio } from '@/components/ds'
 import type { DecisaoCQ, GrupoEsperando, ResultadoAvanco } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { diaMes, num, plural } from '@/lib/formato'
@@ -45,19 +45,21 @@ function GrupoCQ({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar:
   // Rótulos fixos (a barra não muda de largura ao marcar); quantas folhas, a confirmação diz.
   const rotulo = (d: DecisaoCQ) => (d === 'nova_revisao' ? 'Nova revisão…' : reprovadas ? 'Aprovar mesmo assim…' : `Aprovar${g.proxima ? ` e abrir ${g.proxima}` : ''}…`)
   return (
-    <Bloco className="gap-4" style={{ borderColor: reprovadas ? '#E8C9A0' : undefined }}>
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <h2 className="text-base font-semibold">
-          {g.tema} · {g.etapa} avaliado
-        </h2>
-        <span className="text-[13px] text-muted-foreground">
-          {plural(g.folhas.length, 'folha', 'folhas')} com todas as amostras avaliadas {periodo(g)}
-        </span>
-        <span className="ml-auto self-center">
-          <SeloResultado resultado={r} />
-        </span>
-      </div>
-      <p className="text-[13px] text-texto-2">
+    <Bloco className="gap-4">
+      <TituloBloco
+        titulo={
+          <>
+            {g.tema} · {g.etapa} avaliado
+          </>
+        }
+        sub={
+          <>
+            {plural(g.folhas.length, 'folha', 'folhas')} com todas as amostras avaliadas {periodo(g)}
+          </>
+        }
+        acao={<SeloResultado resultado={r} />}
+      />
+      <p className="text-nota text-texto-2">
         {reprovadas
           ? 'Os não conformes passaram do aceito em pelo menos um elemento. O caminho sugerido é uma nova revisão por outra pessoa; aprovar mesmo assim pede a sua confirmação.'
           : r === 'aprovado'
@@ -68,7 +70,7 @@ function GrupoCQ({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar:
         {g.folhas.map((f) => (
           <li key={f.id_lote} className="border-t border-linha py-2 first:border-0">
             <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
-              <label className={cn('tab inline-flex w-[104px] cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm', marcadas.has(f.id_lote) ? 'border-ibge bg-[#EEF3FA]' : 'hover:bg-accent')}>
+              <label className={cn('tab inline-flex w-[104px] cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1', marcadas.has(f.id_lote) ? 'bg-primary-suave text-primary' : 'bg-preenchimento-2 hover:bg-preenchimento')}>
                 <input
                   type="checkbox"
                   checked={marcadas.has(f.id_lote)}
@@ -83,21 +85,21 @@ function GrupoCQ({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar:
                 />
                 {f.folha_revisao}
               </label>
-              <span className="truncate text-[13px] text-texto-2" title={f.cq?.frase}>
+              <span className="truncate text-nota text-texto-2" title={f.cq?.frase}>
                 {f.cq?.frase}
               </span>
-              <button className="px-1 text-[13px] text-ibge hover:underline" aria-expanded={detalhe === f.id_lote} onClick={() => setDetalhe(detalhe === f.id_lote ? null : f.id_lote)}>
+              <button className="px-1 text-nota font-medium text-primary hover:underline" aria-expanded={detalhe === f.id_lote} onClick={() => setDetalhe(detalhe === f.id_lote ? null : f.id_lote)}>
                 <RotuloEstavel ocupado={detalhe === f.id_lote} rotulo="Ver detalhe" rotuloOcupado="Fechar detalhe" />
               </button>
             </div>
             {detalhe === f.id_lote && f.cq && (
-              <div className="mt-2.5 flex flex-col gap-3 rounded-lg bg-[#F7F9FB] p-3">
+              <div className="mt-2.5 flex flex-col gap-3 rounded-xl bg-preenchimento-2 p-3">
                 <div className="grid gap-3 sm:grid-cols-2">
                   {f.cq.planos.map((p) => (
                     <ElementoCQ key={p.id} p={p} compacto />
                   ))}
                 </div>
-                <a className="self-start text-[13px] text-ibge hover:underline" href={href(`supervisao/folhas/${f.id_lote}`, { grupo: 'todas' })}>
+                <a className="self-start text-nota font-medium text-primary hover:underline" href={href(`supervisao/folhas/${f.id_lote}`, { grupo: 'todas' })}>
                   Abrir a folha (ocorrências e histórico)
                 </a>
               </div>
@@ -105,16 +107,16 @@ function GrupoCQ({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar:
           </li>
         ))}
       </ul>
-      <div className="flex flex-wrap items-center gap-2.5 border-t pt-4">
+      <div className="flex flex-wrap items-center gap-2.5 border-t border-linha pt-4">
         {acoes.map((d, i) => (
-          <Button key={d} variant={i === 0 ? 'default' : 'outline'} className={i === 0 ? 'font-semibold' : ''} disabled={!marcadas.size} onClick={() => setDecidir(d)}>
+          <Button key={d} variant={i === 0 ? 'default' : 'outline'} disabled={!marcadas.size} onClick={() => setDecidir(d)}>
             {rotulo(d)}
           </Button>
         ))}
         <Button variant="outline" onClick={() => setMarcadas(tudo ? new Set() : new Set(g.folhas.map((f) => f.id_lote)))}>
           <RotuloEstavel ocupado={tudo} rotulo={`Marcar as ${num(g.folhas.length)}`} rotuloOcupado="Desmarcar" />
         </Button>
-        <span className="text-xs text-muted-foreground">{RESULTADO[r].rotulo === 'Reprovada' ? 'A observação e o resultado vão para o histórico de cada folha.' : 'A confirmação mostra o que acontece em cada folha.'}</span>
+        <span className="text-rodape text-muted-foreground">{RESULTADO[r].rotulo === 'Reprovada' ? 'A observação e o resultado vão para o histórico de cada folha.' : 'A confirmação mostra o que acontece em cada folha.'}</span>
       </div>
       <DecidirCQ
         lotes={decidir ? [...marcadas] : []}
@@ -165,36 +167,38 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
   }
 
   return (
-    <Bloco className={cn('gap-4', fim && 'border-[#E8C9A0]')}>
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <h2 className="text-base font-semibold">
-          {g.tema} · {fim ? 'fim do fluxo' : `${g.etapa} terminada`}
-        </h2>
-        <span className="text-[13px] text-muted-foreground">
-          {plural(g.folhas.length, 'folha', 'folhas')} · {fim ? `última etapa (${g.etapa}) concluída` : 'paradas'} {periodo(g)}
-        </span>
-        <span className="ml-auto text-[13px] font-semibold" style={{ color: fim ? COR.alerta : 'var(--ibge)' }}>
-          {fim ? 'precisa de decisão' : `próxima: ${g.proxima}`}
-        </span>
-      </div>
+    <Bloco className="gap-4">
+      <TituloBloco
+        titulo={
+          <>
+            {g.tema} · {fim ? 'fim do fluxo' : `${g.etapa} terminada`}
+          </>
+        }
+        sub={
+          <>
+            {plural(g.folhas.length, 'folha', 'folhas')} · {fim ? `última etapa (${g.etapa}) concluída` : 'paradas'} {periodo(g)}
+          </>
+        }
+        acao={<Selo tom={fim ? 'alerta' : 'info'}>{fim ? 'precisa de decisão' : `próxima: ${g.proxima}`}</Selo>}
+      />
 
       {fim && (
-        <p className="text-[13px] text-texto-2">
+        <Nota tom="alerta">
           Não há etapa seguinte no fluxo {g.fluxo}, e a CCAR ainda vê estas folhas no status da última etapa. Encerrar a folha (marcar como concluída quando a última etapa do fluxo termina) ainda está para decidir; até lá, abra outra etapa pela gaveta se for o caso.
-        </p>
+        </Nota>
       )}
 
       <div className="flex flex-wrap gap-2">
         {visiveis.map((f) =>
           fim ? (
-            <a key={f.id_lote} href={href(`supervisao/folhas/${f.id_lote}`, { grupo: 'todas' })} className="tab rounded-lg border px-2.5 py-1 text-sm hover:bg-accent" title={`terminou ${diaMes(f.desde)}`}>
+            <a key={f.id_lote} href={href(`supervisao/folhas/${f.id_lote}`, { grupo: 'todas' })} className="tab rounded-md bg-preenchimento-2 px-2.5 py-1 hover:bg-preenchimento" title={`terminou ${diaMes(f.desde)}`}>
               {f.folha_revisao}
             </a>
           ) : (
             <label
               key={f.id_lote}
               title={`${f.situacao === 'pulada' ? 'pulada' : f.ocorrencias_tratadas != null && f.situacao === 'em_andamento' ? `${plural(f.ocorrencias_tratadas, 'ocorrência tratada', 'ocorrências tratadas')}` : f.situacao === 'em_andamento' ? 'cargas concluídas' : 'concluída'} em ${diaMes(f.desde)}`}
-              className={cn('tab inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm', marcadas.has(f.id_lote) ? 'border-ibge bg-[#EEF3FA]' : 'hover:bg-accent')}
+              className={cn('tab inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1', marcadas.has(f.id_lote) ? 'bg-primary-suave text-primary' : 'bg-preenchimento-2 hover:bg-preenchimento')}
             >
               <input
                 type="checkbox"
@@ -213,19 +217,18 @@ function Grupo({ g, recarregar, distribuir }: { g: GrupoEsperando; recarregar: (
           ),
         )}
         {g.folhas.length > VISIVEIS && (
-          <button className="px-2 text-sm text-ibge hover:underline" onClick={() => setTodas(!todas)}>
+          <button className="px-2 font-medium text-primary hover:underline" onClick={() => setTodas(!todas)}>
             <RotuloEstavel ocupado={todas} rotulo={`mais ${num(g.folhas.length - VISIVEIS)}`} rotuloOcupado="ver menos" />
           </button>
         )}
       </div>
 
       {!fim && (
-        <div className="flex flex-wrap items-end gap-2.5 border-t pt-4">
-          <label className="flex min-w-[280px] flex-1 flex-col gap-1.5 text-[13px] text-texto-2">
-            Observação (opcional, vai para o histórico de cada folha)
-            <Input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, CQ por amostragem" className="text-sm text-foreground" />
-          </label>
-          <Button className="font-semibold" disabled={ocupado || !marcadas.size} onClick={abrir}>
+        <div className="flex flex-wrap items-end gap-2.5 border-t border-linha pt-4">
+          <Campo rotulo="Observação (opcional, vai para o histórico de cada folha)" className="min-w-[280px] flex-1">
+            <Input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, CQ por amostragem" className="text-corpo font-normal text-foreground" />
+          </Campo>
+          <Button disabled={ocupado || !marcadas.size} onClick={abrir}>
             {marcadas.size ? `Abrir ${g.proxima} em ${plural(marcadas.size, 'folha', 'folhas')}` : `Abrir ${g.proxima}`}
           </Button>
           <Button variant="outline" onClick={() => setMarcadas(tudo ? new Set() : new Set(g.folhas.map((f) => f.id_lote)))}>
@@ -251,9 +254,11 @@ export default function Esperando({ grupos, recarregar }: { grupos: GrupoEsperan
   return (
     <Conteudo largura={1240}>
       {n === 0 ? (
-        <Bloco className="text-muted-foreground">Nenhuma folha esperando você: todas as folhas da unidade estão com uma etapa aberta ou encerradas.</Bloco>
+        <Bloco>
+          <Vazio>Nenhuma folha esperando você: todas as folhas da unidade estão com uma etapa aberta ou encerradas.</Vazio>
+        </Bloco>
       ) : (
-        <p className="max-w-[820px] text-base">
+        <p className="max-w-[820px] text-titulo-3">
           <b>{plural(n, 'folha', 'folhas')}</b> {n === 1 ? 'terminou' : 'terminaram'} a etapa atual (as cargas estão concluídas) e só {n === 1 ? 'anda' : 'andam'} quando você abrir a próxima. Elas estão agrupadas pela decisão; marque as que vão juntas e decida de uma vez, com uma observação só. Abrir a próxima conclui a etapa, gera as cargas da seguinte e abre a distribuição. No CQ, a decisão é sobre o resultado: aprovar ou nova revisão.
         </p>
       )}

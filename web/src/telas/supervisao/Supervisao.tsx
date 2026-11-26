@@ -1,4 +1,4 @@
-import { CabecalhoModulo, type Aba } from '@/components/painel'
+import { CabecalhoModulo, type Aba } from '@/components/ds'
 import type { GrupoEsperando } from '@/lib/api'
 import { href, useRota } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'

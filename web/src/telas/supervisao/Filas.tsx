@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { ArrowDown, ArrowUp, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
-import { Bloco, COR, Carregando, Conteudo } from '@/components/painel'
+import { Bloco, Carregando, Colunas, Conteudo, Selo, Tabela, TituloBloco } from '@/components/ds'
 import type { Filas as TFilas, ItemFila, Pessoa } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { dataHora, num, plural } from '@/lib/formato'
@@ -79,22 +80,22 @@ export default function Filas() {
 
   return (
     <Conteudo>
-      <p className="max-w-[880px] text-base">
+      <p className="max-w-[880px] text-lede text-texto-2 [&_b]:font-semibold [&_b]:text-foreground">
         Quando a pessoa conclui a última carga pendente que tem, o Feixe atribui a ela a primeira folha da fila. Ninguém fica com várias folhas abertas e ninguém fica parado.{' '}
         {paradas.length > 0 && (
           <>
-            <b style={{ color: COR.alerta }}>{plural(paradas.length, 'pessoa está', 'pessoas estão')}</b> sem carga e sem fila; quem está sem carga recebe na hora a folha que você puser na fila.
+            <b className="text-alerta">{plural(paradas.length, 'pessoa está', 'pessoas estão')}</b> sem carga e sem fila; quem está sem carga recebe na hora a folha que você puser na fila.
           </>
         )}
       </p>
 
-      <div className="overflow-x-auto rounded-[10px] border bg-card">
-        <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
+      <Tabela fixa largura={900}>
+          <Colunas larguras={['26%', '24%', undefined]} />
           <thead>
-            <tr className="text-left text-xs text-muted-foreground">
-              <th className="w-[26%] border-b py-3 pr-2 pl-4 font-medium">Pessoa</th>
-              <th className="w-[24%] border-b px-2 py-3 font-medium">Agora</th>
-              <th className="border-b py-3 pr-4 pl-2 font-medium">Fila (a próxima primeiro)</th>
+            <tr>
+              <th>Pessoa</th>
+              <th>Agora</th>
+              <th>Fila (a próxima primeiro)</th>
             </tr>
           </thead>
           <tbody>
@@ -102,58 +103,56 @@ export default function Filas() {
               const fila = filaDe(x.conta)
               const agora = doPainel.get(x.conta)
               return (
-                <tr key={x.conta} className="border-b border-linha align-top last:border-0">
-                  <td className="truncate py-3 pr-2 pl-4 font-medium">
+                <tr key={x.conta} className="[&>td]:align-top">
+                  <td className="truncate font-medium">
                     {x.nome}
                     {x.conta === eu?.conta ? ' (você)' : ''}
                   </td>
-                  <td className="px-2 py-3">
+                  <td>
                     {x.pendentes ? (
                       <>
                         {num(x.pendentes)} pendentes
                         {agora && (
-                          <span className="block text-[13px] text-muted-foreground">
+                          <span className="block text-nota text-muted-foreground">
                             {agora.grupos.map((c) => (grupo(c) ? rotuloCurto(grupo(c)!) : c)).join(', ')}
                             {agora.lotes.length ? ` · ${agora.lotes.length <= 2 ? agora.lotes.map(nomeLote).join(', ') : plural(agora.lotes.length, 'folha', 'folhas')}` : ''}
                           </span>
                         )}
                       </>
                     ) : (
-                      <span className="font-semibold" style={{ color: COR.alerta }}>
-                        sem carga
-                      </span>
+                      <Selo tom="alerta">sem carga</Selo>
                     )}
                   </td>
-                  <td className="py-3 pr-4 pl-2">
+                  <td>
                     <ol className="flex flex-col gap-1.5">
                       {fila.map((item, i) => (
                         <li key={item.id} className="flex flex-wrap items-center gap-2">
-                          <span className="grid size-5 place-items-center rounded-full bg-aco-claro text-xs font-semibold text-ibge">{i + 1}</span>
-                          <a href={href(`supervisao/folhas/${item.id_lote}`, { grupo: 'todas' })} className="tab font-semibold text-ibge hover:underline">
+                          <span className="grid size-5 place-items-center rounded-full bg-primary-suave text-rodape font-semibold text-primary">{i + 1}</span>
+                          <a href={href(`supervisao/folhas/${item.id_lote}`, { grupo: 'todas' })} className="tab font-semibold text-primary hover:underline">
                             {item.folha_revisao}
                           </a>
-                          <span className="text-[13px] text-muted-foreground">
+                          <span className="text-nota text-muted-foreground">
                             {item.tema} · {item.etapa}
                           </span>
-                          <span className={cn('text-[13px]', !item.a_atribuir && 'font-semibold')} style={{ color: item.a_atribuir ? undefined : COR.alerta }}>
+                          <span className={cn('text-nota', !item.a_atribuir && 'font-semibold text-alerta')}>
                             {item.a_atribuir ? `${num(item.a_atribuir)} a atribuir` : 'nada a atribuir: vai ser pulada'}
                           </span>
                           <span className="ml-auto flex gap-0.5">
-                            <button className="grid size-7 place-items-center rounded hover:bg-accent disabled:opacity-30" disabled={ocupado || i === 0} onClick={() => mover(fila, i, -1)} aria-label={`Subir ${item.folha_revisao}`}>
+                            <Button variant="ghost" size="icon-sm" disabled={ocupado || i === 0} onClick={() => mover(fila, i, -1)} aria-label={`Subir ${item.folha_revisao}`}>
                               <ArrowUp className="size-3.5" />
-                            </button>
-                            <button className="grid size-7 place-items-center rounded hover:bg-accent disabled:opacity-30" disabled={ocupado || i === fila.length - 1} onClick={() => mover(fila, i, 1)} aria-label={`Descer ${item.folha_revisao}`}>
+                            </Button>
+                            <Button variant="ghost" size="icon-sm" disabled={ocupado || i === fila.length - 1} onClick={() => mover(fila, i, 1)} aria-label={`Descer ${item.folha_revisao}`}>
                               <ArrowDown className="size-3.5" />
-                            </button>
-                            <button className="grid size-7 place-items-center rounded hover:bg-accent disabled:opacity-30" disabled={ocupado} onClick={() => tirar(item)} aria-label={`Tirar ${item.folha_revisao} da fila`}>
+                            </Button>
+                            <Button variant="ghost" size="icon-sm" disabled={ocupado} onClick={() => tirar(item)} aria-label={`Tirar ${item.folha_revisao} da fila`}>
                               <X className="size-3.5" />
-                            </button>
+                            </Button>
                           </span>
                         </li>
                       ))}
                     </ol>
                     <Select
-                      className={cn('h-8 max-w-[440px] bg-card text-[13px]', fila.length > 0 && 'mt-2')}
+                      className={cn('max-w-[440px] text-nota', fila.length > 0 && 'mt-2')}
                       value=""
                       disabled={ocupado || !candidatas.length}
                       onChange={(e) => {
@@ -174,13 +173,12 @@ export default function Filas() {
               )
             })}
           </tbody>
-        </table>
-      </div>
+      </Tabela>
 
       {filas.recentes.length > 0 && (
         <Bloco className="gap-2">
-          <h2 className="font-semibold">Atribuídas pela fila nos últimos 7 dias</h2>
-          <ul className="flex flex-col gap-1 text-[13px]">
+          <TituloBloco titulo="Atribuídas pela fila nos últimos 7 dias" />
+          <ul className="flex flex-col gap-1 text-nota">
             {filas.recentes.map((r) => (
               <li key={r.id}>
                 <span className="text-muted-foreground">{dataHora(r.atribuida_em)} · </span>
@@ -190,7 +188,7 @@ export default function Filas() {
           </ul>
         </Bloco>
       )}
-      <p className="text-[13px] text-muted-foreground">
+      <p className="text-nota text-muted-foreground">
         Na lista para pôr na fila entram as folhas com etapa aberta e cargas a atribuir que não estão na fila de ninguém. Uma folha da fila que não tem mais nada a atribuir (alguém pegou as cargas) é pulada e fica marcada aqui para você tirar. Desfazer uma conclusão não desfaz a atribuição.
       </p>
     </Conteudo>

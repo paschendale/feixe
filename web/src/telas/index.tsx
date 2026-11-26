@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react'
 import type { Papel } from '@/lib/api'
 import Catalogo from './catalogo/Catalogo'
+import Design from './Design'
 import Execucao from './execucao/Execucao'
 import Inicio from './inicio/Inicio'
 import Sobre from './Sobre'
@@ -23,6 +24,8 @@ const TELAS: Tela[] = [
   { id: 'execucao', rotulo: 'Execução', papeis: ['apm', 'avaliador', 'supervisor'], componente: Execucao },
   { id: 'catalogo', rotulo: 'Catálogo', papeis: [], componente: Catalogo },
   { id: 'sobre', rotulo: 'Sobre', papeis: [], oculta: true, componente: Sobre },
+  // Vitrine do design system, fora do menu.
+  { id: 'design', rotulo: 'Design system', papeis: [], oculta: true, componente: Design },
 ]
 
 export function telasDe(papeis: Papel[]): Tela[] {

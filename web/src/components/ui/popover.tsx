@@ -13,7 +13,7 @@ function PopoverContent({ className, align = 'end', sideOffset = 6, ...props }: 
       <P.Content
         align={align}
         sideOffset={sideOffset}
-        className={cn('z-50 flex w-80 flex-col gap-3 rounded-lg border bg-popover p-4 text-popover-foreground shadow-lg outline-none', className)}
+        className={cn('z-50 flex w-80 flex-col gap-3 rounded-lg bg-popover p-4 text-popover-foreground shadow-flutuante outline-none', className)}
         {...props}
       />
     </P.Portal>

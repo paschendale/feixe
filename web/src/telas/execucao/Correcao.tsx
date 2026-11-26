@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Barra, Bloco, COR, Colunas, Fichas, RotuloEstavel } from '@/components/painel'
+import { Barra, Bloco, COR, Colunas, Fichas, RotuloEstavel, Tabela as TabelaDS, Vazio } from '@/components/ds'
 import type { FolhaCorrecao, Ocorrencia, OcorrenciaCorrecao, ResultadoTratar } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { diaMes, num, pc, plural } from '@/lib/formato'
@@ -61,7 +61,7 @@ function ContinuarCorrecao({ idLote }: { idLote: number }) {
     }
   }
   return (
-    <Button size="lg" onClick={ir} disabled={!conectado || ocupado} className="font-semibold">
+    <Button size="lg" onClick={ir} disabled={!conectado || ocupado}>
       <Play className="fill-current" /> Continuar no QGIS
     </Button>
   )
@@ -83,50 +83,48 @@ function ProximoPasso({ f }: { f: FolhaCorrecao }) {
 function Tabela({ f, acoes }: { f: FolhaCorrecao; acoes: ReturnType<typeof useTratar> }) {
   const { conectado } = useSessao()
   return (
-    <div className="overflow-x-auto rounded-[10px] border bg-card">
-      <table className="w-full min-w-[900px] table-fixed border-collapse text-[13px]">
-        <Colunas larguras={[150, 90, undefined, 140, 120, 120, 230]} />
-        <thead>
-          <tr className="text-left text-xs text-muted-foreground">
-            <th className="border-b py-2.5 pr-2 pl-4 font-medium">Elemento</th>
-            <th className="border-b px-2 py-2.5 font-medium">Revisão</th>
-            <th className="border-b px-2 py-2.5 font-medium">Anotação</th>
-            <th className="border-b px-2 py-2.5 font-medium">Avaliador</th>
-            <th className="border-b px-2 py-2.5 font-medium">Ciência do APM</th>
-            <th className="border-b px-2 py-2.5 font-medium">Situação</th>
-            <th className="border-b py-2.5 pr-4 pl-2" />
+    <TabelaDS fixa densa largura={900}>
+      <Colunas larguras={[150, 90, undefined, 140, 120, 120, 230]} />
+      <thead>
+        <tr>
+          <th>Elemento</th>
+          <th>Revisão</th>
+          <th>Anotação</th>
+          <th>Avaliador</th>
+          <th>Ciência do APM</th>
+          <th>Situação</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        {f.ocorrencias.map((o) => (
+          <tr key={o.uuid}>
+            <td className="truncate font-medium" title={o.elemento ?? undefined}>
+              {o.elemento ?? '—'}
+            </td>
+            <td className="tab">{o.folha_revisao}</td>
+            <td className="truncate" title={o.anotacao ?? undefined}>
+              {o.anotacao ?? <span className="text-muted-foreground">sem anotação</span>}
+            </td>
+            <td className="truncate text-muted-foreground" title={o.avaliador}>
+              {primeiro(o.avaliador)}
+            </td>
+            <td className="tab text-muted-foreground">{o.ciente_em ? `ciente ${diaMes(o.ciente_em)}` : 'sem ciência'}</td>
+            <td className="tab">{o.tratado ? <span className="text-muted-foreground">tratada {diaMes(o.tratado_em)}</span> : 'por tratar'}</td>
+            <td className="py-1.5">
+              <span className="flex justify-end gap-1.5">
+                <Button size="sm" variant="outline" disabled={!conectado || acoes.ocupado === o.uuid} onClick={() => acoes.ver(o)}>
+                  Ver no QGIS
+                </Button>
+                <Button size="sm" variant={o.tratado ? 'ghost' : 'default'} className="w-[92px]" disabled={acoes.ocupado === o.uuid || !o.pode_tratar} onClick={() => acoes.tratar(o, !o.tratado)}>
+                  <RotuloEstavel ocupado={acoes.ocupado === o.uuid} rotulo={o.tratado ? 'Desfazer' : 'Tratada'} rotuloOcupado="…" />
+                </Button>
+              </span>
+            </td>
           </tr>
-        </thead>
-        <tbody>
-          {f.ocorrencias.map((o) => (
-            <tr key={o.uuid} className="border-b border-linha last:border-0">
-              <td className="truncate py-2 pr-2 pl-4 font-medium" title={o.elemento ?? undefined}>
-                {o.elemento ?? '—'}
-              </td>
-              <td className="tab px-2 py-2">{o.folha_revisao}</td>
-              <td className="truncate px-2 py-2" title={o.anotacao ?? undefined}>
-                {o.anotacao ?? <span className="text-muted-foreground">sem anotação</span>}
-              </td>
-              <td className="truncate px-2 py-2 text-muted-foreground" title={o.avaliador}>
-                {primeiro(o.avaliador)}
-              </td>
-              <td className="tab px-2 py-2 text-muted-foreground">{o.ciente_em ? `ciente ${diaMes(o.ciente_em)}` : 'sem ciência'}</td>
-              <td className="tab px-2 py-2">{o.tratado ? <span className="text-muted-foreground">tratada {diaMes(o.tratado_em)}</span> : 'por tratar'}</td>
-              <td className="py-1.5 pr-4 pl-2">
-                <span className="flex justify-end gap-1.5">
-                  <Button size="sm" variant="outline" disabled={!conectado || acoes.ocupado === o.uuid} onClick={() => acoes.ver(o)}>
-                    Ver no QGIS
-                  </Button>
-                  <Button size="sm" variant={o.tratado ? 'ghost' : 'default'} className="w-[92px]" disabled={acoes.ocupado === o.uuid || !o.pode_tratar} onClick={() => acoes.tratar(o, !o.tratado)}>
-                    <RotuloEstavel ocupado={acoes.ocupado === o.uuid} rotulo={o.tratado ? 'Desfazer' : 'Tratada'} rotuloOcupado="…" />
-                  </Button>
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+        ))}
+      </tbody>
+    </TabelaDS>
   )
 }
 
@@ -136,7 +134,11 @@ export function Correcao({ folhas }: { folhas: FolhaCorrecao[] }) {
   const rota = useRota()
   const acoes = useTratar()
   if (!folhas.length)
-    return <Bloco className="text-muted-foreground">Nenhuma folha com você na correção de inspeção. O supervisor distribui as folhas aprovadas no CQ.</Bloco>
+    return (
+      <Bloco>
+        <Vazio>Nenhuma folha com você na correção de inspeção. O supervisor distribui as folhas aprovadas no CQ.</Vazio>
+      </Bloco>
+    )
   const pedida = Number(rota.query.get('folha')) || null
   const f = folhas.find((x) => x.id_lote === pedida) ?? folhas.find((x) => x.pendentes > 0) ?? folhas[0]
   return (
@@ -152,26 +154,26 @@ export function Correcao({ folhas }: { folhas: FolhaCorrecao[] }) {
       <Bloco className="flex-row flex-wrap items-center gap-x-5 gap-y-3 px-5 py-4">
         <div className="flex min-w-[300px] flex-1 flex-col gap-1.5">
           <div className="flex flex-wrap items-baseline gap-x-3">
-            <span className="tab text-lg font-bold">{f.folha_revisao}</span>
+            <span className="tab text-titulo-2 font-bold">{f.folha_revisao}</span>
             <span className="text-muted-foreground">
               {f.tema} · {f.etapa} · {f.situacao === 'pendente' ? 'a iniciar' : 'em andamento'}
             </span>
           </div>
-          <div className="flex justify-between text-[13px]">
+          <div className="flex justify-between text-nota">
             <span>
               <b>{num(f.tratadas)}</b> de {plural(f.total, 'ocorrência tratada', 'ocorrências tratadas')} · todas as revisões
             </span>
             <span className="tab">{pc(f.tratadas, f.total)}%</span>
           </div>
           <Barra partes={[{ valor: f.tratadas, cor: COR.concluida }]} total={Math.max(f.total, 1)} />
-          <p className="text-[13px] text-texto-2">
+          <p className="text-nota text-texto-2">
             <ProximoPasso f={f} />
           </p>
         </div>
         {f.pendentes > 0 && <ContinuarCorrecao idLote={f.id_lote} />}
       </Bloco>
       <Tabela f={f} acoes={acoes} />
-      <p className="text-[13px] text-muted-foreground">
+      <p className="text-nota text-muted-foreground">
         O trabalho é no QGIS: <b>Próxima ocorrência</b> leva o mapa ao ponto sem mudar a escala, e <b>Tratada</b> marca e já vai para a seguinte. Tudo funciona sem a conexão com a CCAR: vai quando a conexão voltar.
       </p>
     </>

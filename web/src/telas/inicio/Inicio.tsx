@@ -1,4 +1,4 @@
-import { Bloco, Conteudo, LinkSeta } from '@/components/painel'
+import { Bloco, Conteudo, LinkSeta, Nota } from '@/components/ds'
 import type { FluxoCompleto } from '@/lib/api'
 import { hojePorExtenso, primeiroNome, saudacao } from '@/lib/formato'
 import { href } from '@/lib/rotas'
@@ -40,18 +40,18 @@ function ComecePorAqui() {
   return (
     <Bloco className="mt-6 gap-5">
       <div className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold">Comece por aqui</h2>
-        <span className="text-[13px] text-muted-foreground">A sua unidade ainda não tem folhas no Feixe. São três passos; o resto o Feixe faz sozinho.</span>
+        <h2 className="text-titulo-2 font-semibold">Comece por aqui</h2>
+        <span className="text-nota text-muted-foreground">A sua unidade ainda não tem folhas no Feixe. São três passos; o resto o Feixe faz sozinho.</span>
       </div>
       <ol className="flex flex-col gap-4">
         {passos.map((p, i) => (
           <li key={p.titulo} className="grid grid-cols-[32px_1fr] gap-3">
-            <span className={cn('grid size-7 place-items-center rounded-full text-sm font-semibold', p.feito ? 'bg-[#2E7D4F] text-white' : 'bg-aco-claro text-ibge')}>{p.feito ? '✓' : i + 1}</span>
+            <span className={cn('grid size-7 place-items-center rounded-full text-nota font-semibold', p.feito ? 'bg-sucesso text-white' : 'bg-primary-suave text-primary')}>{p.feito ? '✓' : i + 1}</span>
             <div className="flex flex-col gap-1">
               <b>{p.titulo}</b>
-              <span className="text-[13px] text-texto-2">{p.texto}</span>
+              <span className="text-nota text-texto-2">{p.texto}</span>
               {p.link && (
-                <LinkSeta href={p.link.href} className="mt-1 text-[13px]">
+                <LinkSeta href={p.link.href} className="mt-1 text-nota">
                   {p.link.rotulo}
                 </LinkSeta>
               )}
@@ -59,7 +59,7 @@ function ComecePorAqui() {
           </li>
         ))}
       </ol>
-      <p className="border-t pt-4 text-[13px] text-texto-2">
+      <p className="border-t border-linha pt-4 text-nota text-texto-2">
         <b>Depois, no dia a dia:</b> quando uma folha termina as cargas, ela aparece aqui em "Precisa de você". Você abre a próxima etapa (as cargas saem na hora) e distribui de novo. Com as filas montadas, quem termina já recebe a próxima folha sem esperar você.
       </p>
     </Bloco>
@@ -72,10 +72,10 @@ function SupervisorInicio() {
   const p = dados.painel.dados
   return (
     <>
-      <p className="mt-1 max-w-[880px] text-[19px] leading-normal">{p ? fraseSupervisao(p, dados.esperando.dados?.grupos ?? null, unidadeDe(eu?.uf)) : 'Carregando…'}</p>
-      {dados.painel.erro && <p className="text-sm text-destructive">{dados.painel.erro}</p>}
+      <p className="mt-1 max-w-[880px] text-lede text-texto-2 [&_b]:font-semibold [&_b]:text-foreground">{p ? fraseSupervisao(p, dados.esperando.dados?.grupos ?? null, unidadeDe(eu?.uf)) : 'Carregando…'}</p>
+      {dados.painel.erro && <Nota tom="perigo">{dados.painel.erro}</Nota>}
       {tem('supervisor') && dados.lotes.dados && dados.lotes.dados.itens.length === 0 && <ComecePorAqui />}
-      <div className="mt-6 flex flex-col gap-11">
+      <div className="mt-8 flex flex-col gap-12">
         <ResumoSupervisao dados={dados} />
       </div>
     </>
@@ -91,18 +91,18 @@ export default function Inicio() {
   const projetos = [...new Set((eu?.perfis ?? []).filter((p) => p.papel && p.papel !== 'consulta').map((p) => p.projeto))].slice(0, 3)
   return (
     <Conteudo largura={1200} className="gap-2 pt-8">
-      <p className="text-[13px] text-muted-foreground">{[hojePorExtenso(), eu?.uf, ...projetos].filter(Boolean).join(' · ')}</p>
-      <h1 className="text-[28px] font-semibold tracking-[-.01em]">
+      <p className="text-nota font-medium text-muted-foreground uppercase tracking-[.03em]">{[hojePorExtenso(), eu?.uf, ...projetos].filter(Boolean).join(' · ')}</p>
+      <h1 className="text-titulo-grande font-bold">
         {saudacao()}
         {eu ? `, ${primeiroNome(eu.nome)}` : ''}
       </h1>
       {pronta && !eu?.papeis.length && (
-        <Bloco className="mt-4">
-          Sem papel no Feixe para esta conta. Conecte com o botão da barra do Feixe no QGIS; os perfis vêm do SGBC. Veja a situação em <a href="#/sobre" className="text-ibge underline">Sobre</a>.
-        </Bloco>
+        <Nota tom="alerta" className="mt-4" titulo="Sem papel no Feixe para esta conta">
+          Conecte com o botão da barra do Feixe no QGIS; os perfis vêm do SGBC. Veja a situação em <a href="#/sobre" className="font-medium text-primary underline">Sobre</a>.
+        </Nota>
       )}
       {supervisiona && <SupervisorInicio />}
-      {executa && (supervisiona ? <div className="mt-11"><ResumoExecucao comTitulo /></div> : <ResumoExecucao comTitulo={false} />)}
+      {executa && (supervisiona ? <div className="mt-12"><ResumoExecucao comTitulo /></div> : <div className="mt-6"><ResumoExecucao comTitulo={false} /></div>)}
     </Conteudo>
   )
 }

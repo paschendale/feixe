@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useState, type ReactNode } from 'react'
-import { cn } from '@/lib/utils'
+import { CheckCircle2, XCircle } from 'lucide-react'
 
 type Aviso = { id: number; texto: string; tipo: 'ok' | 'erro' }
 type Avisar = (texto: string, tipo?: Aviso['tipo']) => void
@@ -17,17 +17,15 @@ export function AvisosProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={avisar}>
       {children}
-      <div className="fixed right-4 bottom-4 z-50 flex w-96 flex-col gap-2">
+      <div className="fixed right-4 bottom-4 z-50 flex w-96 max-w-[calc(100%-2rem)] flex-col gap-2">
         {avisos.map((a) => (
           <div
             key={a.id}
             role="status"
-            className={cn(
-              'rounded-md border px-4 py-3 text-sm shadow-md',
-              a.tipo === 'erro' ? 'border-destructive bg-destructive text-white' : 'bg-background',
-            )}
+            className="flex items-start gap-2.5 rounded-xl bg-card/95 px-4 py-3 text-nota shadow-flutuante backdrop-blur"
           >
-            {a.texto}
+            {a.tipo === 'erro' ? <XCircle className="mt-px size-4 shrink-0 text-perigo" aria-hidden /> : <CheckCircle2 className="mt-px size-4 shrink-0 text-sucesso" aria-hidden />}
+            <span>{a.texto}</span>
           </div>
         ))}
       </div>

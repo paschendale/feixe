@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import { MousePointerSquareDashed } from 'lucide-react'
-import { RotuloEstavel } from '@/components/painel'
+import { Campo, RotuloEstavel } from '@/components/ds'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import type { ResultadoCriacao } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { useSessao } from '@/lib/sessao'
@@ -56,15 +55,14 @@ export function NovoLoteLivre({ aberto, fechar }: { aberto: boolean; fechar: (cr
           </DialogDescription>
         </DialogHeader>
         <EscolherFluxo valor={fluxo} mudar={(f) => setFluxo(f?.id ?? null)} />
-        <div className="grid gap-1.5">
-          <Label htmlFor="nome-lote">Nome</Label>
-          <Input id="nome-lote" placeholder="ex.: Bacia do Paranoá" value={nome} onChange={(e) => setNome(e.target.value)} />
-        </div>
+        <Campo rotulo="Nome">
+          <Input placeholder="ex.: Bacia do Paranoá" value={nome} onChange={(e) => setNome(e.target.value)} />
+        </Campo>
         <div className="flex items-center gap-3">
-          <Button variant="outline" onClick={lerSelecao} disabled={!conectado}>
+          <Button variant="tinted" onClick={lerSelecao} disabled={!conectado}>
             <MousePointerSquareDashed /> Usar a seleção do QGIS
           </Button>
-          <span className="text-sm text-muted-foreground">
+          <span className="text-muted-foreground">
             {selecao ? `${selecao.feicoes} ${selecao.feicoes === 1 ? 'feição' : 'feições'} de ${selecao.camada}` : 'Nenhum polígono ainda.'}
           </span>
         </div>

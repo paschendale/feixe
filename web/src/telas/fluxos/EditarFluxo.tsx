@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
-import { RotuloEstavel } from '@/components/painel'
+import { RotuloEstavel } from '@/components/ds'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -73,8 +73,8 @@ export function EditarFluxo({ fluxo, catalogo, fechar }: { fluxo: FluxoCompleto 
           {etapas.map((e, i) => {
             const usada = !!e.passagens
             return (
-              <li key={e.id ?? `n${i}`} className="grid grid-cols-[28px_1fr_auto] gap-3 rounded-lg border p-3">
-                <span className="tab pt-2 text-sm font-semibold text-muted-foreground">{i + 1}.</span>
+              <li key={e.id ?? `n${i}`} className="grid grid-cols-[28px_1fr_auto] gap-3 rounded-xl border border-linha p-3">
+                <span className="tab pt-2 font-semibold text-muted-foreground">{i + 1}.</span>
                 <div className="flex flex-col gap-2">
                   <div className="grid grid-cols-[1fr_200px] gap-2">
                     <Input value={e.nome} onChange={(x) => mudar(i, { nome: x.target.value })} aria-label="Nome da etapa" />
@@ -91,7 +91,7 @@ export function EditarFluxo({ fluxo, catalogo, fechar }: { fluxo: FluxoCompleto 
                       ))}
                     </Select>
                   </div>
-                  <div className="flex flex-wrap items-center gap-4 text-sm">
+                  <div className="flex flex-wrap items-center gap-4">
                     {(
                       [
                         ['obrigatoria', 'Obrigatória'],
@@ -103,10 +103,10 @@ export function EditarFluxo({ fluxo, catalogo, fechar }: { fluxo: FluxoCompleto 
                         <input type="checkbox" checked={e[k]} onChange={(x) => mudar(i, { [k]: x.target.checked })} /> {rot}
                       </label>
                     ))}
-                    {usada && <span className="text-xs text-muted-foreground">{e.passagens} passagens</span>}
+                    {usada && <span className="text-rodape text-muted-foreground">{e.passagens} passagens</span>}
                   </div>
                   {e.fase === 'cq' && (
-                    <div className="flex flex-col gap-1.5 rounded-md bg-[#F7F9FB] p-2.5 text-sm">
+                    <div className="flex flex-col gap-1.5 rounded-xl bg-preenchimento-2 p-2.5">
                       <div className="flex flex-wrap items-center gap-4">
                         <label className="flex items-center gap-1.5">
                           Nível de inspeção
@@ -143,7 +143,7 @@ export function EditarFluxo({ fluxo, catalogo, fechar }: { fluxo: FluxoCompleto 
                           %
                         </label>
                       </div>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-rodape text-muted-foreground">
                         {e.nivel_inspecao && e.lqa != null
                           ? 'Ao abrir a etapa, o Feixe sorteia as amostras de cada atividade e gera as cargas, com este padrão; o supervisor pode trocar os parâmetros na gaveta da folha enquanto nada foi avaliado.'
                           : 'Sem nível e LQA, a etapa abre sem amostras e o supervisor cria os planos na gaveta de cada folha.'}{' '}
@@ -151,8 +151,8 @@ export function EditarFluxo({ fluxo, catalogo, fechar }: { fluxo: FluxoCompleto 
                       </span>
                     </div>
                   )}
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                    {ativs(e.fase).length === 0 && <span className="text-xs text-muted-foreground">Nenhuma atividade desta fase no catálogo para o tema.</span>}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {ativs(e.fase).length === 0 && <span className="text-rodape text-muted-foreground">Nenhuma atividade desta fase no catálogo para o tema.</span>}
                     {ativs(e.fase).map((a) => (
                       <label key={a.id} className="flex items-center gap-1.5">
                         <input

@@ -3,7 +3,7 @@ import { Pie, PieChart } from 'recharts'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
-import { COR, RotuloEstavel } from '@/components/painel'
+import { COR, RotuloEstavel, Selo, type Tom } from '@/components/ds'
 import type { DecisaoCQ, ItemDecisaoCQ, ResultadoCQ, ResultadoDecisaoCQ, ResultadoPlano } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { lista, num, plural } from '@/lib/formato'
@@ -13,21 +13,17 @@ import { comCargas, resumoPreparo } from '../folhas/preparo'
 const pc = (x: number) => `${x.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`
 
 // Resultado da passagem de CQ, como o supervisor lê: o rótulo e a cor (com a palavra, nunca só a cor).
-export const RESULTADO: Record<ResultadoCQ, { rotulo: string; cor: string; fundo: string }> = {
-  aprovado: { rotulo: 'Aprovada', cor: COR.concluida, fundo: '#EEF3FA' },
-  reprovado: { rotulo: 'Reprovada', cor: '#8A3B00', fundo: COR.alertaFundo },
-  pendente: { rotulo: 'Em avaliação', cor: '#4A5868', fundo: '#F1F3F6' },
-  sem_ac: { rotulo: 'Sem Ac no plano', cor: COR.alerta, fundo: COR.alertaFundo },
-  sem_planos: { rotulo: 'Sem planos', cor: '#4A5868', fundo: '#F1F3F6' },
+export const RESULTADO: Record<ResultadoCQ, { rotulo: string; tom: Tom }> = {
+  aprovado: { rotulo: 'Aprovada', tom: 'info' },
+  reprovado: { rotulo: 'Reprovada', tom: 'alerta' },
+  pendente: { rotulo: 'Em avaliação', tom: 'neutro' },
+  sem_ac: { rotulo: 'Sem Ac no plano', tom: 'alerta' },
+  sem_planos: { rotulo: 'Sem planos', tom: 'neutro' },
 }
 
 export function SeloResultado({ resultado }: { resultado: ResultadoCQ }) {
   const r = RESULTADO[resultado]
-  return (
-    <span className="inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-semibold" style={{ color: r.cor, background: r.fundo }}>
-      {r.rotulo}
-    </span>
-  )
+  return <Selo tom={r.tom}>{r.rotulo}</Selo>
 }
 
 // Velocímetro do nível de conformidade (D-62): meia-lua de 0 ao fim da escala, com a faixa até a fração crítica
@@ -39,8 +35,8 @@ export function Velocimetro({ observado, fracao, tamanho = 112 }: { observado: n
   const faixas =
     fc != null
       ? [
-          { nome: 'dentro', valor: fc, fill: '#DCE6F2' },
-          { nome: 'acima', valor: Math.max(escala - fc, 0), fill: '#F6DDB8' },
+          { nome: 'dentro', valor: fc, fill: 'var(--aco-claro)' },
+          { nome: 'acima', valor: Math.max(escala - fc, 0), fill: COR.alertaFundo },
         ]
       : [{ nome: 'escala', valor: escala, fill: COR.vazio }]
   const v = Math.min(observado ?? 0, escala)
@@ -54,10 +50,10 @@ export function Velocimetro({ observado, fracao, tamanho = 112 }: { observado: n
   return (
     <div aria-hidden className="relative shrink-0" style={{ width: tamanho, height: alto }}>
       <PieChart width={tamanho} height={alto} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-        <Pie data={faixas} dataKey="valor" cx="50%" cy={tamanho / 2} startAngle={180} endAngle={0} innerRadius={r - 7} outerRadius={r} stroke="#fff" strokeWidth={2} isAnimationActive={false} />
+        <Pie data={faixas} dataKey="valor" cx="50%" cy={tamanho / 2} startAngle={180} endAngle={0} innerRadius={r - 7} outerRadius={r} stroke="var(--card)" strokeWidth={2} isAnimationActive={false} />
         <Pie data={arco} dataKey="valor" cx="50%" cy={tamanho / 2} startAngle={180} endAngle={0} innerRadius={r - 19} outerRadius={r - 10} stroke="none" cornerRadius={4} isAnimationActive={false} />
       </PieChart>
-      <span className="tab absolute inset-x-0 bottom-0 text-center text-[15px] leading-none font-semibold">{observado == null ? '—' : pc(observado)}</span>
+      <span className="tab absolute inset-x-0 bottom-0 text-center text-titulo-3 leading-none font-semibold">{observado == null ? '—' : pc(observado)}</span>
     </div>
   )
 }
@@ -68,8 +64,8 @@ export function ElementoCQ({ p, compacto = false }: { p: ResultadoPlano; compact
   return (
     <div className="flex items-center gap-3" role="group" aria-label={c.leitura}>
       <Velocimetro observado={c.observado} fracao={c.fracao_critica} tamanho={compacto ? 88 : 112} />
-      <div className="flex min-w-0 flex-col gap-0.5 text-[13px]">
-        <span className="font-medium" style={{ color: p.excede ? COR.alerta : undefined }}>
+      <div className="flex min-w-0 flex-col gap-0.5 text-nota">
+        <span className={p.excede ? 'font-medium text-alerta' : 'font-medium'}>
           {p.frase}
         </span>
         <span className="text-muted-foreground">
@@ -154,41 +150,41 @@ export function DecidirCQ({
               : `Conclui o CQ como reprovada e abre ${destino.length ? lista(destino) : 'a revisão'} na revisão seguinte, com as cargas pela grade. A distribuição sugere outra pessoa que não quem fez a revisão avaliada.`}
           </DialogDescription>
         </DialogHeader>
-        {!itens && <div className="grid min-h-[200px] place-items-center rounded-lg border text-sm text-muted-foreground">Conferindo as folhas…</div>}
+        {!itens && <div className="grid min-h-[200px] place-items-center rounded-xl bg-preenchimento-2 text-muted-foreground">Conferindo as folhas…</div>}
         {itens && (
           <div className="flex max-h-[50vh] min-h-[200px] flex-col gap-2.5 overflow-auto">
             {validos.map((i) => (
-              <div key={i.id_lote} className="flex flex-col gap-1 rounded-lg border bg-[#F7F9FB] px-4 py-3">
+              <div key={i.id_lote} className="flex flex-col gap-1 rounded-xl bg-preenchimento-2 px-4 py-3">
                 <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
                   <b className="tab">{i.folha_revisao}</b>
                   <SeloResultado resultado={i.resultado} />
-                  <span className="ml-auto text-[13px]">
+                  <span className="ml-auto text-nota">
                     {aprovar ? (
                       i.proxima ? (
                         <>
-                          abre <b className="text-ibge">{i.proxima}</b>
+                          abre <b className="text-primary">{i.proxima}</b>
                         </>
                       ) : (
                         'última etapa do fluxo: só conclui'
                       )
                     ) : (
                       <>
-                        abre <b className="text-ibge">{i.proxima}</b> como <b className="tab">{i.nova_folha}</b>
+                        abre <b className="text-primary">{i.proxima}</b> como <b className="tab">{i.nova_folha}</b>
                       </>
                     )}
                   </span>
                 </div>
-                {i.frase && <span className="text-[13px] text-texto-2">{i.frase}</span>}
-                {!aprovar && i.autores.length > 0 && <span className="text-xs text-muted-foreground">Revisão avaliada feita por {lista(i.autores)}: a sugestão do Distribuir será outra pessoa.</span>}
+                {i.frase && <span className="text-nota text-texto-2">{i.frase}</span>}
+                {!aprovar && i.autores.length > 0 && <span className="text-rodape text-muted-foreground">Revisão avaliada feita por {lista(i.autores)}: a sugestão do Distribuir será outra pessoa.</span>}
                 {i.aviso && (
-                  <span className="text-xs" style={{ color: COR.alerta }}>
+                  <span className="text-rodape text-alerta">
                     {i.aviso}
                   </span>
                 )}
               </div>
             ))}
             {recusados.length > 0 && (
-              <div className="text-[13px]">
+              <div className="text-nota">
                 <b>Não {recusados.length === 1 ? 'anda' : 'andam'}:</b>
                 <ul className="mt-1 list-disc pl-5 text-muted-foreground">
                   {recusados.map((i) => (
@@ -205,7 +201,7 @@ export function DecidirCQ({
         {(!itens || validos.length > 0) && (
           <div className="flex flex-col gap-2.5">
             {pedeConfirmacao && (
-              <label className="flex items-start gap-2 rounded-lg px-3.5 py-2.5 text-[13px]" style={{ background: COR.alertaFundo, color: '#5C3D00' }}>
+              <label className="flex items-start gap-2 rounded-xl bg-alerta-suave px-4 py-3 text-nota text-foreground">
                 <input type="checkbox" className="mt-0.5" checked={forcar} onChange={(e) => setForcar(e.target.checked)} />
                 <span>
                   <b>Aprovar mesmo reprovada{reprovadas.length > 1 ? 's' : ''} no CQ</b> ({folhas(reprovadas)}): os não conformes passaram do aceito. A decisão é sua e fica no histórico com o resultado e a sua observação.
@@ -213,17 +209,17 @@ export function DecidirCQ({
               </label>
             )}
             {!aprovar && (
-              <label className="flex items-start gap-2 text-sm">
+              <label className="flex items-start gap-2">
                 <input type="checkbox" className="mt-1" checked={expor} onChange={(e) => setExpor(e.target.checked)} />
                 <span>
                   Incluir as correções a serem feitas
-                  <span className="block text-xs text-muted-foreground">Mostra a quem fizer a revisão as ocorrências do CQ. Sem isso, a revisão é às cegas.</span>
+                  <span className="block text-rodape text-muted-foreground">Mostra a quem fizer a revisão as ocorrências do CQ. Sem isso, a revisão é às cegas.</span>
                 </span>
               </label>
             )}
-            <label className="flex flex-col gap-1.5 text-[13px] text-texto-2">
+            <label className="flex flex-col gap-1.5 text-nota text-texto-2">
               Observação (opcional; o resultado por elemento vai para o histórico de cada folha de todo jeito)
-              <Textarea rows={2} value={obs} onChange={(e) => setObs(e.target.value)} placeholder={aprovar ? 'Ex.: dentro do aceito, segue para a correção de inspeção' : 'Ex.: comissão acima do aceito, revisar a folha toda'} className="text-sm text-foreground" />
+              <Textarea rows={2} value={obs} onChange={(e) => setObs(e.target.value)} placeholder={aprovar ? 'Ex.: dentro do aceito, segue para a correção de inspeção' : 'Ex.: comissão acima do aceito, revisar a folha toda'} className="text-foreground" />
             </label>
           </div>
         )}
@@ -231,7 +227,7 @@ export function DecidirCQ({
           <Button variant="outline" onClick={() => fechar()}>
             Cancelar
           </Button>
-          <Button className="font-semibold" disabled={!validos.length || ocupado || (pedeConfirmacao && !forcar)} onClick={confirmar}>
+          <Button disabled={!validos.length || ocupado || (pedeConfirmacao && !forcar)} onClick={confirmar}>
             <RotuloEstavel ocupado={ocupado} rotulo={rotulo} rotuloOcupado="Gravando…" />
           </Button>
         </DialogFooter>

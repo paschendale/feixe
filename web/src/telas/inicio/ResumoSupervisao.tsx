@@ -1,4 +1,4 @@
-import { Barra, Bloco, COR, Legenda, LinkSeta, Numero, Rotulo, Secao } from '@/components/painel'
+import { Barra, Bloco, COR, Legenda, LinkSeta, Metrica, Rotulo, Secao, Tabela, TituloBloco, Vazio } from '@/components/ds'
 import type { GrupoAtividade, GrupoEsperando, Lote, PainelSupervisao, StatusNacional } from '@/lib/api'
 import { lista, num, parado, pc, plural, quando } from '@/lib/formato'
 import { href } from '@/lib/rotas'
@@ -64,28 +64,32 @@ function PrecisaDeVoce({ p, esperando, lotes }: { p: PainelSupervisao; esperando
   const cartoes = []
   if (nEsperando)
     cartoes.push(
-      <Bloco key="esp" className="flex-[1_1_300px] gap-1.5">
-        <Numero valor={nEsperando} />
-        <span>{nEsperando === 1 ? 'folha terminou a etapa e espera' : 'folhas terminaram a etapa e esperam'} você abrir a próxima</span>
-        <span className="text-[13px] text-muted-foreground">{lista([...porTema].map(([t, n]) => `${num(n)} de ${t}`))}</span>
+      <Metrica
+        key="esp"
+        valor={nEsperando}
+        tom="info"
+        rotulo={`${nEsperando === 1 ? 'folha terminou a etapa e espera' : 'folhas terminaram a etapa e esperam'} você abrir a próxima`}
+        detalhe={lista([...porTema].map(([t, n]) => `${num(n)} de ${t}`))}
+      >
         <LinkSeta href="#/supervisao/esperando" className="mt-2">
           Decidir
         </LinkSeta>
-      </Bloco>,
+      </Metrica>,
     )
   for (const g of producao) {
     const comCargas = p.lotes.filter((l) => l.a_atribuir > 0 && g.lotes.includes(l.id_lote))
     cartoes.push(
-      <Bloco key={g.chave} className="flex-[1_1_300px] gap-1.5">
-        <Numero valor={g.a_atribuir} alerta />
-        <span>cargas de {g.tema.toLowerCase()} sem responsável</span>
-        <span className="text-[13px] text-muted-foreground">
-          {comCargas.length <= 4 ? lista(comCargas.map((l) => `${nome(l.id_lote)} (${num(l.a_atribuir)})`)) : plural(comCargas.length, 'folha', 'folhas')} · {g.rotulo}
-        </span>
+      <Metrica
+        key={g.chave}
+        valor={g.a_atribuir}
+        tom="alerta"
+        rotulo={`cargas de ${g.tema.toLowerCase()} sem responsável`}
+        detalhe={<>{comCargas.length <= 4 ? lista(comCargas.map((l) => `${nome(l.id_lote)} (${num(l.a_atribuir)})`)) : plural(comCargas.length, 'folha', 'folhas')} · {g.rotulo}</>}
+      >
         <LinkSeta href={href('supervisao/folhas', { grupo: g.chave, distribuir: 1 })} className="mt-2">
           Distribuir
         </LinkSeta>
-      </Bloco>,
+      </Metrica>,
     )
   }
   // Amostras de CQ sem avaliador (D3d): um cartão por tema, com as atividades (elementos) e as folhas. O Distribuir
@@ -95,37 +99,43 @@ function PrecisaDeVoce({ p, esperando, lotes }: { p: PainelSupervisao; esperando
     const folhas = [...new Set(porAtividade.flatMap((a) => a.lotes))]
     const total = porAtividade.reduce((s, a) => s + a.amostras, 0) || g.a_atribuir
     cartoes.push(
-      <Bloco key={g.chave} className="flex-[1_1_300px] gap-1.5">
-        <Numero valor={total} alerta />
-        <span>amostras de {g.rotulo} sem avaliador</span>
-        <span className="text-[13px] text-muted-foreground">
-          {porAtividade.length ? lista(porAtividade.map((a) => `${a.elemento ?? a.atividade} (${num(a.amostras)})`)) : null}
-          {porAtividade.length ? ' · ' : ''}
-          {folhas.length && folhas.length <= 3 ? lista(folhas.map(nome)) : plural(folhas.length || g.lotes.length, 'folha', 'folhas')}
-        </span>
+      <Metrica
+        key={g.chave}
+        valor={total}
+        tom="alerta"
+        rotulo={`amostras de ${g.rotulo} sem avaliador`}
+        detalhe={
+          <>
+            {porAtividade.length ? lista(porAtividade.map((a) => `${a.elemento ?? a.atividade} (${num(a.amostras)})`)) : null}
+            {porAtividade.length ? ' · ' : ''}
+            {folhas.length && folhas.length <= 3 ? lista(folhas.map(nome)) : plural(folhas.length || g.lotes.length, 'folha', 'folhas')}
+          </>
+        }
+      >
         <LinkSeta href={href('supervisao/folhas', { grupo: g.chave, distribuir: 1 })} className="mt-2">
           Distribuir as amostras
         </LinkSeta>
-      </Bloco>,
+      </Metrica>,
     )
   }
   if (conflitos?.total)
     cartoes.push(
-      <Bloco key="conflitos" className="flex-[1_1_300px] gap-1.5">
-        <Numero valor={conflitos.total} alerta />
-        <span>{conflitos.total === 1 ? 'alteração se cruzou com outra ou foi recusada' : 'alterações se cruzaram com outras ou foram recusadas'} ao sincronizar</span>
-        <span className="text-[13px] text-muted-foreground">
-          {lista([...(conflitos.conflitos ? [plural(conflitos.conflitos, 'conflito', 'conflitos')] : []), ...(conflitos.recusas ? [plural(conflitos.recusas, 'recusa', 'recusas')] : [])])} nos últimos {conflitos.dias} dias
-        </span>
+      <Metrica
+        key="conflitos"
+        valor={conflitos.total}
+        tom="alerta"
+        rotulo={`${conflitos.total === 1 ? 'alteração se cruzou com outra ou foi recusada' : 'alterações se cruzaram com outras ou foram recusadas'} ao sincronizar`}
+        detalhe={<>{lista([...(conflitos.conflitos ? [plural(conflitos.conflitos, 'conflito', 'conflitos')] : []), ...(conflitos.recusas ? [plural(conflitos.recusas, 'recusa', 'recusas')] : [])])} nos últimos {conflitos.dias} dias</>}
+      >
         <LinkSeta href="#/supervisao/conflitos" className="mt-2">
           Ver o que aconteceu
         </LinkSeta>
-      </Bloco>,
+      </Metrica>,
     )
   return (
     <div className="flex flex-col gap-2.5">
       <Rotulo>Precisa de você</Rotulo>
-      {cartoes.length ? <div className="flex flex-wrap gap-4">{cartoes}</div> : <Bloco className="text-muted-foreground">Nada esperando você: nenhuma folha parada, nenhuma carga sem responsável e nenhuma amostra sem avaliador.</Bloco>}
+      {cartoes.length ? <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4">{cartoes}</div> : <Bloco><Vazio>Nada esperando você: nenhuma folha parada, nenhuma carga sem responsável e nenhuma amostra sem avaliador.</Vazio></Bloco>}
     </div>
   )
 }
@@ -134,16 +144,16 @@ function CartaoAtividade({ g }: { g: GrupoAtividade }) {
   const cq = ehCq(g)
   const pendentes = g.com_alguem + g.a_atribuir + g.na_fila
   return (
-    <Bloco className="flex-[1_1_340px]">
+    <Bloco>
       <div className="flex flex-col gap-0.5">
-        <span className="text-base font-semibold">{g.rotulo}</span>
-        <span className="text-[13px] text-muted-foreground">
+        <span className="text-titulo-3 font-semibold">{g.rotulo}</span>
+        <span className="text-nota text-muted-foreground">
           {plural(g.lotes.length, 'folha', 'folhas')} · {plural(g.pessoas, cq ? 'avaliador' : 'pessoa', cq ? 'avaliadores' : 'pessoas')}
           {cq && g.atividades.length > 1 ? ` · ${g.atividades.length} medidas` : ''}
         </span>
       </div>
       <div className="flex flex-col gap-1.5">
-        <div className="flex justify-between text-[13px]">
+        <div className="flex justify-between text-nota">
           <span>
             <b>{num(g.concluidas)}</b> de {num(g.total)} {cq ? 'amostras avaliadas' : 'cargas concluídas'}
           </span>
@@ -154,21 +164,21 @@ function CartaoAtividade({ g }: { g: GrupoAtividade }) {
           partes={[
             { valor: g.concluidas, cor: COR.concluida, rotulo: cq ? 'avaliadas' : 'concluídas' },
             { valor: g.com_alguem, cor: COR.comAlguem, rotulo: cq ? 'com avaliador' : 'com alguém' },
-            { valor: g.na_fila, cor: '#B8C7DA', rotulo: 'na fila' },
+            { valor: g.na_fila, cor: COR.naFila, rotulo: 'na fila' },
           ]}
         />
         <Legenda
           itens={[
             ...(g.concluidas ? [{ cor: COR.concluida, rotulo: cq ? 'avaliadas' : 'concluídas' }] : []),
             ...(g.com_alguem ? [{ cor: COR.comAlguem, rotulo: cq ? 'com avaliador' : 'com alguém' }] : []),
-            ...(g.na_fila ? [{ cor: '#B8C7DA', rotulo: 'na fila' }] : []),
+            ...(g.na_fila ? [{ cor: COR.naFila, rotulo: 'na fila' }] : []),
             ...(g.a_atribuir ? [{ cor: COR.vazio, rotulo: cq ? 'sem avaliador' : 'a atribuir' }] : []),
           ]}
         />
       </div>
-      <div className="flex flex-wrap gap-x-5 text-[13px]">
+      <div className="mt-auto flex flex-wrap gap-x-5 text-nota">
         <span>
-          <b style={{ color: g.a_atribuir ? COR.alerta : undefined }}>{num(g.a_atribuir)}</b> {cq ? 'sem avaliador' : 'a atribuir'}
+          <b className={cn('tab', g.a_atribuir > 0 && 'text-alerta')}>{num(g.a_atribuir)}</b> {cq ? 'sem avaliador' : 'a atribuir'}
         </span>
         {g.na_fila > 0 && (
           <span>
@@ -197,18 +207,14 @@ function StatusNacionalCartao({ p, nEsperando }: { p: PainelSupervisao; nEsperan
   const sem = ORDEM_STATUS.filter((k) => !p.status[k])
   return (
     <Bloco className="flex-[1_1_420px] gap-3.5">
-      <div className="flex flex-wrap items-baseline gap-2.5">
-        <h3 className="text-base font-semibold">Status nacional da unidade</h3>
-        <span className="text-[13px] text-muted-foreground">{plural(total, 'folha', 'folhas')} · o que a CCAR vê</span>
-      </div>
-      <div className="flex h-10 overflow-hidden rounded-lg text-[13px] font-semibold">
+      <TituloBloco titulo="Status nacional da unidade" sub={`${plural(total, 'folha', 'folhas')} · o que a CCAR vê`} />
+      <div className="flex h-9 gap-0.5 overflow-hidden rounded-lg text-nota font-semibold">
         {com.map((k) => {
-          const escuro = ['ENTREGUE_GCQ', 'CONCLUIDA', 'DEVOLVIDA', 'EM_CQ'].includes(k)
           return (
             <div
               key={k}
               className="flex min-w-0 items-center overflow-hidden px-3 whitespace-nowrap"
-              style={{ flex: `${p.status[k]} 1 0`, background: k === 'EM_CQ' ? '#3A66A3' : STATUS[k].cor, color: escuro ? '#fff' : '#1C2F4A' }}
+              style={{ flex: `${p.status[k]} 1 0`, background: STATUS[k].cor, color: STATUS[k].escuro ? 'var(--primary-foreground)' : COR.textoClaro }}
               title={`${STATUS[k].rotulo}: ${p.status[k]}`}
             >
               {STATUS[k].rotulo} · {num(p.status[k] ?? 0)}
@@ -217,14 +223,14 @@ function StatusNacionalCartao({ p, nEsperando }: { p: PainelSupervisao; nEsperan
         })}
       </div>
       {sem.length > 0 && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-rodape text-muted-foreground">
           {sem.map((k) => (
             <span key={k}>{STATUS[k].rotulo} 0</span>
           ))}
         </div>
       )}
       {nEsperando > 0 && (
-        <p className="text-[13px] text-muted-foreground">
+        <p className="text-nota text-muted-foreground">
           As {plural(nEsperando, 'folha parada', 'folhas paradas')} esperando a próxima etapa seguem no status da etapa que terminou: só mudam quando a seguinte abrir.
         </p>
       )}
@@ -239,41 +245,39 @@ function EquipeCartao({ p }: { p: PainelSupervisao }) {
   const mostrar = ordenadas.slice(0, 5)
   return (
     <Bloco className="flex-[1_1_520px]">
-      <div className="flex flex-wrap items-baseline gap-2.5">
-        <h3 className="text-base font-semibold">Equipe</h3>
-        <span className="text-[13px] text-muted-foreground">{plural(ordenadas.length, 'pessoa com carga', 'pessoas com carga')}</span>
-        <LinkSeta href="#/supervisao/equipe" className="ml-auto text-[13px]">
-          Abrir Equipe
-        </LinkSeta>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[13px]">
-          <thead>
-            <tr className="text-left text-muted-foreground">
-              <th className="border-b py-1.5 pr-2 font-medium">Pessoa</th>
-              <th className="border-b px-2 py-1.5 text-right font-medium">Pendentes</th>
-              <th className="border-b px-2 py-1.5 font-medium">Atividade</th>
-              <th className="border-b py-1.5 pl-2 font-medium">Última conclusão</th>
+      <TituloBloco
+        titulo="Equipe"
+        sub={plural(ordenadas.length, 'pessoa com carga', 'pessoas com carga')}
+        acao={
+          <LinkSeta href="#/supervisao/equipe" className="text-nota">
+            Abrir Equipe
+          </LinkSeta>
+        }
+      />
+      <Tabela solta densa>
+        <thead>
+          <tr>
+            <th>Pessoa</th>
+            <th className="text-right">Pendentes</th>
+            <th>Atividade</th>
+            <th className="whitespace-nowrap">Última conclusão</th>
+          </tr>
+        </thead>
+        <tbody>
+          {mostrar.map((x) => (
+            <tr key={x.conta}>
+              <td>
+                {x.nome}
+                {x.conta === eu?.conta ? ' (você)' : ''}
+              </td>
+              <td className="tab text-right">{num(x.pendentes)}</td>
+              <td>{lista(x.grupos.map((c) => (grupo(c) ? rotuloCurto(grupo(c)!) : c)))}</td>
+              <td className={cn('whitespace-nowrap', parado(x.ultima) && 'font-semibold text-alerta')}>{quando(x.ultima)}</td>
             </tr>
-          </thead>
-          <tbody>
-            {mostrar.map((x) => (
-              <tr key={x.conta} className="border-b border-linha last:border-0">
-                <td className="py-2 pr-2">
-                  {x.nome}
-                  {x.conta === eu?.conta ? ' (você)' : ''}
-                </td>
-                <td className="tab px-2 py-2 text-right">{num(x.pendentes)}</td>
-                <td className="px-2 py-2">{lista(x.grupos.map((c) => (grupo(c) ? rotuloCurto(grupo(c)!) : c)))}</td>
-                <td className={cn('py-2 pl-2', parado(x.ultima) && 'font-semibold')} style={{ color: parado(x.ultima) ? COR.alerta : undefined }}>
-                  {quando(x.ultima)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <span className="text-xs text-muted-foreground">
+          ))}
+        </tbody>
+      </Tabela>
+      <span className="text-rodape text-muted-foreground">
         Por quem está há mais tempo sem concluir (quem ainda não concluiu nenhuma vem depois)
         {ordenadas.length > mostrar.length ? `; mais ${plural(ordenadas.length - mostrar.length, 'pessoa', 'pessoas')} no módulo` : ''}.
       </span>
@@ -294,7 +298,7 @@ export function ResumoSupervisao({ dados }: { dados: ReturnType<typeof usePainel
       <div className="flex flex-col gap-2.5">
         <Rotulo>Em produção, por atividade</Rotulo>
         {p.grupos.length ? (
-          <div className="flex flex-wrap gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-4">
             {p.grupos.map((g) => (
               <CartaoAtividade key={g.chave} g={g} />
             ))}
@@ -306,7 +310,7 @@ export function ResumoSupervisao({ dados }: { dados: ReturnType<typeof usePainel
           </Bloco>
         )}
       </div>
-      <div className="flex flex-wrap items-stretch gap-4">
+      <div className="flex flex-wrap items-start gap-4">
         <StatusNacionalCartao p={p} nEsperando={nEsperando} />
         {tem('supervisor') && <EquipeCartao p={p} />}
       </div>

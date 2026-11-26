@@ -1,8 +1,8 @@
 import { useState } from 'react'
+import { Campo, Segmentado } from '@/components/ds'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import type { Catalogo, FluxoCompleto } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
@@ -40,29 +40,28 @@ export function NovoFluxo({ catalogo, aberto, fechar }: { catalogo: Catalogo; ab
           <DialogTitle>Novo fluxo</DialogTitle>
           <DialogDescription>Comece pelo modelo da CCAR ou copie o fluxo de outra unidade; depois ajuste as etapas.</DialogDescription>
         </DialogHeader>
-        <div className="flex gap-4 text-sm">
-          <label className="flex items-center gap-1.5">
-            <input type="radio" checked={modo === 'modelo'} onChange={() => setModo('modelo')} /> Modelo da CCAR
-          </label>
-          <label className="flex items-center gap-1.5">
-            <input type="radio" checked={modo === 'copia'} onChange={() => setModo('copia')} /> Copiar de outra unidade
-          </label>
-        </div>
+        <Segmentado
+          rotulo="Origem do fluxo"
+          ativa={modo}
+          escolher={setModo}
+          opcoes={[
+            { id: 'modelo', rotulo: 'Modelo da CCAR' },
+            { id: 'copia', rotulo: 'Copiar de outra unidade' },
+          ]}
+        />
         {modo === 'modelo' ? (
           <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="nf-projeto">Projeto</Label>
-              <Select id="nf-projeto" value={proj ?? ''} onChange={(e) => setProjeto(Number(e.target.value))}>
+            <Campo rotulo="Projeto">
+              <Select value={proj ?? ''} onChange={(e) => setProjeto(Number(e.target.value))}>
                 {projetos.map((p) => (
                   <option key={p.cod_projeto} value={p.cod_projeto}>
                     {p.projeto}
                   </option>
                 ))}
               </Select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="nf-tema">Tema</Label>
-              <Select id="nf-tema" value={tema ?? ''} onChange={(e) => setTema(Number(e.target.value) || null)}>
+            </Campo>
+            <Campo rotulo="Tema">
+              <Select value={tema ?? ''} onChange={(e) => setTema(Number(e.target.value) || null)}>
                 <option value="">Escolha</option>
                 {catalogo.temas
                   .filter((t) => t.ativo)
@@ -72,12 +71,11 @@ export function NovoFluxo({ catalogo, aberto, fechar }: { catalogo: Catalogo; ab
                     </option>
                   ))}
               </Select>
-            </div>
+            </Campo>
           </div>
         ) : (
-          <div className="grid gap-1.5">
-            <Label htmlFor="nf-origem">Fluxo de origem</Label>
-            <Select id="nf-origem" value={origem ?? ''} onChange={(e) => setOrigem(Number(e.target.value) || null)}>
+          <Campo rotulo="Fluxo de origem">
+            <Select value={origem ?? ''} onChange={(e) => setOrigem(Number(e.target.value) || null)}>
               <option value="">Escolha</option>
               {outros?.itens.map((f) => (
                 <option key={f.id} value={f.id}>
@@ -85,12 +83,11 @@ export function NovoFluxo({ catalogo, aberto, fechar }: { catalogo: Catalogo; ab
                 </option>
               ))}
             </Select>
-          </div>
+          </Campo>
         )}
-        <div className="grid gap-1.5">
-          <Label htmlFor="nf-nome">Nome</Label>
-          <Input id="nf-nome" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="ex.: DF LML" />
-        </div>
+        <Campo rotulo="Nome">
+          <Input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="ex.: DF LML" />
+        </Campo>
         <DialogFooter>
           <Button variant="outline" onClick={() => fechar()}>
             Cancelar

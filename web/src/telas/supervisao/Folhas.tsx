@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { Barra, Bloco, COR, Carregando, Colunas, Conteudo, Fichas } from '@/components/painel'
+import { Barra, Bloco, COR, Campo, Carregando, Colunas, Conteudo, Fichas, Tabela } from '@/components/ds'
 import type { FluxoCompleto, GrupoAtividade, LotePainel } from '@/lib/api'
 import { diasAtras, lista, num, parado, pc, plural, quando } from '@/lib/formato'
 import { href, navegar, useRota } from '@/lib/rotas'
@@ -114,16 +114,16 @@ export default function Folhas() {
 
       <Bloco className="min-h-[100px] flex-row flex-wrap items-center gap-x-7 gap-y-3 px-5 py-4">
         <div className="flex min-w-[300px] flex-[1_1_360px] flex-col gap-0.5">
-          <span className="text-base font-semibold">{grupo ? grupo.rotulo : 'Todas as folhas da unidade'}</span>
-          <span className="line-clamp-2 text-[13px] text-muted-foreground" title={descricao}>
+          <span className="text-titulo-3 font-semibold">{grupo ? grupo.rotulo : 'Todas as folhas da unidade'}</span>
+          <span className="line-clamp-2 text-nota text-muted-foreground" title={descricao}>
             {descricao}
           </span>
         </div>
         {grupo && (
           <div className="flex min-w-[260px] flex-[1_1_280px] flex-col gap-1.5">
-            <span className="text-[13px]">
+            <span className="text-nota">
               <b>{num(grupo.concluidas)}</b> de {num(grupo.total)} {grupo.fase === 'cq' ? 'amostras avaliadas' : 'cargas concluídas'} · {pc(grupo.concluidas, grupo.total)}% ·{' '}
-              <span style={{ color: grupo.a_atribuir ? COR.alerta : undefined }}>{num(grupo.a_atribuir)} {grupo.fase === 'cq' ? 'sem avaliador' : 'a atribuir'}</span> · {grupo.fase === 'cq' ? plural(grupo.pessoas, 'avaliador', 'avaliadores') : plural(grupo.pessoas, 'pessoa', 'pessoas')}
+              <span className={grupo.a_atribuir ? 'text-alerta' : undefined}>{num(grupo.a_atribuir)} {grupo.fase === 'cq' ? 'sem avaliador' : 'a atribuir'}</span> · {grupo.fase === 'cq' ? plural(grupo.pessoas, 'avaliador', 'avaliadores') : plural(grupo.pessoas, 'pessoa', 'pessoas')}
             </span>
             <Barra
               total={grupo.total}
@@ -136,7 +136,7 @@ export default function Folhas() {
         )}
         {supervisor && (
           <div className="flex gap-2">
-            <Button variant="outline" className="border-ibge font-semibold text-ibge" onClick={() => setDialogo('folha')}>
+            <Button variant="tinted" onClick={() => setDialogo('folha')}>
               Novas folhas
             </Button>
             <Button variant="outline" onClick={() => setDialogo('livre')}>
@@ -148,57 +148,53 @@ export default function Folhas() {
 
       {/* Barra das marcadas: flutua sobre a lista, sem empurrar os filtros e a tabela para baixo do ponteiro. */}
       {supervisor && marcadosLotes.length > 0 && (
-        <div role="region" aria-label="Folhas marcadas" className="fixed inset-x-0 bottom-5 z-40 mx-auto flex w-fit max-w-[calc(100%-2rem)] items-center gap-3 rounded-xl border border-[#C9D7EA] bg-[#EEF3FA]/95 px-4 py-3 shadow-lg backdrop-blur">
+        <div role="region" aria-label="Folhas marcadas" className="fixed inset-x-0 bottom-5 z-40 mx-auto flex w-fit max-w-[calc(100%-2rem)] items-center gap-3 rounded-xl bg-card/90 px-4 py-3 shadow-flutuante backdrop-blur">
           <b className="whitespace-nowrap">{plural(marcadosLotes.length, 'folha marcada', 'folhas marcadas')}</b>
           <span className="max-w-[360px] truncate text-texto-2">{marcadosLotes.length <= 5 ? lista(marcadosLotes.map((l) => l.folha_revisao)) : ''}</span>
           <div className="flex shrink-0 gap-2">
-            <Button className="font-semibold" onClick={() => setDistribuir(marcadosLotes.map((l) => l.id))}>
+            <Button onClick={() => setDistribuir(marcadosLotes.map((l) => l.id))}>
               Distribuir
             </Button>
-            <Button variant="outline" className="bg-card" onClick={() => setAvancar(marcadosLotes.map((l) => l.id))}>
+            <Button variant="outline" onClick={() => setAvancar(marcadosLotes.map((l) => l.id))}>
               Abrir a próxima etapa
             </Button>
-            <button type="button" className="h-9 px-3 text-texto-2 hover:underline" onClick={() => setMarcados(new Set())}>
+            <Button variant="ghost" onClick={() => setMarcados(new Set())}>
               Limpar
-            </button>
+            </Button>
           </div>
         </div>
       )}
 
       <div className="flex flex-wrap items-end gap-2.5">
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          Buscar folha
-          <Input type="search" className="h-9 w-60 bg-card" placeholder="MI ou nome (ex.: 2573)" value={busca} onChange={(e) => setBusca(e.target.value)} />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          Situação
-          <Select className="w-56 bg-card" value={filtro} onChange={(e) => setFiltro(e.target.value as Filtro)}>
+        <Campo rotulo="Buscar folha">
+          <Input type="search" className="w-60" placeholder="MI ou nome (ex.: 2573)" value={busca} onChange={(e) => setBusca(e.target.value)} />
+        </Campo>
+        <Campo rotulo="Situação">
+          <Select className="w-56" value={filtro} onChange={(e) => setFiltro(e.target.value as Filtro)}>
             <option value="">Todas</option>
             <option value="pendente">A iniciar</option>
             <option value="em_andamento">Em andamento</option>
             <option value="parado">Sem conclusão há 7 dias</option>
             {!grupo && <option value="esperando">Esperando a próxima etapa ou encerradas</option>}
           </Select>
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          Responsável
-          <Select className="w-56 bg-card" value={quem} onChange={(e) => setQuem(e.target.value)}>
+        </Campo>
+        <Campo rotulo="Responsável">
+          <Select className="w-56" value={quem} onChange={(e) => setQuem(e.target.value)}>
             <option value="">Todos</option>
             {responsaveis.map((r) => (
               <option key={r}>{r}</option>
             ))}
           </Select>
-        </label>
-        <span className="pb-2 text-sm text-muted-foreground">{plural(itens.length, 'folha', 'folhas')}</span>
+        </Campo>
+        <span className="pb-2 text-muted-foreground">{plural(itens.length, 'folha', 'folhas')}</span>
       </div>
 
-      <div className="overflow-x-auto rounded-[10px] border bg-card">
-        <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
+      <Tabela fixa largura={900}>
           <Colunas larguras={[...(supervisor ? [40] : []), 96, undefined, 300, '17%', 140, 130]} />
           <thead>
-            <tr className="text-left text-xs text-muted-foreground">
+            <tr>
               {supervisor && (
-                <th className="border-b py-3 pr-2 pl-4">
+                <th className="pr-2">
                   <input
                     type="checkbox"
                     aria-label="Marcar todas"
@@ -207,18 +203,18 @@ export default function Folhas() {
                   />
                 </th>
               )}
-              <th className={cn('border-b px-2 py-3 font-medium', !supervisor && 'pl-4')}>Folha</th>
-              <th className="border-b px-2 py-3 font-medium">Etapa</th>
-              <th className="border-b px-2 py-3 font-medium">Cargas concluídas</th>
-              <th className="border-b px-2 py-3 font-medium">Responsáveis</th>
-              <th className="border-b px-2 py-3 font-medium">Última conclusão</th>
-              <th className="border-b py-3 pr-4 pl-2 text-right font-medium">{grupo ? 'Na etapa' : 'Status'}</th>
+              <th className={cn(supervisor && 'pl-2')}>Folha</th>
+              <th>Etapa</th>
+              <th>Cargas concluídas</th>
+              <th>Responsáveis</th>
+              <th>Última conclusão</th>
+              <th className="text-right">{grupo ? 'Na etapa' : 'Status'}</th>
             </tr>
           </thead>
           <tbody>
             {itens.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-3 text-muted-foreground">
+                <td colSpan={7} className="text-muted-foreground">
                   {todos.length ? 'Nenhuma folha com esses filtros.' : supervisor ? 'A unidade ainda não tem folhas no Feixe: use "Novas folhas" acima.' : 'A unidade ainda não tem folhas no Feixe.'}
                 </td>
               </tr>
@@ -229,23 +225,23 @@ export default function Folhas() {
               const alerta = grupo?.fase !== 'cq' && aberta && (l.cargas_total ?? 0) > 0 && l.situacao === 'em_andamento' && parado(x?.ultima ?? x?.iniciada_em ?? null)
               const dias = diasAtras(x?.iniciada_em ?? null)
               return (
-                <tr key={l.id} className={cn('border-b border-linha last:border-0 hover:bg-[#F7F9FB]', (marcados.has(l.id) || selecionado === l.id) && 'bg-[#F4F8FD]')}>
+                <tr key={l.id} className={cn((marcados.has(l.id) || selecionado === l.id) && 'bg-primary-suave/60')}>
                   {supervisor && (
-                    <td className="py-3 pr-2 pl-4">
+                    <td className="pr-2">
                       <input type="checkbox" aria-label={`Marcar ${l.folha_revisao}`} checked={marcados.has(l.id)} onChange={() => marcar(l.id)} />
                     </td>
                   )}
-                  <td className={cn('px-2 py-3', !supervisor && 'pl-4')}>
-                    <a href={href(`supervisao/folhas/${l.id}`, { grupo: grupoQ })} className="tab font-semibold text-ibge hover:underline">
+                  <td className={cn(supervisor && 'pl-2')}>
+                    <a href={href(`supervisao/folhas/${l.id}`, { grupo: grupoQ })} className="tab font-semibold text-primary hover:underline">
                       {l.folha_revisao}
                     </a>
                   </td>
-                  <td className="truncate px-2 py-3" title={[!grupo && l.tema, l.etapa, l.situacao && (aberta ? SITUACAO[l.situacao] : 'esperando a próxima')].filter(Boolean).join(' · ')}>
+                  <td className="truncate" title={[!grupo && l.tema, l.etapa, l.situacao && (aberta ? SITUACAO[l.situacao] : 'esperando a próxima')].filter(Boolean).join(' · ')}>
                     {!grupo && <span className="text-muted-foreground">{l.tema} · </span>}
                     {l.etapa ?? '—'}
                     {l.situacao && <span className="text-muted-foreground"> · {aberta ? SITUACAO[l.situacao] : 'esperando a próxima'}</span>}
                   </td>
-                  <td className="px-2 py-3">
+                  <td>
                     {l.cargas_total ? (
                       <div className="flex min-w-0 items-center gap-2.5">
                         <Barra className="w-[90px] shrink-0" altura={6} total={l.cargas_total} partes={[{ valor: l.cargas_concluidas ?? 0, cor: COR.concluida }]} />
@@ -253,7 +249,7 @@ export default function Folhas() {
                           {num(l.cargas_concluidas ?? 0)}/{num(l.cargas_total)}
                         </span>
                         <span className="min-w-0 truncate">
-                          {!!x?.a_atribuir && <span style={{ color: COR.alerta }}>· {num(x.a_atribuir)} {grupo?.fase === 'cq' ? 'sem avaliador' : 'a atribuir'} </span>}
+                          {!!x?.a_atribuir && <span className="text-alerta">· {num(x.a_atribuir)} {grupo?.fase === 'cq' ? 'sem avaliador' : 'a atribuir'} </span>}
                           {!!x?.na_fila && <span className="text-muted-foreground">· na fila de {(x.fila_de ?? '').split(' ')[0]}</span>}
                         </span>
                       </div>
@@ -261,20 +257,19 @@ export default function Folhas() {
                       <span className="text-muted-foreground">{grupo?.fase === 'cq' && aberta ? 'sem amostras: veja na folha o próximo passo' : 'sem cargas'}</span>
                     )}
                   </td>
-                  <td className="truncate px-2 py-3" title={x?.responsaveis.join(', ')}>{x?.responsaveis.length ? lista(x.responsaveis.map((n) => n.split(' ')[0])) : <span className="text-muted-foreground">—</span>}</td>
-                  <td className={cn('truncate px-2 py-3', alerta && 'font-semibold')} style={{ color: alerta ? COR.alerta : x?.ultima ? undefined : 'var(--muted-foreground)' }}>
+                  <td className="truncate" title={x?.responsaveis.join(', ')}>{x?.responsaveis.length ? lista(x.responsaveis.map((n) => n.split(' ')[0])) : <span className="text-muted-foreground">—</span>}</td>
+                  <td className={cn('truncate', alerta ? 'font-semibold text-alerta' : !x?.ultima && 'text-muted-foreground')}>
                     {aberta ? quando(x?.ultima ?? null) : '—'}
                   </td>
-                  <td className="tab py-3 pr-4 pl-2 text-right">
+                  <td className="tab text-right">
                     {grupo ? (dias !== null ? plural(dias, 'dia', 'dias') : '—') : <Status s={l.status_nacional} />}
                   </td>
                 </tr>
               )
             })}
           </tbody>
-        </table>
-      </div>
-      <p className="text-[13px] text-muted-foreground">Em laranja: em andamento e sem conclusão há mais de 7 dias. Clicar na folha abre a gaveta com o andamento e as ações do fluxo.</p>
+      </Tabela>
+      <p className="text-nota text-muted-foreground">Em laranja: em andamento e sem conclusão há mais de 7 dias. Clicar na folha abre a gaveta com o andamento e as ações do fluxo.</p>
 
       {selecionado && (
         <Gaveta

@@ -1,43 +1,87 @@
 @import "tailwindcss";
 @import "@fontsource-variable/public-sans";
 
-
+/*
+ * Design system do Feixe: tokens. Toda cor, raio, sombra e tamanho de texto das telas sai daqui; nada de hex ou
+ * px soltos nas telas. Os componentes ficam em src/components/ds e a vitrine em #/design.
+ *
+ * Linguagem: superfícies brancas sobre um fundo cinza-claro, sem bordas (a separação vem de uma sombra fina), raios
+ * generosos, um único azul de ação (o azul IBGE) e cores de estado sempre em par texto/fundo suave.
+ */
 :root {
-  /* Identidade do Feixe (deck e protótipo): azul IBGE, azul-aço e neutros frios. */
+  /* Marca */
   --ibge: #004182;
   --aco: #7492c1;
   --aco-claro: #dce5f2;
-  /* Linha entre as linhas das tabelas e o texto secundário escuro (abas, rótulos). */
-  --linha: #eef1f4;
-  --texto-2: #3d4b5c;
-  --background: #f5f7fa;
-  --foreground: #1c2733;
+
+  /* Superfícies e texto */
+  --background: #f3f4f7;
+  --foreground: #1d1f24;
   --card: #ffffff;
-  --card-foreground: #1c2733;
+  --card-foreground: #1d1f24;
   --popover: #ffffff;
-  --popover-foreground: #1c2733;
+  --popover-foreground: #1d1f24;
+  --muted-foreground: #6b7280; /* texto secundário */
+  --terciario: #9aa1ad; /* texto terciário, ícones de apoio */
+  --texto-2: #3f4753; /* texto de apoio legível (descrições longas) */
+
+  /* Separadores e preenchimentos (cinzas translúcidos, como no macOS) */
+  --border: #e6e8ec;
+  --linha: #eef0f3; /* entre as linhas de lista e tabela */
+  --input: #d5d9e0;
+  --preenchimento: rgb(120 128 140 / 0.14); /* trilho de barra, controle segmentado */
+  --preenchimento-2: rgb(120 128 140 / 0.08); /* hover de linha, botão neutro */
+
+  /* Ação */
   --primary: #004182;
   --primary-foreground: #ffffff;
-  --secondary: #e9edf2;
-  --secondary-foreground: #1c2733;
-  --muted: #e9edf2;
-  --muted-foreground: #66768a;
+  --primary-suave: #e7eef8; /* botão tingido, seleção */
+  --secondary: rgb(120 128 140 / 0.12);
+  --secondary-foreground: #1d1f24;
+  --muted: #eef0f3;
   --accent: #eef3fa;
   --accent-foreground: #004182;
-  --destructive: #c8443a;
-  --border: #e3e8ef;
-  --input: #cbd3dd;
   --ring: #7492c1;
-  --radius: 0.625rem;
+
+  /* Estados: sempre o texto e o fundo suave do mesmo tom */
+  --sucesso: #1f7a45;
+  --sucesso-suave: #e4f3ea;
+  --alerta: #915c00;
+  --alerta-suave: #fcefd9;
+  --destructive: #c23b31;
+  --perigo-suave: #fbe9e7;
+  --info: #004182;
+  --info-suave: #e7eef8;
+
+  /* Dados (barras, anéis, gráficos) */
+  --dado-concluida: #004182;
+  --dado-com-alguem: #9db4d8;
+  --dado-na-fila: #c3d1e4;
+  --dado-nao-conforme: #d98a1c;
+  --dado-status-planejada: #d6e0ee;
+  --dado-status-producao: #9db4d8;
+  --dado-status-cq: #3a66a3;
+  --dado-status-gcq: #2b5590;
+  --dado-status-concluida: #004182;
+  --dado-status-devolvida: #c23b31;
+  --dado-texto-claro: #1c2f4a;
+
+  /* Forma */
+  --radius: 0.75rem;
+  --sombra-cartao: 0 0 0 0.5px rgb(16 24 40 / 0.06), 0 1px 2px rgb(16 24 40 / 0.05);
+  --sombra-flutuante: 0 0 0 0.5px rgb(16 24 40 / 0.08), 0 12px 32px -4px rgb(16 24 40 / 0.18);
+  --sombra-controle: 0 0 0 0.5px rgb(16 24 40 / 0.1), 0 1px 2px rgb(16 24 40 / 0.08);
 }
 
 @theme inline {
-  --font-sans: 'Public Sans Variable', 'Segoe UI', Arial, sans-serif;
+  --font-sans: 'Public Sans Variable', 'Segoe UI', system-ui, Arial, sans-serif;
+
   --color-ibge: var(--ibge);
   --color-aco: var(--aco);
   --color-aco-claro: var(--aco-claro);
   --color-linha: var(--linha);
   --color-texto-2: var(--texto-2);
+  --color-terciario: var(--terciario);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -46,6 +90,7 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-suave: var(--primary-suave);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -56,14 +101,82 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --color-preenchimento: var(--preenchimento);
+  --color-preenchimento-2: var(--preenchimento-2);
+  --color-sucesso: var(--sucesso);
+  --color-sucesso-suave: var(--sucesso-suave);
+  --color-alerta: var(--alerta);
+  --color-alerta-suave: var(--alerta-suave);
+  --color-perigo: var(--destructive);
+  --color-perigo-suave: var(--perigo-suave);
+  --color-info: var(--info);
+  --color-info-suave: var(--info-suave);
+
+  --radius-sm: 0.375rem; /* 6: selos, células */
+  --radius-md: 0.5rem; /* 8: botões, campos */
+  --radius-lg: 0.75rem; /* 12: popover, controle segmentado */
+  --radius-xl: 0.875rem; /* 14: cartões e listas */
+  --radius-2xl: 1.125rem; /* 18: diálogos */
+
+  --shadow-cartao: var(--sombra-cartao);
+  --shadow-flutuante: var(--sombra-flutuante);
+  --shadow-controle: var(--sombra-controle);
+
+  /* Escala de texto (use estas, nunca text-[Npx]) */
+  --text-titulo-grande: 1.875rem;
+  --text-titulo-grande--line-height: 2.25rem;
+  --text-titulo-grande--letter-spacing: -0.02em;
+  --text-titulo-1: 1.5rem;
+  --text-titulo-1--line-height: 2rem;
+  --text-titulo-1--letter-spacing: -0.015em;
+  --text-titulo-2: 1.1875rem;
+  --text-titulo-2--line-height: 1.625rem;
+  --text-titulo-2--letter-spacing: -0.01em;
+  --text-titulo-3: 1rem;
+  --text-titulo-3--line-height: 1.375rem;
+  --text-corpo: 0.875rem;
+  --text-corpo--line-height: 1.3125rem;
+  --text-nota: 0.8125rem;
+  --text-nota--line-height: 1.1875rem;
+  --text-rodape: 0.75rem;
+  --text-rodape--line-height: 1rem;
+  --text-legenda: 0.6875rem;
+  --text-legenda--line-height: 0.875rem;
+  --text-numero: 2.125rem;
+  --text-numero--line-height: 2.5rem;
+  --text-numero--letter-spacing: -0.02em;
+  --text-lede: 1.125rem;
+  --text-lede--line-height: 1.625rem;
 }
 
 @layer base {
   * { @apply border-border outline-ring/50; }
-  body { @apply bg-background text-foreground font-sans; font-size: 14px; }
+  html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  body { @apply bg-background text-foreground font-sans text-corpo; }
   .tab { font-variant-numeric: tabular-nums; }
+}
+
+@layer components {
+  /* Tabela do design system (componente Tabela): cabeçalho em rodapé secundário, linhas separadas por um fio, hover
+     suave. As células herdam o preenchimento daqui; classes nas células só para alinhamento e largura. */
+  .ds-tabela { @apply w-full border-collapse text-corpo; }
+  .ds-tabela > thead > tr > th {
+    @apply border-b border-border px-3 py-2.5 text-left align-bottom text-rodape font-medium text-muted-foreground;
+  }
+  .ds-tabela > tbody > tr > td { @apply border-b border-linha px-3 py-2.5 align-middle; }
+  .ds-tabela > tbody > tr:last-child > td { @apply border-b-0; }
+  .ds-tabela > tbody > tr:hover > td { background: var(--preenchimento-2); }
+  .ds-tabela > tfoot > tr > td { @apply border-t border-border px-3 py-2 text-nota text-muted-foreground; }
+  .ds-tabela > thead > tr > th:first-child,
+  .ds-tabela > tbody > tr > td:first-child,
+  .ds-tabela > tfoot > tr > td:first-child { @apply pl-5; }
+  .ds-tabela > thead > tr > th:last-child,
+  .ds-tabela > tbody > tr > td:last-child,
+  .ds-tabela > tfoot > tr > td:last-child { @apply pr-5; }
+  .ds-tabela.compacta > thead > tr > th,
+  .ds-tabela.compacta > tbody > tr > td { @apply py-2; }
+  .ds-tabela.solta > thead > tr > th:first-child,
+  .ds-tabela.solta > tbody > tr > td:first-child { @apply pl-0; }
+  .ds-tabela.solta > thead > tr > th:last-child,
+  .ds-tabela.solta > tbody > tr > td:last-child { @apply pr-0; }
 }

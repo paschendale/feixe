@@ -1,13 +1,12 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Barra, Bloco, COR, CabecalhoModulo, Carregando, Colunas, Conteudo, Fichas, RotuloNegrito } from '@/components/painel'
+import { Barra, Bloco, COR, CabecalhoModulo, Carregando, Colunas, Conteudo, Fichas, LinkSeta, Segmentado, Tabela, TituloBloco, Vazio } from '@/components/ds'
 import type { Carga, Passagem, Progresso, ResumoCargas } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { diaMes, diasAtras, hora, num, pc, plural } from '@/lib/formato'
 import { href, navegar, useRota } from '@/lib/rotas'
 import { useSessao } from '@/lib/sessao'
 import { enviar, useApi } from '@/lib/useApi'
-import { cn } from '@/lib/utils'
 import { AmostrasCQ } from './AmostrasCQ'
 import { Correcao } from './Correcao'
 import { ABERTAS, Continuar, Preparando, Producao, pendentesDe, usePainelExecucao, usePorDia } from './comum'
@@ -58,93 +57,83 @@ function Cargas({ p }: { p: Passagem }) {
   const hoje = concluidas.filter((c) => diasAtras(c.concluido_em) === 0)
   const variasAtividades = new Set(dados.itens.map((c) => c.atividade)).size > 1
   const lista = aba === 'pendentes' ? pendentes : aba === 'hoje' ? hoje : concluidas
-  const abas: [Aba, string, number][] = [
-    ['pendentes', 'Pendentes', pendentes.length],
-    ['concluidas', 'Concluídas', concluidas.length],
-    ['hoje', 'Hoje', hoje.length],
+  const abas: { id: Aba; rotulo: string; contagem: string }[] = [
+    { id: 'pendentes', rotulo: 'Pendentes', contagem: num(pendentes.length) },
+    { id: 'concluidas', rotulo: 'Concluídas', contagem: num(concluidas.length) },
+    { id: 'hoje', rotulo: 'Hoje', contagem: num(hoje.length) },
   ]
   return (
     <>
-      <div role="tablist" aria-label="Situação" className="flex flex-wrap gap-1 border-b">
-        {abas.map(([id, rotulo, n]) => (
-          <button
-            key={id}
-            role="tab"
-            aria-selected={aba === id}
-            onClick={() => setAba(id)}
-            className={cn('border-b-2 px-3.5 py-2.5', aba === id ? 'border-ibge text-ibge' : 'border-transparent text-texto-2 hover:text-ibge')}
-          >
-            <RotuloNegrito ativo={aba === id}>
-              {rotulo} · {num(n)}
-            </RotuloNegrito>
-          </button>
-        ))}
-      </div>
-      <div className="overflow-x-auto rounded-[10px] border bg-card">
-        <table className="w-full table-fixed border-collapse text-sm">
-          <Colunas larguras={[200, ...(variasAtividades ? ['26%'] : []), undefined, 240]} />
-          <thead>
-            <tr className="text-left text-xs text-muted-foreground">
-              <th className="border-b py-3 pr-2 pl-4 font-medium">Carga</th>
-              {variasAtividades && <th className="border-b px-2 py-3 font-medium">Atividade</th>}
-              <th className="border-b px-2 py-3 font-medium">Situação</th>
-              <th className="border-b py-3 pr-4 pl-2" />
+      <Segmentado rotulo="Situação" opcoes={abas} ativa={aba} escolher={setAba} />
+      <Tabela fixa>
+        <Colunas larguras={[200, ...(variasAtividades ? ['26%'] : []), undefined, 240]} />
+        <thead>
+          <tr>
+            <th>Carga</th>
+            {variasAtividades && <th>Atividade</th>}
+            <th>Situação</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {lista.length === 0 && (
+            <tr>
+              <td colSpan={variasAtividades ? 4 : 3} className="text-muted-foreground">
+                {aba === 'pendentes' ? 'Nenhuma pendente: sua parte nesta folha terminou.' : aba === 'hoje' ? 'Nenhuma concluída hoje.' : 'Nenhuma concluída ainda.'}
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {lista.length === 0 && (
-              <tr>
-                <td colSpan={variasAtividades ? 4 : 3} className="px-4 py-2.5 text-muted-foreground">
-                  {aba === 'pendentes' ? 'Nenhuma pendente: sua parte nesta folha terminou.' : aba === 'hoje' ? 'Nenhuma concluída hoje.' : 'Nenhuma concluída ainda.'}
+          )}
+          {lista.slice(0, 300).map((c) => (
+            <tr key={c.id}>
+              <td className="tab font-mono text-nota">{c.geocodigo ?? `nº ${c.id}`}</td>
+              {variasAtividades && (
+                <td className="truncate text-muted-foreground" title={c.atividade}>
+                  {c.atividade}
                 </td>
-              </tr>
-            )}
-            {lista.slice(0, 300).map((c) => (
-              <tr key={c.id} className="border-b border-linha last:border-0">
-                <td className="tab py-2.5 pr-2 pl-4 font-mono text-[13px]">{c.geocodigo ?? `nº ${c.id}`}</td>
-                {variasAtividades && (
-                  <td className="truncate px-2 py-2.5 text-muted-foreground" title={c.atividade}>
-                    {c.atividade}
-                  </td>
-                )}
-                <td className="px-2 py-2.5">{c.concluido ? <span className="text-muted-foreground">concluída {diaMes(c.concluido_em)} {hora(c.concluido_em)}</span> : 'pendente'}</td>
-                <td className="py-2 pr-4 pl-2">
-                  <span className="flex justify-end gap-1.5">
-                    {c.concluido && aberta && recente(c) && (
-                      <Button size="sm" variant="ghost" disabled={acoes.ocupado === c.id} onClick={() => acoes.desfazer(c)}>
-                        Desfazer
-                      </Button>
-                    )}
-                    {(c.concluido || aberta) && (
-                      <Button size="sm" variant="outline" className="w-[124px]" disabled={!conectado || acoes.ocupado === c.id} onClick={() => acoes.trabalhar(c)}>
-                        {c.concluido ? 'Ver no QGIS' : 'Trabalhar nesta'}
-                      </Button>
-                    )}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {lista.length > 300 && <p className="border-t px-4 py-2.5 text-[13px] text-muted-foreground">Mostrando 300 de {num(lista.length)}. No QGIS, a camada Minhas cargas mostra todas.</p>}
-      </div>
+              )}
+              <td>{c.concluido ? <span className="text-muted-foreground">concluída {diaMes(c.concluido_em)} {hora(c.concluido_em)}</span> : 'pendente'}</td>
+              <td className="py-2">
+                <span className="flex justify-end gap-1.5">
+                  {c.concluido && aberta && recente(c) && (
+                    <Button size="sm" variant="ghost" disabled={acoes.ocupado === c.id} onClick={() => acoes.desfazer(c)}>
+                      Desfazer
+                    </Button>
+                  )}
+                  {(c.concluido || aberta) && (
+                    <Button size="sm" variant="outline" className="w-[124px]" disabled={!conectado || acoes.ocupado === c.id} onClick={() => acoes.trabalhar(c)}>
+                      {c.concluido ? 'Ver no QGIS' : 'Trabalhar nesta'}
+                    </Button>
+                  )}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+        {lista.length > 300 && (
+          <tfoot>
+            <tr>
+              <td colSpan={variasAtividades ? 4 : 3}>Mostrando 300 de {num(lista.length)}. No QGIS, a camada Minhas cargas mostra todas.</td>
+            </tr>
+          </tfoot>
+        )}
+      </Tabela>
       {hoje.length > 0 && aba !== 'hoje' && (
         <Bloco className="gap-2">
-          <h2 className="font-semibold">Concluídas hoje</h2>
-          <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[13px]">
+          <TituloBloco titulo="Concluídas hoje" />
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-nota">
             {hoje.slice(0, 6).map((c) => (
               <span key={c.id} className="tab inline-flex items-center gap-1.5">
                 {c.geocodigo ?? `nº ${c.id}`} · {hora(c.concluido_em)}
                 {aberta && (
-                  <button className="text-ibge hover:underline" disabled={acoes.ocupado === c.id} onClick={() => acoes.desfazer(c)}>
+                  <button className="font-medium text-primary hover:underline" disabled={acoes.ocupado === c.id} onClick={() => acoes.desfazer(c)}>
                     Desfazer
                   </button>
                 )}
               </span>
             ))}
-            {hoje.length > 6 && <button className="text-ibge hover:underline" onClick={() => setAba('hoje')}>e mais {num(hoje.length - 6)}</button>}
+            {hoje.length > 6 && <button className="font-medium text-primary hover:underline" onClick={() => setAba('hoje')}>e mais {num(hoje.length - 6)}</button>}
           </div>
-          <span className="text-xs text-muted-foreground">Desfazer vale por 24 horas, só para quem concluiu.</span>
+          <span className="text-rodape text-muted-foreground">Desfazer vale por 24 horas, só para quem concluiu.</span>
         </Bloco>
       )}
     </>
@@ -206,7 +195,7 @@ export default function Execucao() {
         {ativa === 'correcao' && <Correcao folhas={painel.correcao} />}
         {ativa === 'ciencia' && (
           <>
-            <p className="max-w-[880px] text-[15px] text-texto-2">
+            <p className="max-w-[880px] text-texto-2">
               O avaliador apontou estas ocorrências nas suas cargas. Veja cada uma no QGIS e marque <b>Ciente</b>: é o retorno do controle de qualidade, não um pedido de correção. A correção, quando houver, vem numa etapa própria.
             </p>
             <ParaCiencia dados={painel.ciencia} comCientes />
@@ -235,14 +224,16 @@ function MinhasCargas({ passagens: todas, temCQ }: { passagens: Passagem[]; temC
   return (
     <>
       {chaves.length === 0 ? (
-        <Bloco className="text-muted-foreground">
-          {temCQ ? (
-            <>
-              Nenhuma carga de produção com você agora. As suas amostras de CQ estão em <a className="font-semibold text-ibge hover:underline" href={href('execucao/cq')}>Minhas amostras</a>.
-            </>
-          ) : (
-            'Nenhuma carga atribuída a você em folhas abertas. O supervisor atribui as cargas.'
-          )}
+        <Bloco>
+          <Vazio>
+            {temCQ ? (
+              <>
+                Nenhuma carga de produção com você agora. As suas amostras de CQ estão em <a className="font-medium text-primary hover:underline" href={href('execucao/cq')}>Minhas amostras</a>.
+              </>
+            ) : (
+              'Nenhuma carga atribuída a você em folhas abertas. O supervisor atribui as cargas.'
+            )}
+          </Vazio>
         </Bloco>
       ) : (
         <>
@@ -256,12 +247,12 @@ function MinhasCargas({ passagens: todas, temCQ }: { passagens: Passagem[]; temC
             <Bloco className="flex-row flex-wrap items-center gap-x-5 gap-y-3 px-5 py-4">
               <div className="flex min-w-[300px] flex-1 flex-col gap-1.5">
                 <div className="flex flex-wrap items-baseline gap-x-3">
-                  <span className="tab text-lg font-bold">{atual.folha_revisao}</span>
+                  <span className="tab text-titulo-2 font-bold">{atual.folha_revisao}</span>
                   <span className="text-muted-foreground">
                     {atual.tema} · {atual.etapa} · {ABERTAS.includes(atual.situacao) ? (atual.situacao === 'pendente' ? 'a iniciar' : 'em andamento') : 'encerrada pelo supervisor'}
                   </span>
                 </div>
-                <div className="flex justify-between text-[13px]">
+                <div className="flex justify-between text-nota">
                   <span>
                     <b>{num(atual.concluidas)}</b> de {num(atual.total)} das suas cargas concluídas{hoje ? ` · ${num(hoje)} hoje` : ''}
                   </span>
@@ -273,41 +264,36 @@ function MinhasCargas({ passagens: todas, temCQ }: { passagens: Passagem[]; temC
             </Bloco>
           )}
           {outras.length > 0 && (
-            <div className="flex flex-wrap gap-2 text-sm">
+            <div className="flex flex-wrap gap-2">
               <span className="text-muted-foreground">Outras folhas nesta atividade:</span>
               {outras.map((p) => (
-                <a key={p.id_lote_etapa} href={href('execucao/cargas', { atividade: chave, folha: p.id_lote_etapa })} className="tab text-ibge hover:underline">
+                <a key={p.id_lote_etapa} href={href('execucao/cargas', { atividade: chave, folha: p.id_lote_etapa })} className="tab font-medium text-primary hover:underline">
                   {p.folha_revisao} ({num(pendentesDe(p))})
                 </a>
               ))}
             </div>
           )}
           {atual && <Cargas key={atual.id_lote_etapa} p={atual} />}
-          <div className="flex flex-wrap items-stretch gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
             {terminadas.map((p) => (
-              <Bloco key={p.id_lote_etapa} className="flex-[1_1_280px] gap-1.5">
-                <h2 className="font-semibold">
-                  {p.folha_revisao} · {p.tema}
-                </h2>
-                <span className="text-[13px] text-muted-foreground">
+              <Bloco key={p.id_lote_etapa} className="gap-1.5">
+                <TituloBloco titulo={`${p.folha_revisao} · ${p.tema}`} />
+                <span className="text-nota text-muted-foreground">
                   {plural(p.total, 'carga concluída', 'cargas concluídas')}. Sua parte terminou; a folha segue quando o supervisor abrir a próxima etapa.
                 </span>
-                <a href={href('execucao/cargas', { atividade: chave, folha: p.id_lote_etapa })} className="text-[13px] text-ibge hover:underline">
+                <LinkSeta href={href('execucao/cargas', { atividade: chave, folha: p.id_lote_etapa })} className="text-nota">
                   Ver as cargas
-                </a>
+                </LinkSeta>
               </Bloco>
             ))}
-            <Bloco className="flex-[1_1_300px]">
-              <div className="flex items-baseline gap-2.5">
-                <h2 className="font-semibold">Suas conclusões</h2>
-                <span className="text-[13px] text-muted-foreground">últimos 10 dias, todas as atividades</span>
-              </div>
+            <Bloco>
+              <TituloBloco titulo="Suas conclusões" sub="últimos 10 dias, todas as atividades" />
               <Producao dias={dias} altura={80} />
             </Bloco>
           </div>
         </>
       )}
-      <p className="text-[13px] text-muted-foreground">
+      <p className="text-nota text-muted-foreground">
         O trabalho é no QGIS (barra do Feixe: próxima, pular, concluir). Aqui é o acompanhamento e o atalho para levar o QGIS até uma carga. As cargas puladas no QGIS continuam aqui: o pulo só vale naquela sessão do QGIS.
       </p>
     </>

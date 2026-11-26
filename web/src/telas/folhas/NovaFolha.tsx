@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { MousePointerClick, Search, X } from 'lucide-react'
-import { RotuloEstavel } from '@/components/painel'
+import { RotuloEstavel } from '@/components/ds'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -105,7 +105,9 @@ export function NovaFolha({ aberto, fechar: fecharDialogo, fluxoInicial = null }
         </DialogHeader>
         <EscolherFluxo valor={fluxo} mudar={(f) => setFluxo(f?.id ?? null)} />
         <div className="grid gap-1.5">
-          <Label htmlFor="busca-folha">Folhas 1:100.000</Label>
+          <Label htmlFor="busca-folha" className="text-rodape text-muted-foreground">
+            Folhas 1:100.000
+          </Label>
           <form
             className="flex gap-2"
             onSubmit={(e) => {
@@ -122,12 +124,12 @@ export function NovaFolha({ aberto, fechar: fecharDialogo, fluxoInicial = null }
             </Button>
           </form>
           {/* Resultados, escolhidas e rodapé com altura fixa: o diálogo não cresce a cada busca ou escolha. */}
-          {achadas.length === 0 && <p className="grid h-40 place-items-center rounded-md border border-dashed px-4 text-center text-[13px] text-muted-foreground">As folhas achadas aparecem aqui. Também dá para escolher no mapa do QGIS.</p>}
+          {achadas.length === 0 && <p className="grid h-40 place-items-center rounded-lg border border-dashed border-input px-4 text-center text-nota text-muted-foreground">As folhas achadas aparecem aqui. Também dá para escolher no mapa do QGIS.</p>}
           {achadas.length > 0 && (
-            <ul className="h-40 divide-y overflow-auto rounded-md border text-sm">
+            <ul className="h-40 divide-y divide-linha overflow-auto rounded-lg border border-linha">
               {achadas.map((f) => (
                 <li key={f.id}>
-                  <button className="flex w-full justify-between px-3 py-1.5 text-left hover:bg-accent" onClick={() => adicionar(f)}>
+                  <button className="flex w-full justify-between px-3 py-1.5 text-left hover:bg-preenchimento-2" onClick={() => adicionar(f)}>
                     <span>
                       <b className="tab">{f.cd_mi}</b>
                       {f.nm_carta ? ` · ${f.nm_carta}` : ''}
@@ -140,11 +142,11 @@ export function NovaFolha({ aberto, fechar: fecharDialogo, fluxoInicial = null }
           )}
         </div>
         {noMapa && (
-          <p className="text-[13px] text-muted-foreground">
+          <p className="text-nota text-muted-foreground">
             No QGIS: clique numa folha para escolher ou tirar; <b>Ctrl ou Shift e arraste</b> para escolher todas as folhas de um retângulo. Em azul, as escolhidas; hachuradas, as que já estão no Feixe{fluxo ? ' neste tema' : ' na sua unidade'}.
           </p>
         )}
-        <div className="flex h-8 items-center justify-between text-sm">
+        <div className="flex h-8 items-center justify-between">
           <span className="text-muted-foreground">{escolhidas.length === 0 ? 'Nenhuma folha escolhida.' : escolhidas.length === 1 ? '1 folha escolhida' : `${escolhidas.length} folhas escolhidas`}</span>
           {escolhidas.length > 0 && (
             <Button variant="ghost" size="sm" onClick={() => setEscolhidas([])}>
@@ -154,7 +156,7 @@ export function NovaFolha({ aberto, fechar: fecharDialogo, fluxoInicial = null }
         </div>
         <div className="flex h-[76px] flex-wrap content-start gap-2 overflow-y-auto">
           {escolhidas.map((f) => (
-            <span key={f.id} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-ibge pr-1.5 pl-3 text-sm text-white">
+            <span key={f.id} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-primary pr-1.5 pl-3 text-nota text-primary-foreground">
               <b className="tab">{f.cd_mi}</b>
               <button aria-label={`Tirar ${f.cd_mi}`} onClick={() => setEscolhidas((xs) => xs.filter((x) => x.id !== f.id))}>
                 <X className="size-3.5" />

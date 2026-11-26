@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Bloco, COR, Colunas, LinkSeta, RotuloEstavel } from '@/components/painel'
+import { Bloco, Colunas, LinkSeta, RotuloEstavel, Tabela as TabelaDS, TituloBloco, Vazio } from '@/components/ds'
 import type { OcorrenciaCiencia, ParaCiencia as Dados } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { diaMes, hora, plural } from '@/lib/formato'
@@ -41,50 +41,48 @@ function useCiencia() {
 function Tabela({ itens, acoes, cientes }: { itens: OcorrenciaCiencia[]; acoes: ReturnType<typeof useCiencia>; cientes?: boolean }) {
   const { conectado } = useSessao()
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[820px] table-fixed border-collapse text-[13px]">
-        <Colunas larguras={[150, 160, undefined, 150, 110, cientes ? 130 : 220]} />
-        <thead>
-          <tr className="text-left text-xs text-muted-foreground">
-            <th className="border-b py-2 pr-2 font-medium">Elemento</th>
-            <th className="border-b px-2 py-2 font-medium">Sua carga</th>
-            <th className="border-b px-2 py-2 font-medium">Anotação</th>
-            <th className="border-b px-2 py-2 font-medium">Avaliador</th>
-            <th className="border-b px-2 py-2 font-medium">{cientes ? 'Ciente em' : 'Registrada'}</th>
-            <th className="border-b py-2 pl-2" />
-          </tr>
-        </thead>
-        <tbody>
-          {itens.map((o) => (
-            <tr key={o.uuid} className="border-b border-linha last:border-0">
-              <td className="truncate py-2 pr-2 font-medium" title={o.elemento ?? undefined}>
-                {o.elemento ?? '—'}
-              </td>
-              <td className="tab truncate px-2 py-2 font-mono">{o.geocodigo_avaliada ?? (o.id_carga_avaliada ? `nº ${o.id_carga_avaliada}` : '—')}</td>
-              <td className="truncate px-2 py-2" title={o.anotacao ?? undefined}>
-                {o.anotacao ?? <span className="text-muted-foreground">sem anotação</span>}
-              </td>
-              <td className="truncate px-2 py-2 text-muted-foreground" title={o.avaliador}>
-                {primeiro(o.avaliador)}
-              </td>
-              <td className="tab truncate px-2 py-2 text-muted-foreground">{cientes ? `${diaMes(o.ciente_em)} ${hora(o.ciente_em)}` : diaMes(o.criado_em)}</td>
-              <td className="py-1.5 pl-2">
-                <span className="flex justify-end gap-1.5">
-                  <Button size="sm" variant="outline" disabled={!conectado || acoes.ocupado === o.uuid} onClick={() => acoes.ver(o)}>
-                    Ver no QGIS
+    <TabelaDS solta densa fixa largura={820}>
+      <Colunas larguras={[150, 160, undefined, 150, 110, cientes ? 130 : 220]} />
+      <thead>
+        <tr>
+          <th>Elemento</th>
+          <th>Sua carga</th>
+          <th>Anotação</th>
+          <th>Avaliador</th>
+          <th>{cientes ? 'Ciente em' : 'Registrada'}</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        {itens.map((o) => (
+          <tr key={o.uuid}>
+            <td className="truncate font-medium" title={o.elemento ?? undefined}>
+              {o.elemento ?? '—'}
+            </td>
+            <td className="tab truncate font-mono">{o.geocodigo_avaliada ?? (o.id_carga_avaliada ? `nº ${o.id_carga_avaliada}` : '—')}</td>
+            <td className="truncate" title={o.anotacao ?? undefined}>
+              {o.anotacao ?? <span className="text-muted-foreground">sem anotação</span>}
+            </td>
+            <td className="truncate text-muted-foreground" title={o.avaliador}>
+              {primeiro(o.avaliador)}
+            </td>
+            <td className="tab truncate text-muted-foreground">{cientes ? `${diaMes(o.ciente_em)} ${hora(o.ciente_em)}` : diaMes(o.criado_em)}</td>
+            <td className="py-1.5">
+              <span className="flex justify-end gap-1.5">
+                <Button size="sm" variant="outline" disabled={!conectado || acoes.ocupado === o.uuid} onClick={() => acoes.ver(o)}>
+                  Ver no QGIS
+                </Button>
+                {!cientes && (
+                  <Button size="sm" className="w-[76px]" disabled={acoes.ocupado === o.uuid || !o.pode_ciente} onClick={() => acoes.ciente(o)}>
+                    Ciente
                   </Button>
-                  {!cientes && (
-                    <Button size="sm" className="w-[76px]" disabled={acoes.ocupado === o.uuid || !o.pode_ciente} onClick={() => acoes.ciente(o)}>
-                      Ciente
-                    </Button>
-                  )}
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+                )}
+              </span>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </TabelaDS>
   )
 }
 
@@ -97,15 +95,17 @@ export function ParaCiencia({ dados, limite, comCientes }: { dados: Dados; limit
   return (
     <div className="flex flex-col gap-4">
       {folhas.length === 0 ? (
-        <Bloco className="text-muted-foreground">Nada para ciência: nenhuma ocorrência nova nas suas cargas.</Bloco>
+        <Bloco>
+          <Vazio>Nada para ciência: nenhuma ocorrência nova nas suas cargas.</Vazio>
+        </Bloco>
       ) : (
         mostrar.map((itens) => {
           const f = itens[0]
           return (
-            <Bloco key={f.id_lote} className="gap-2.5 border-[#F0D9B5]" style={{ background: '#FFFBF4' }}>
+            <Bloco key={f.id_lote} className="gap-2.5">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <span className="tab text-base font-bold">{f.folha_revisao}</span>
-                <span className="text-[13px]" style={{ color: COR.alerta }}>
+                <span className="tab text-titulo-3 font-bold">{f.folha_revisao}</span>
+                <span className="text-nota text-alerta">
                   {plural(itens.length, 'ocorrência nas suas cargas', 'ocorrências nas suas cargas')}
                   {f.etapa ? ` · ${f.etapa}` : ''}
                 </span>
@@ -121,16 +121,13 @@ export function ParaCiencia({ dados, limite, comCientes }: { dados: Dados; limit
         })
       )}
       {limite && folhas.length > mostrar.length && (
-        <LinkSeta href="#/execucao/ciencia" className="text-sm">
+        <LinkSeta href="#/execucao/ciencia">
           e mais {plural(folhas.length - mostrar.length, 'folha', 'folhas')} em Execução › Para ciência
         </LinkSeta>
       )}
       {comCientes && dados.cientes.length > 0 && (
         <Bloco className="gap-2.5">
-          <div className="flex flex-wrap items-baseline gap-x-2.5">
-            <h2 className="font-semibold">Já com ciência</h2>
-            <span className="text-[13px] text-muted-foreground">últimos {dados.dias} dias</span>
-          </div>
+          <TituloBloco titulo="Já com ciência" sub={`últimos ${dados.dias} dias`} />
           <Tabela itens={dados.cientes} acoes={acoes} cientes />
         </Bloco>
       )}

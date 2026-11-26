@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Colunas, RotuloEstavel } from '@/components/painel'
+import { Colunas, Nota, RotuloEstavel, Tabela } from '@/components/ds'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -130,17 +130,17 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
             As amostras {nFolhas > 1 ? 'das folhas se juntam e ' : ''}se repartem entre os avaliadores que você escolher, na proporção de cada um, com uma fatia de cada elemento para cada pessoa. Quem recebe começa agora, sem fila. Quem executou a folha não avalia.
           </DialogDescription>
         </DialogHeader>
-        {!dados && <div className="grid h-[200px] place-items-center rounded-md border text-sm text-muted-foreground">Montando a sugestão…</div>}
-        {dados && !total && <p className="text-sm text-muted-foreground">Nenhuma destas folhas tem amostras de CQ: os planos ainda não foram criados (gaveta da folha).</p>}
+        {!dados && <div className="grid h-[200px] place-items-center rounded-xl bg-preenchimento-2 text-muted-foreground">Montando a sugestão…</div>}
+        {dados && !total && <p className="text-muted-foreground">Nenhuma destas folhas tem amostras de CQ: os planos ainda não foram criados (gaveta da folha).</p>}
         {dados && total > 0 && (
-          <p className="text-[13px] text-texto-2">
+          <p className="text-nota text-texto-2">
             <b className="text-foreground">{plural(total, 'amostra', 'amostras')}</b> em {folhasTxt(dados.folhas.map((f) => f.folha_revisao))}
             {avaliadas > 0 && `, ${num(avaliadas)} já avaliadas (ficam com quem avaliou)`} · {elementos.map((e) => `${e.elemento} ${num(e.amostras)}`).join(' · ')}
           </p>
         )}
 
         {dados && total > 0 && pergunta && (
-          <div className="flex flex-col gap-3 rounded-lg bg-[#EEF3FA] px-4 py-3.5 text-sm text-[#1C2F4A]">
+          <div className="flex flex-col gap-3 rounded-xl bg-info-suave px-4 py-3.5">
             <span>
               {dados.origem === 'atual' ? (
                 <>
@@ -153,7 +153,7 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
               )}
             </span>
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" className="font-semibold" onClick={reutilizar}>
+              <Button size="sm" onClick={reutilizar}>
                 {dados.origem === 'atual' ? 'Manter e ajustar' : 'Reutilizar'}
               </Button>
               <Button size="sm" variant="outline" onClick={outras}>
@@ -166,16 +166,15 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
         {dados && total > 0 && !pergunta && (
           <>
             {escolhidos.length > 0 ? (
-              <div className="max-h-[42vh] overflow-auto rounded-md border">
-                <table className="w-full table-fixed border-collapse text-sm">
+              <Tabela fixa compacta className="max-h-[42vh] overflow-auto">
                   <Colunas larguras={['30%', '12%', '14%', undefined, '40px']} />
                   <thead className="sticky top-0 bg-card">
-                    <tr className="text-left text-xs text-muted-foreground">
-                      <th className="border-b py-2 pr-2 pl-3 font-medium">Avaliador</th>
-                      <th className="border-b px-2 py-2 font-medium">%</th>
-                      <th className="border-b px-2 py-2 font-medium">Amostras</th>
-                      <th className="border-b px-2 py-2 font-medium">Fica com</th>
-                      <th className="border-b" />
+                    <tr>
+                      <th>Avaliador</th>
+                      <th>%</th>
+                      <th>Amostras</th>
+                      <th>Fica com</th>
+                      <th />
                     </tr>
                   </thead>
                   <tbody>
@@ -184,31 +183,31 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
                       const peso = pesos[conta] ?? 0
                       const r = doServidor.get(conta)
                       return (
-                        <tr key={conta} className="border-b border-linha last:border-0">
-                          <td className="py-2 pr-2 pl-3">
+                        <tr key={conta}>
+                          <td>
                             <b className="block truncate">{primeiro(p?.nome ?? conta)}</b>
-                            <span className="block truncate text-xs text-muted-foreground">
+                            <span className="block truncate text-rodape text-muted-foreground">
                               {p?.pendentes ? `${num(p.pendentes)} pendentes agora` : 'sem carga agora'}
                               {p?.com ? ` · está com ${num(p.com)} destas` : ''}
                             </span>
                             {!!p?.nao_avalia.length && (
-                              <span className="block truncate text-xs text-[#8A5300]" title={`Executou ${p.nao_avalia.join(', ')}: fica fora destas folhas, as amostras delas vão para os outros.`}>
+                              <span className="block truncate text-rodape text-alerta" title={`Executou ${p.nao_avalia.join(', ')}: fica fora destas folhas, as amostras delas vão para os outros.`}>
                                 fora de {folhasTxt(p.nao_avalia)} (executou)
                               </span>
                             )}
                           </td>
-                          <td className="px-2 py-2">
-                            <Input type="number" min={0} max={100} step={1} className="h-8 text-[13px]" value={pct(peso)} onChange={(e) => setPesos((x) => ({ ...x, [conta]: Math.max(0, (Number(e.target.value) * total) / 100) }))} aria-label={`Porcentagem de ${p?.nome ?? conta}`} />
+                          <td>
+                            <Input type="number" min={0} max={100} step={1} className="h-8 text-nota" value={pct(peso)} onChange={(e) => setPesos((x) => ({ ...x, [conta]: Math.max(0, (Number(e.target.value) * total) / 100) }))} aria-label={`Porcentagem de ${p?.nome ?? conta}`} />
                           </td>
-                          <td className="px-2 py-2">
-                            <Input type="number" min={0} max={total} step={1} className="h-8 text-[13px]" value={Math.round(peso)} onChange={(e) => setPesos((x) => ({ ...x, [conta]: Math.max(0, Number(e.target.value)) }))} aria-label={`Amostras de ${p?.nome ?? conta}`} />
+                          <td>
+                            <Input type="number" min={0} max={total} step={1} className="h-8 text-nota" value={Math.round(peso)} onChange={(e) => setPesos((x) => ({ ...x, [conta]: Math.max(0, Number(e.target.value)) }))} aria-label={`Amostras de ${p?.nome ?? conta}`} />
                           </td>
-                          <td className="px-2 py-2 text-[13px]">
+                          <td className="text-nota">
                             {r ? (
                               <>
                                 <b className="tab">{plural(r.total, 'amostra', 'amostras')}</b>
-                                {(r.recebe > 0 || r.perde > 0) && <span className="text-xs text-muted-foreground"> ({[r.recebe && `+${num(r.recebe)}`, r.perde && `−${num(r.perde)}`].filter(Boolean).join(' ')})</span>}
-                                <span className="block truncate text-xs text-muted-foreground" title={elementos.map((e) => `${e.elemento}: ${num(r.por_elemento[e.id_atividade] ?? 0)}`).join('\n')}>
+                                {(r.recebe > 0 || r.perde > 0) && <span className="text-rodape text-muted-foreground"> ({[r.recebe && `+${num(r.recebe)}`, r.perde && `−${num(r.perde)}`].filter(Boolean).join(' ')})</span>}
+                                <span className="block truncate text-rodape text-muted-foreground" title={elementos.map((e) => `${e.elemento}: ${num(r.por_elemento[e.id_atividade] ?? 0)}`).join('\n')}>
                                   {elementos.map((e) => `${e.elemento} ${num(r.por_elemento[e.id_atividade] ?? 0)}`).join(' · ')}
                                 </span>
                               </>
@@ -216,7 +215,7 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
                               <span className="text-muted-foreground">{peso > 0 ? '…' : 'nada'}</span>
                             )}
                           </td>
-                          <td className="pr-2 text-right">
+                          <td className="pr-2 pl-0 text-right">
                             <Button size="sm" variant="ghost" className="h-7 px-2 text-muted-foreground" onClick={() => tirar(conta)} aria-label={`Tirar ${p?.nome ?? conta}`} title="Tirar da divisão">
                               ×
                             </Button>
@@ -225,13 +224,12 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
                       )
                     })}
                   </tbody>
-                </table>
-              </div>
+              </Tabela>
             ) : (
-              <p className="rounded-md border border-dashed px-3.5 py-3 text-[13px] text-muted-foreground">Escolha quem vai avaliar: cada pessoa que você adicionar divide as amostras em partes iguais com as outras, e depois você ajusta a proporção.</p>
+              <p className="rounded-xl border border-dashed border-input px-3.5 py-3 text-nota text-muted-foreground">Escolha quem vai avaliar: cada pessoa que você adicionar divide as amostras em partes iguais com as outras, e depois você ajusta a proporção.</p>
             )}
             <div className="flex flex-wrap items-center gap-2">
-              <Select className="h-8 w-[320px] max-w-full text-[13px]" value="" onChange={(e) => adicionar(e.target.value)} aria-label="Adicionar avaliador">
+              <Select className="h-8 w-[320px] max-w-full text-nota" value="" onChange={(e) => adicionar(e.target.value)} aria-label="Adicionar avaliador">
                 <option value="">Adicionar avaliador…</option>
                 {paraAdicionar.map((p) => (
                   <option key={p.conta} value={p.conta} disabled={!!p.motivo}>
@@ -245,19 +243,19 @@ export function DistribuirCQ({ lotes, fechar }: { lotes: number[]; fechar: (feit
                   Partes iguais
                 </Button>
               )}
-              {dados.sem_perfil_v && <span className="text-xs text-muted-foreground">Ninguém tem perfil de avaliador (V) no projeto: a lista traz a equipe toda.</span>}
+              {dados.sem_perfil_v && <span className="text-rodape text-muted-foreground">Ninguém tem perfil de avaliador (V) no projeto: a lista traz a equipe toda.</span>}
             </div>
-            {dados.fora.length > 0 && <p className="text-xs text-muted-foreground">Ficam de fora: {dados.fora.map((f) => `${f.folha_revisao ?? `folha ${f.id_lote}`} (${f.motivo})`).join('; ')}.</p>}
+            {dados.fora.length > 0 && <p className="text-rodape text-muted-foreground">Ficam de fora: {dados.fora.map((f) => `${f.folha_revisao ?? `folha ${f.id_lote}`} (${f.motivo})`).join('; ')}.</p>}
           </>
         )}
 
         {!pergunta && previa && previa.sem_avaliador.length > 0 && (
-          <p className="rounded-md bg-[#FFF4E0] px-3 py-2 text-[13px] text-[#8A5300]">
+          <Nota tom="alerta">
             Ficam sem avaliador: {previa.sem_avaliador.map((x) => `${x.folha_revisao} (${plural(x.amostras, 'amostra', 'amostras')})`).join(', ')}. Todos os escolhidos executaram {previa.sem_avaliador.length === 1 ? 'esta folha' : 'estas folhas'}: adicione alguém que possa avaliar.
-          </p>
+          </Nota>
         )}
         <DialogFooter className="items-center gap-3 sm:justify-between">
-          <span className={cn('text-[13px] text-muted-foreground', erroPrevia && 'text-[#8A5300]')}>
+          <span className={cn('text-nota text-muted-foreground', erroPrevia && 'text-alerta')}>
             {pergunta || !dados || !total
               ? ''
               : (erroPrevia ??

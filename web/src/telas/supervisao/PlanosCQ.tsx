@@ -3,11 +3,12 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { Barra, Colunas, COR, LinkSeta, RotuloEstavel } from '@/components/painel'
+import { Barra, Campo, Colunas, COR, LinkSeta, Nota, RotuloEstavel, Tabela } from '@/components/ds'
 import type { PlanoCQ, PlanosCQ as Planos, PreviaCQ } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { lista, num, plural } from '@/lib/formato'
 import { enviar, useApi } from '@/lib/useApi'
+import { cn } from '@/lib/utils'
 import { ElementoCQ, SeloResultado } from './ResultadoCQ'
 
 // Parâmetros dos Quadros 5 e 6 do manual (core/cq/amostragem.py): níveis gerais de inspeção e colunas de LQA.
@@ -111,9 +112,8 @@ function Parametros({
               : `Um plano por atividade (${lista(alvos.map((a) => a.nome))}). Ao confirmar, o Feixe sorteia as células e gera as cargas das amostras, sem responsável.`}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-3 gap-3 text-[13px]">
-          <label className="flex flex-col gap-1.5">
-            Nível de inspeção
+        <div className="grid grid-cols-3 gap-3">
+          <Campo rotulo="Nível de inspeção">
             <Select value={nivel} onChange={(e) => setNivel(e.target.value)}>
               <option value="">Escolha…</option>
               {NIVEIS.map((n) => (
@@ -122,9 +122,8 @@ function Parametros({
                 </option>
               ))}
             </Select>
-          </label>
-          <label className="flex flex-col gap-1.5">
-            LQA
+          </Campo>
+          <Campo rotulo="LQA">
             <Select value={lqa} onChange={(e) => setLqa(e.target.value)}>
               <option value="">Escolha…</option>
               {LQAS.map((x) => (
@@ -133,44 +132,43 @@ function Parametros({
                 </option>
               ))}
             </Select>
-          </label>
-          <label className="flex flex-col gap-1.5">
-            Fração crítica (%)
+          </Campo>
+          <Campo rotulo="Fração crítica (%)">
             <Input value={fracao} onChange={(e) => setFracao(e.target.value)} placeholder="a do elemento" inputMode="decimal" />
-          </label>
+          </Campo>
         </div>
-        <div className="min-h-[112px] rounded-lg border bg-[#F7F9FB] p-3 text-[13px]">
+        <div className="min-h-[112px] rounded-xl bg-preenchimento-2 p-3 text-nota">
           {!previas && !erro && <span className="text-muted-foreground">Escolha o nível e o LQA e veja a prévia: o tamanho do universo (N), a letra-código, quantas amostras e quantas não conformes o plano aceita.</span>}
-          {erro && <span className="text-destructive">{erro}</span>}
+          {erro && <span className="text-perigo">{erro}</span>}
           {previas && (
-            <table className="w-full table-fixed border-collapse">
+            <Tabela solta densa fixa>
               <Colunas larguras={[undefined, 70, 60, 80, 80]} />
-              <thead className="text-left text-xs text-muted-foreground">
+              <thead>
                 <tr>
-                  <th className="pb-1.5 font-medium">Atividade</th>
-                  <th className="pb-1.5 text-right font-medium">N</th>
-                  <th className="pb-1.5 text-right font-medium">Letra</th>
-                  <th className="pb-1.5 text-right font-medium">Amostras</th>
-                  <th className="pb-1.5 text-right font-medium">Aceita até</th>
+                  <th>Atividade</th>
+                  <th className="text-right">N</th>
+                  <th className="text-right">Letra</th>
+                  <th className="text-right">Amostras</th>
+                  <th className="text-right">Aceita até</th>
                 </tr>
               </thead>
               <tbody className="tab">
                 {previas.map((p) => (
                   <tr key={p.id_atividade}>
-                    <td className="truncate border-t py-1.5" title={`${p.atividade}\n${p.universo}`}>
+                    <td className="truncate" title={`${p.atividade}\n${p.universo}`}>
                       {p.elemento ?? p.atividade}
                     </td>
-                    <td className="border-t py-1.5 text-right">{num(p.N)}</td>
-                    <td className="border-t py-1.5 text-right">{p.letra ?? '—'}</td>
-                    <td className="border-t py-1.5 text-right">{p.inspecao_completa ? `todas (${num(p.n)})` : num(p.n)}</td>
-                    <td className="border-t py-1.5 text-right">{num(p.ac)}</td>
+                    <td className="text-right">{num(p.N)}</td>
+                    <td className="text-right">{p.letra ?? '—'}</td>
+                    <td className="text-right">{p.inspecao_completa ? `todas (${num(p.n)})` : num(p.n)}</td>
+                    <td className="text-right">{num(p.ac)}</td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Tabela>
           )}
           {previas?.some((p) => p.ja_sorteadas > 0) && (
-            <p className="mt-2 text-xs text-muted-foreground">As células já sorteadas em passagens anteriores {onde}, na mesma atividade, ficam fora do universo.</p>
+            <p className="mt-2 text-rodape text-muted-foreground">As células já sorteadas em passagens anteriores {onde}, na mesma atividade, ficam fora do universo.</p>
           )}
         </div>
         <DialogFooter>
@@ -178,7 +176,7 @@ function Parametros({
             Cancelar
           </Button>
           {previas ? (
-            <Button className="font-semibold" disabled={ocupado} onClick={confirmar}>
+            <Button disabled={ocupado} onClick={confirmar}>
               <RotuloEstavel ocupado={ocupado} rotulo={refazer ? 'Refazer o plano' : 'Criar e sortear'} rotuloOcupado="Sorteando…" />
             </Button>
           ) : (
@@ -199,7 +197,7 @@ export function PlanosCQ({ idLoteEtapa, folha, distribuir }: { idLoteEtapa: numb
   const [dialogo, setDialogo] = useState<{ alvos: Alvo[]; refazer: boolean; inicial: Planos['padrao'] } | null>(null)
   const onde = folha ? 'desta folha' : 'deste lote'
 
-  if (!dados) return <div className="min-h-[72px] text-[13px] text-muted-foreground">{erro ?? 'Carregando os planos de CQ…'}</div>
+  if (!dados) return <div className="min-h-[72px] text-nota text-muted-foreground">{erro ?? 'Carregando os planos de CQ…'}</div>
   const aberta = ['pendente', 'em_andamento'].includes(dados.situacao)
   const porArea = dados.sem_plano.filter((a) => !a.por_feicao)
   const porFeicao = dados.sem_plano.filter((a) => a.por_feicao)
@@ -209,23 +207,23 @@ export function PlanosCQ({ idLoteEtapa, folha, distribuir }: { idLoteEtapa: numb
 
   return (
     <div className="flex flex-col gap-2.5">
-      <span className="text-[13px] font-semibold">Planos de amostragem</span>
+      <span className="text-nota font-semibold">Planos de amostragem</span>
       {dados.planos.length > 0 && (
-        <table className="w-full table-fixed border-collapse text-[13px]">
+        <Tabela solta densa fixa>
           <Colunas larguras={[undefined, 196, 156]} />
           <tbody>
             {dados.planos.map((p) => (
               <tr key={p.id}>
-                <td className="border-t py-1.5 pr-2" title={`${frasePlano(p)}\n${p.atividade}${p.universo ? `\n${p.universo}` : ''}\nfração crítica ${pct(p.fracao_critica)} · semente ${p.semente}`}>
+                <td title={`${frasePlano(p)}\n${p.atividade}${p.universo ? `\n${p.universo}` : ''}\nfração crítica ${pct(p.fracao_critica)} · semente ${p.semente}`}>
                   <span className="block truncate font-medium">{p.elemento ?? p.atividade}</span>
-                  <span className="block truncate text-xs text-muted-foreground">{frasePlano(p).replace(/^[^:]*: /, '')}</span>
+                  <span className="block truncate text-rodape text-muted-foreground">{frasePlano(p).replace(/^[^:]*: /, '')}</span>
                 </td>
                 {/* Andamento do plano (D3d): avaliadas/n e não conformes x Ac. A decisão (aprovar, nova revisão) é do supervisor, no D4. */}
-                <td className="tab border-t py-1.5 pr-2">
+                <td className="tab">
                   <span className="block truncate">
                     {num(p.avaliadas)} de {num(p.amostras)} avaliadas
                   </span>
-                  <span className="block truncate text-xs" style={{ color: p.ac != null && p.nao_conformes > p.ac ? COR.alerta : undefined }}>
+                  <span className={cn('block truncate text-rodape', p.ac != null && p.nao_conformes > p.ac && 'text-alerta')}>
                     <b>{num(p.nao_conformes)}</b> {p.nao_conformes === 1 ? 'não conforme' : 'não conformes'} · aceita até {ou(p.ac)}
                   </span>
                   <Barra
@@ -238,13 +236,13 @@ export function PlanosCQ({ idLoteEtapa, folha, distribuir }: { idLoteEtapa: numb
                     ]}
                   />
                 </td>
-                <td className="border-t py-1.5 text-right">
+                <td className="text-right">
                   {aberta && p.pode_refazer ? (
                     <Button size="sm" variant="outline" onClick={() => setDialogo({ alvos: [{ id_atividade: p.id_atividade, nome: p.elemento ?? p.atividade }], refazer: true, inicial: { nivel: p.nivel, lqa: p.lqa, fracao_critica: p.fracao_critica } })}>
                       Trocar parâmetros
                     </Button>
                   ) : (
-                    <span className="text-xs text-muted-foreground" title={p.motivo_refazer ?? undefined}>
+                    <span className="text-rodape text-muted-foreground" title={p.motivo_refazer ?? undefined}>
                       plano fechado
                     </span>
                   )}
@@ -252,11 +250,11 @@ export function PlanosCQ({ idLoteEtapa, folha, distribuir }: { idLoteEtapa: numb
               </tr>
             ))}
           </tbody>
-        </table>
+        </Tabela>
       )}
       {dados.planos.length > 0 && (
-        <div className="flex flex-col gap-3 rounded-lg border bg-card px-3.5 py-3" aria-label="Resultado do CQ">
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px]">
+        <div className="flex flex-col gap-3 rounded-xl bg-preenchimento-2 px-4 py-3" aria-label="Resultado do CQ">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-nota">
             <b>Resultado</b>
             <SeloResultado resultado={dados.resultado.resultado} />
             <span className="text-muted-foreground">
@@ -272,54 +270,66 @@ export function PlanosCQ({ idLoteEtapa, folha, distribuir }: { idLoteEtapa: numb
           </div>
           {/* Com amostras sem avaliador, o próximo passo (Distribuir) vem logo abaixo, com o botão. */}
           {aberta && dados.resultado.faltam > 0 && semAvaliador === 0 && (
-            <span className="text-[13px] text-[#1C2F4A]">
-              <b>Próximo passo: esperar os avaliadores.</b> A folha aparece em Esperando você, com o resultado, quando todas as amostras forem avaliadas.
+            <span className="text-nota text-texto-2">
+              <b className="text-foreground">Próximo passo: esperar os avaliadores.</b> A folha aparece em Esperando você, com o resultado, quando todas as amostras forem avaliadas.
             </span>
           )}
           {aberta && dados.resultado.faltam === 0 && (
-            <span className="text-[13px] text-[#1C2F4A]">
-              <b>Próximo passo: decidir</b> em “Andar com a folha” (abaixo): Aprovar ou Nova revisão.
+            <span className="text-nota text-texto-2">
+              <b className="text-foreground">Próximo passo: decidir</b> em “Andar com a folha” (abaixo): Aprovar ou Nova revisão.
             </span>
           )}
         </div>
       )}
       {aberta && porArea.length > 0 && (
-        <div className="flex flex-col gap-2 rounded-lg bg-[#EEF3FA] px-3.5 py-3 text-[13px] text-[#1C2F4A]">
+        <Nota
+          tom="info"
+          acao={
+            <Button size="sm" onClick={() => setDialogo({ alvos: porArea.map((a) => ({ id_atividade: a.id_atividade, nome: a.elemento ?? a.atividade })), refazer: false, inicial: dados.padrao })}>
+              Criar os planos de CQ
+            </Button>
+          }
+        >
           <span>
-            <b>Próximo passo: criar os planos de CQ</b> de {lista(porArea.map((a) => a.elemento ?? a.atividade))}.{' '}
+            <b className="text-foreground">Próximo passo: criar os planos de CQ</b> de {lista(porArea.map((a) => a.elemento ?? a.atividade))}.{' '}
             {temPadrao
               ? 'Os parâmetros padrão da etapa já vêm preenchidos.'
               : 'A etapa não tem nível de inspeção e LQA padrão: escolha agora. Com o padrão no fluxo (Supervisão › Fluxos), os próximos CQs já abrem com as amostras sorteadas.'}
           </span>
-          <Button size="sm" className="self-start font-semibold" onClick={() => setDialogo({ alvos: porArea.map((a) => ({ id_atividade: a.id_atividade, nome: a.elemento ?? a.atividade })), refazer: false, inicial: dados.padrao })}>
-            Criar os planos de CQ
-          </Button>
-        </div>
+        </Nota>
       )}
       {aberta && !dados.planos.length && !dados.sem_plano.length && (
-        <div className="flex flex-col gap-2 rounded-lg bg-[#EEF3FA] px-3.5 py-3 text-[13px] text-[#1C2F4A]">
+        <Nota
+          tom="info"
+          acao={
+            <LinkSeta href="#/supervisao/fluxos" className="text-nota">
+              Abrir os fluxos
+            </LinkSeta>
+          }
+        >
           <span>
-            <b>Próximo passo: escolher as medidas de CQ desta etapa.</b> A etapa não tem atividade de CQ no fluxo, então não há o que sortear. Em Supervisão › Fluxos, acrescente as medidas a inspecionar; depois, os planos se criam aqui.
+            <b className="text-foreground">Próximo passo: escolher as medidas de CQ desta etapa.</b> A etapa não tem atividade de CQ no fluxo, então não há o que sortear. Em Supervisão › Fluxos, acrescente as medidas a inspecionar; depois, os planos se criam aqui.
           </span>
-          <LinkSeta href="#/supervisao/fluxos" className="self-start">
-            Abrir os fluxos
-          </LinkSeta>
-        </div>
+        </Nota>
       )}
       {porFeicao.length > 0 && (
-        <span className="text-xs" style={{ color: COR.alerta }}>
+        <span className="text-rodape text-alerta">
           {lista(porFeicao.map((a) => a.elemento ?? a.atividade))}: inspeção por feição ainda não tem plano no Feixe.
         </span>
       )}
       {aberta && porArea.length === 0 && semAvaliador > 0 && (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-[#EEF3FA] px-3.5 py-3 text-[13px] text-[#1C2F4A]">
-          <span className="flex-1">
-            <b>Próximo passo: distribuir as amostras.</b> {plural(semAvaliador, 'amostra está', 'amostras estão')} sem avaliador; a etapa começa quando um avaliador as receber.
+        <Nota
+          tom="info"
+          acao={
+            <Button size="sm" onClick={distribuir}>
+              Distribuir as amostras
+            </Button>
+          }
+        >
+          <span>
+            <b className="text-foreground">Próximo passo: distribuir as amostras.</b> {plural(semAvaliador, 'amostra está', 'amostras estão')} sem avaliador; a etapa começa quando um avaliador as receber.
           </span>
-          <Button size="sm" className="font-semibold" onClick={distribuir}>
-            Distribuir as amostras
-          </Button>
-        </div>
+        </Nota>
       )}
       {dialogo && (
         <Parametros

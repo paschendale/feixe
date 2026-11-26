@@ -4,7 +4,7 @@ import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { Barra, COR } from '@/components/painel'
+import { Barra, Bloco, COR, Campo, Nota, Rotulo, Tabela, TituloBloco } from '@/components/ds'
 import type { DecisaoCQ, EstadoLote, FluxoCompleto, Historico, LoteCompleto, PassagemLote, PlanosCQ as Planos, Preparo } from '@/lib/api'
 import { useAvisar } from '@/lib/avisos'
 import { diaMes, diasAtras, num, pc, plural } from '@/lib/formato'
@@ -33,10 +33,6 @@ const ACAO: Record<string, string> = {
   importar: 'Convertida:',
 }
 
-function Titulo({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-[13px] font-semibold tracking-[.04em] text-muted-foreground uppercase">{children}</h2>
-}
-
 // Trilho: as etapas do fluxo com o que a folha já fez em cada uma, onde está agora e a próxima sugerida.
 function Trilho({ fluxo, lote, estado }: { fluxo: FluxoCompleto; lote: LoteCompleto; estado: EstadoLote | null }) {
   return (
@@ -59,17 +55,17 @@ function Trilho({ fluxo, lote, estado }: { fluxo: FluxoCompleto; lote: LoteCompl
           <li key={e.id} className={cn('grid grid-cols-[22px_1fr_auto] items-center gap-2.5 border-b border-linha py-2.5 last:border-0', aberta && 'font-semibold')}>
             <span
               className={cn(
-                'inline-block size-3 rounded-full border-2 border-[#C7D0DB]',
+                'inline-block size-3 rounded-full border-2 border-input',
                 ultima?.situacao === 'concluida' && !aberta && 'border-aco bg-aco',
-                aberta && 'border-ibge shadow-[0_0_0_3px_var(--aco-claro)]',
-                proxima && 'border-dashed border-ibge',
+                aberta && 'border-primary shadow-[0_0_0_3px_var(--aco-claro)]',
+                proxima && 'border-dashed border-primary',
               )}
             />
             <span>
               {e.nome}
               {atual && !aberta && <span className="font-normal text-muted-foreground"> · terminou aqui</span>}
             </span>
-            <span className={cn('text-[13px]', aberta || proxima ? 'font-medium text-ibge' : 'font-normal text-muted-foreground')}>{lado}</span>
+            <span className={cn('text-nota', aberta || proxima ? 'font-medium text-primary' : 'font-normal text-muted-foreground')}>{lado}</span>
           </li>
         )
       })}
@@ -224,22 +220,20 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
 
   return (
     <section aria-labelledby="andar" className="flex flex-col gap-3">
-      <Titulo>
+      <Rotulo>
         <span id="andar">Andar com a folha</span>
-      </Titulo>
+      </Rotulo>
       {sugestao && (
-        <p className="rounded-lg bg-[#EEF3FA] px-3.5 py-3 text-[#1C2F4A]">
+        <Nota tom="info" semIcone>
           Sugestão do Feixe: {sugestao} Nada anda sozinho: a decisão é sua.
-        </p>
+        </Nota>
       )}
-      <label className="flex flex-col gap-1.5 text-[13px] text-texto-2">
-        Observação (opcional, fica no histórico)
-        <Textarea rows={3} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, segue para o CQ" className="text-sm text-foreground" />
-      </label>
+      <Campo rotulo="Observação (opcional, fica no histórico)">
+        <Textarea rows={3} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: aquisição conferida, segue para o CQ" className="text-corpo font-normal text-foreground" />
+      </Campo>
       {outra && (
-        <div className="flex flex-col gap-2.5 rounded-lg border bg-[#F7F9FB] p-3">
-          <label className="flex flex-col gap-1.5 text-[13px]">
-            Etapa a abrir
+        <div className="flex flex-col gap-2.5 rounded-xl bg-preenchimento-2 p-3">
+          <Campo rotulo="Etapa a abrir">
             <Select value={etapa ?? ''} onChange={(e) => setEtapa(Number(e.target.value))}>
               {fluxo?.etapas.map((e) => (
                 <option key={e.id} value={e.id}>
@@ -248,12 +242,12 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
                 </option>
               ))}
             </Select>
-          </label>
-          <label className="flex items-start gap-2 text-sm">
+          </Campo>
+          <label className="flex items-start gap-2">
             <input type="checkbox" className="mt-1" checked={expor} onChange={(e) => setExpor(e.target.checked)} />
             <span>
               Incluir as correções a fazer
-              <span className="block text-xs text-muted-foreground">Mostra a quem executar as ocorrências das passagens anteriores. Sem isso, a revisão é às cegas.</span>
+              <span className="block text-rodape text-muted-foreground">Mostra a quem executar as ocorrências das passagens anteriores. Sem isso, a revisão é às cegas.</span>
             </span>
           </label>
           <div className="flex justify-end gap-2">
@@ -277,14 +271,14 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
               {(['aprovar', 'nova_revisao'] as DecisaoCQ[])
                 .sort((a) => (resultado?.resultado === 'reprovado' ? (a === 'nova_revisao' ? -1 : 1) : a === 'aprovar' ? -1 : 1))
                 .map((d, i) => (
-                  <Button key={d} variant={i === 0 ? 'default' : 'outline'} className={i === 0 ? 'font-semibold' : ''} disabled={ocupado} onClick={() => setDecidir(d)}>
+                  <Button key={d} variant={i === 0 ? 'default' : 'outline'} disabled={ocupado} onClick={() => setDecidir(d)}>
                     {d === 'aprovar' ? (resultado?.resultado === 'reprovado' ? 'Aprovar mesmo assim…' : seguinte ? `Aprovar e abrir ${seguinte.nome}…` : 'Aprovar…') : 'Nova revisão…'}
                   </Button>
                 ))}
             </>
           )}
           {botoes.map((b, i) => (
-            <Button key={b.titulo} variant={i === 0 && !cqAberto ? 'default' : 'outline'} className={i === 0 && !cqAberto ? 'font-semibold' : ''} disabled={ocupado} onClick={() => rodar(b)}>
+            <Button key={b.titulo} variant={i === 0 && !cqAberto ? 'default' : 'outline'} disabled={ocupado} onClick={() => rodar(b)}>
               {b.titulo}
             </Button>
           ))}
@@ -305,7 +299,7 @@ function Andar({ lote, fluxo, estado, distribuir }: { lote: LoteCompleto; fluxo:
           if (abertas?.length) distribuir(abertas)
         }}
       />
-      <span className="text-xs text-muted-foreground">
+      <span className="text-rodape text-muted-foreground">
         {eAberta?.obrigatoria ? `Pular não aparece: ${eAberta.nome} é obrigatória neste fluxo. ` : ''}
         {aberta ? 'Para repetir ou voltar a uma etapa, conclua ou pule a atual; depois "Outra etapa…" abre qualquer etapa do fluxo.' : '"Outra etapa…" abre qualquer etapa do fluxo (repetir uma revisão, voltar).'}
       </span>
@@ -330,14 +324,14 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
   return (
     <D.Root open onOpenChange={(v) => !v && fechar()}>
       <D.Portal>
-        <D.Overlay className="fixed inset-0 z-40 bg-[#1C2733]/10" />
+        <D.Overlay className="fixed inset-0 z-40 bg-black/10" />
         <D.Content
           aria-describedby={undefined}
-          className="fixed inset-y-0 right-0 z-40 flex w-full max-w-[620px] flex-col gap-6 overflow-auto border-l bg-card px-7 pt-6 pb-10 shadow-[-12px_0_32px_rgba(28,39,51,.08)] outline-none"
+          className="fixed inset-y-2 right-2 z-40 flex w-[calc(100%-1rem)] max-w-[620px] flex-col gap-6 overflow-auto rounded-xl bg-card px-7 pt-6 pb-10 shadow-flutuante outline-none"
         >
         <div className="flex items-start gap-3">
           <div className="flex flex-1 flex-col gap-1">
-            <D.Title className="tab text-[26px] font-bold">{lote?.folha_revisao ?? '…'}</D.Title>
+            <D.Title className="tab text-titulo-grande font-bold">{lote?.folha_revisao ?? '…'}</D.Title>
             {lote && (
               <span className="text-muted-foreground">
                 {lote.tema} · {lote.projeto}
@@ -346,15 +340,15 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
             )}
           </div>
           {lote && (
-            <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: STATUS[lote.status_nacional].cor, color: ['EM_PRODUCAO', 'PLANEJADA'].includes(lote.status_nacional) ? '#1C2F4A' : '#fff' }}>
+            <span className="rounded-full px-2.5 py-1 text-rodape font-semibold" style={{ background: STATUS[lote.status_nacional].cor, color: STATUS[lote.status_nacional].escuro ? 'var(--primary-foreground)' : COR.textoClaro }}>
               {STATUS[lote.status_nacional].rotulo}
             </span>
           )}
-          <button onClick={fechar} aria-label="Fechar" className="grid size-9 place-items-center rounded-lg border hover:bg-accent">
+          <Button variant="secondary" size="icon" className="rounded-full" onClick={fechar} aria-label="Fechar">
             <X className="size-3.5" />
-          </button>
+          </Button>
         </div>
-        {erro && <p className="text-sm text-destructive">{erro}</p>}
+        {erro && <Nota tom="perigo">{erro}</Nota>}
         {lote && (
           <>
             <div className="flex flex-wrap gap-2">
@@ -388,29 +382,33 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
 
             {fluxo && (
               <section className="flex flex-col gap-2.5">
-                <Titulo>Fluxo</Titulo>
+                <Rotulo>Fluxo</Rotulo>
                 <Trilho fluxo={fluxo} lote={lote} estado={estado} />
               </section>
             )}
 
             {atual && (
-              <section className="flex flex-col gap-3 rounded-[10px] border bg-[#F7F9FB] p-4">
-                <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-                  <h2 className="text-base font-semibold">
-                    {atual.etapa}
-                    {atual.instancia > 1 ? ` (${atual.instancia}ª)` : ''}
-                  </h2>
-                  <span className="text-[13px] text-muted-foreground">
-                    {atual.situacao === 'em_andamento' && atual.iniciada_em && `em andamento desde ${diaMes(atual.iniciada_em)} · ${plural(diasAtras(atual.iniciada_em) ?? 0, 'dia', 'dias')}`}
-                    {atual.situacao === 'pendente' && 'a iniciar'}
-                    {atual.situacao === 'concluida' && `concluída em ${diaMes(atual.concluida_em)}, esperando a próxima etapa`}
-                    {atual.situacao === 'pulada' && 'pulada, esperando a próxima etapa'}
-                  </span>
-                </div>
+              <Bloco className="gap-3 bg-preenchimento-2 p-4 shadow-none">
+                <TituloBloco
+                  titulo={
+                    <>
+                      {atual.etapa}
+                      {atual.instancia > 1 ? ` (${atual.instancia}ª)` : ''}
+                    </>
+                  }
+                  sub={
+                    <>
+                      {atual.situacao === 'em_andamento' && atual.iniciada_em && `em andamento desde ${diaMes(atual.iniciada_em)} · ${plural(diasAtras(atual.iniciada_em) ?? 0, 'dia', 'dias')}`}
+                      {atual.situacao === 'pendente' && 'a iniciar'}
+                      {atual.situacao === 'concluida' && `concluída em ${diaMes(atual.concluida_em)}, esperando a próxima etapa`}
+                      {atual.situacao === 'pulada' && 'pulada, esperando a próxima etapa'}
+                    </>
+                  }
+                />
                 {atual.fase === 'correcao_inspecao' && (
                   // Correção de inspeção (D5): o andamento é das ocorrências da folha, de todas as revisões.
                   <div className="flex flex-col gap-1.5">
-                    <div className="flex justify-between text-[13px]">
+                    <div className="flex justify-between text-nota">
                       <span>
                         <b>{num(lote.ocorrencias.tratadas)}</b> de {plural(lote.ocorrencias.total, 'ocorrência tratada', 'ocorrências tratadas')} · todas as revisões
                       </span>
@@ -420,7 +418,7 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                   </div>
                 )}
                 {atual.fase === 'correcao_inspecao' && atual.cargas_total === 1 ? (
-                  <span className="text-[13px] text-muted-foreground">
+                  <span className="text-nota text-muted-foreground">
                     {lote.pessoas.find((p) => p.conta) ? (
                       <>
                         Com <b>{lote.pessoas.find((p) => p.conta)!.nome}</b>
@@ -433,37 +431,37 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                 ) : atual.cargas_total > 0 ? (
                   <>
                     <div className="flex flex-col gap-1.5">
-                      <div className="flex justify-between text-[13px]">
+                      <div className="flex justify-between text-nota">
                         <span>
                           <b>{num(atual.cargas_concluidas)}</b> de {num(atual.cargas_total)} {atual.fase === 'cq' ? 'amostras avaliadas' : 'cargas concluídas'}
                         </span>
-                        <span style={{ color: lote.pessoas.some((p) => !p.conta) ? COR.alerta : undefined }}>
+                        <span className={lote.pessoas.some((p) => !p.conta) ? 'text-alerta' : undefined}>
                           {num(lote.pessoas.filter((p) => !p.conta).reduce((s, p) => s + p.total - p.concluidas, 0))} {atual.fase === 'cq' ? 'sem avaliador' : 'a atribuir'}
                         </span>
                       </div>
                       <Barra total={atual.cargas_total} partes={[{ valor: atual.cargas_concluidas, cor: COR.concluida }]} />
                     </div>
-                    <table className="w-full border-collapse text-[13px]">
+                    <Tabela solta densa>
                       <tbody>
                         {lote.pessoas
                           .filter((p) => p.conta)
                           .map((p) => (
                             <tr key={p.conta}>
-                              <td className="border-t py-1.5">
+                              <td>
                                 {p.nome}
                                 {p.conta === eu?.conta ? ' (você)' : ''}
                               </td>
-                              <td className="tab border-t py-1.5 text-right">
+                              <td className="tab text-right">
                                 {num(p.concluidas)} de {num(p.total)}
                               </td>
-                              <td className="border-t py-1.5 pl-3 text-right text-muted-foreground">{p.ultima ? diaMes(p.ultima) : 'ainda não'}</td>
+                              <td className="text-right text-muted-foreground">{p.ultima ? diaMes(p.ultima) : 'ainda não'}</td>
                             </tr>
                           ))}
                       </tbody>
-                    </table>
+                    </Tabela>
                   </>
                 ) : (
-                  <div className="flex flex-wrap items-center gap-3 text-[13px] text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-3 text-nota text-muted-foreground">
                     <span>
                       {atual.fase === 'cq'
                         ? 'Sem amostras ainda nesta etapa.'
@@ -493,7 +491,7 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
                   </div>
                 )}
                 {supervisor && atual.fase === 'cq' && <PlanosCQ idLoteEtapa={atual.id} folha={lote.tipo === 'folha'} distribuir={() => distribuir([lote.id])} />}
-              </section>
+              </Bloco>
             )}
 
             {supervisor && <OcorrenciasFolha idLote={lote.id} />}
@@ -502,8 +500,8 @@ export function Gaveta({ id, fluxos, fechar, distribuir }: { id: number; fluxos:
 
             {hist && hist.itens.length > 0 && (
               <section className="flex flex-col gap-2.5">
-                <Titulo>Histórico</Titulo>
-                <ol className="flex flex-col text-[13px]">
+                <Rotulo>Histórico</Rotulo>
+                <ol className="flex flex-col text-nota">
                   {hist.itens.slice(0, 20).map((h, i) => (
                     <li key={i} className="flex flex-col gap-0.5 border-b border-linha py-2.5 last:border-0">
                       <span>
